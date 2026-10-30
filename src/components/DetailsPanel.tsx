@@ -6,6 +6,7 @@ interface Props {
   folders: Folder[]
   onSaved: (d: Doc) => void
   onToggleFolder: (folderId: string, has: boolean) => void
+  onTrash?: () => void
 }
 
 const AUTHOR_SEP = '; '
@@ -35,7 +36,13 @@ function textToAuthors(s: string): { first_name?: string; last_name?: string }[]
     })
 }
 
-export default function DetailsPanel({ doc, folders, onSaved, onToggleFolder }: Props) {
+export default function DetailsPanel({
+  doc,
+  folders,
+  onSaved,
+  onToggleFolder,
+  onTrash
+}: Props) {
   const [form, setForm] = useState({
     title: '',
     authors: '',
@@ -223,6 +230,17 @@ export default function DetailsPanel({ doc, folders, onSaved, onToggleFolder }: 
             {msg}
           </span>
         )}
+        <span style={{ flex: 1 }} />
+        <button
+          className="danger"
+          onClick={async () => {
+            if (!confirm(`把「${doc.title || '这条文献'}」移入回收站？可在回收站里恢复。`)) return
+            await onTrash?.()
+          }}
+          title="移入回收站，可在回收站恢复"
+        >
+          移入回收站
+        </button>
       </div>
     </>
   )

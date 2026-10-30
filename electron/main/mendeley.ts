@@ -191,6 +191,29 @@ export class Mendeley {
     })
   }
 
+  /** Move to trash.  Mendeley has no hard delete for documents. */
+  async trashDocument(id: string): Promise<void> {
+    await this.request('POST', `/documents/${id}/trash`)
+  }
+
+  async listTrash(): Promise<Doc[]> {
+    const out: Doc[] = []
+    const params: Record<string, string> = { limit: '100', view: 'all' }
+    for (let guard = 0; guard < 100; guard++) {
+      const batch = await this.request<Doc[]>('GET', '/trash', { params })
+      if (!batch || batch.length === 0) break
+      out.push(...batch)
+      if (batch.length < 100) break
+      params.marker = batch[batch.length - 1].id
+    }
+    return out
+  }
+
+  /** Restore from trash.  Undocumented but stable, and the web client uses it. */
+  async restoreDocument(id: string): Promise<Doc> {
+    return this.request<Doc>('POST', `/trash/${id}/restore`)
+  }
+
   /** Rename, or move by passing a new parent_id (null moves it to the root). */
   async patchFolder(id: string, body: { name?: string; parent_id?: string | null }): Promise<Folder> {
     return this.request<Folder>('PATCH', '/folders/' + id, {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Doc, Folder, Library, SyncStatus, UpdateState } from '../shared/types'
 import FolderTree from './components/FolderTree'
+import TrashView from './components/TrashView'
 import DocTable from './components/DocTable'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
@@ -36,6 +37,7 @@ export default function App() {
   const [rightTab, setRightTab] = useState<'pdf' | 'details'>('details')
   const [err, setErr] = useState<string | null>(null)
   const [upd, setUpd] = useState<UpdateState | null>(null)
+  const [trash, setTrash] = useState<Doc[] | null>(null)
   const [pdfDir, setPdfDir] = useState('')
   const [fontSize, setFontSize] = useState(15)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -225,7 +227,17 @@ export default function App() {
           }}
           title="从 GitHub Releases 拉取最新版本并自动安装重启"
         >
+
           {upd?.phase === 'downloading' ? `下载中 ${upd.percent ?? 0}%` : '检查更新'}
+        </button>
+        <button
+          onClick={async () => {
+            const list = await window.api.listTrash()
+            setTrash(list)
+          }}
+          title="浏览回收站并恢复"
+        >
+          回收站
         </button>
         <input
           ref={searchRef}
@@ -335,6 +347,16 @@ export default function App() {
           />
         </div>
 
+        {trash ? (
+          <TrashView
+            docs={trash}
+            onClose={() => setTrash(null)}
+            onRestore={async (id) => {
+              await window.api.restoreDoc(id)
+              setTrash((t) => (t ? t.filter((d) => d.id !== id) : t))
+            }}
+          />
+        ) : (
         <div className="pane pane-mid">
           <div className="pane-head">
             <span>文献</span>
@@ -371,6 +393,7 @@ export default function App() {
             }}
           />
         </div>
+        )}
 
         <div className="pane pane-right">
           <div className="pane-head">
@@ -404,6 +427,11 @@ export default function App() {
                   l ? { ...l, docs: l.docs.map((x) => (x.id === d.id ? d : x)) } : l
                 )
               }
+              onTrash={async () => {
+                await window.api.trashDoc(selected.id)
+                setLib((l) => (l ? { ...l, docs: l.docs.filter((x) => x.id !== selected.id) } : l))
+                setSelId(null)
+              }}
               onToggleFolder={async (fid, has) => {
                 if (has) await window.api.removeFromFolder(fid, selected.id)
                 else await window.api.addToFolder(fid, selected.id)

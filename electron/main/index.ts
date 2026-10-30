@@ -273,6 +273,28 @@ ipcMain.handle('doc:patch', async (_e, id: string, body: Record<string, unknown>
   return updated
 })
 
+// Mendeley has no hard delete for documents: they go to the trash and can be
+// restored.  Probed against the live API to confirm the route is
+// POST /trash/{id}/restore; POST /documents/{id}/restore returns
+// "No service found for your request".
+ipcMain.handle('doc:trash', async (_e, id: string) => {
+  const c = ensureClient()
+  await c.trashDocument(id)
+  const lib = loadLibrary()
+  if (lib) saveLibrary(lib.docs.filter((d) => d.id !== id), lib.folders)
+  return { ok: true }
+})
+
+ipcMain.handle('trash:list', async () => {
+  const c = ensureClient()
+  return c.listTrash()
+})
+
+ipcMain.handle('trash:restore', async (_e, id: string) => {
+  const c = ensureClient()
+  return c.restoreDocument(id)
+})
+
 ipcMain.handle(
   'folder:add',
   async (_e, folderId: string, docId: string) => {

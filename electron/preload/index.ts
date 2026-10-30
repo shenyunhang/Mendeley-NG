@@ -29,6 +29,9 @@ const api = {
 
   patchDoc: (id: string, body: Record<string, unknown>) =>
     ipcRenderer.invoke('doc:patch', id, body) as Promise<Doc>,
+  trashDoc: (id: string) => ipcRenderer.invoke('doc:trash', id) as Promise<{ ok: boolean }>,
+  listTrash: () => ipcRenderer.invoke('trash:list') as Promise<Doc[]>,
+  restoreDoc: (id: string) => ipcRenderer.invoke('trash:restore', id) as Promise<Doc>,
   addToFolder: (folderId: string, docId: string) =>
     ipcRenderer.invoke('folder:add', folderId, docId) as Promise<{ ok: boolean }>,
   removeFromFolder: (folderId: string, docId: string) =>

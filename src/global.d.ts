@@ -18,6 +18,9 @@ export interface Api {
   pickPdfDir: () => Promise<string | null>
   importToken: () => Promise<{ ok: boolean; error?: string } | null>
   patchDoc: (id: string, body: Record<string, unknown>) => Promise<Doc>
+  trashDoc: (id: string) => Promise<{ ok: boolean }>
+  listTrash: () => Promise<Doc[]>
+  restoreDoc: (id: string) => Promise<Doc>
   addToFolder: (folderId: string, docId: string) => Promise<{ ok: boolean }>
   removeFromFolder: (folderId: string, docId: string) => Promise<{ ok: boolean }>
   createFolder: (name: string) => Promise<Folder>
