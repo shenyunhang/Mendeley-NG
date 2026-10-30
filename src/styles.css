@@ -1,0 +1,303 @@
+/* Sizes are in CSS pixels, which Chromium scales by the system factor on its
+   own.  Nothing here needs a DPI workaround: that was the entire reason for
+   rewriting this app rather than patching 1.19.8. */
+
+:root {
+  --bg: #1a1a1a;
+  --bg-2: #212121;
+  --bg-3: #2a2a2a;
+  --border: #3a3a3a;
+  --fg: #e8e8e8;
+  --fg-dim: #a0a0a0;
+  --accent: #4a9eff;
+  --accent-dim: #2d5f8f;
+  --warn: #d4a24a;
+  --ok: #5cb85c;
+  --row-h: 2rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei',
+    'PingFang SC', sans-serif;
+  font-size: var(--ui-fs, 15px);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+button {
+  font-family: inherit;
+  font-size: 0.867rem;
+  background: var(--bg-3);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: #353535;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.primary {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 0.867rem;
+  background: var(--bg-3);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+}
+input:focus,
+textarea:focus {
+  outline: 1px solid var(--accent);
+}
+
+/* ---------- layout ---------- */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.toolbar .grow {
+  flex: 1;
+}
+.toolbar .status {
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  max-width: 44%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.pane-left {
+  flex: 0 0 240px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-2);
+}
+.pane-mid {
+  flex: 1 1 auto;
+  min-width: 420px;
+}
+.pane-right {
+  flex: 0 0 46%;
+  border-left: 1px solid var(--border);
+  background: var(--bg-2);
+}
+.pane-head {
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* ---------- folder tree ---------- */
+.folders {
+  overflow: auto;
+  padding: 4px 0;
+  flex: 1;
+}
+.folder-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 0.867rem;
+  white-space: nowrap;
+}
+.folder-row:hover {
+  background: var(--bg-3);
+}
+.folder-row.sel {
+  background: var(--accent-dim);
+}
+.folder-row .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.folder-row .n {
+  margin-left: auto;
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+}
+
+/* ---------- table ---------- */
+.table-wrap {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.tbl th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--fg-dim);
+  padding: 6px 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.tbl th.sorted {
+  color: var(--accent);
+}
+.tbl td {
+  padding: 0 8px;
+  height: var(--row-h);
+  font-size: 0.867rem;
+  border-bottom: 1px solid #2c2c2c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+tr.row {
+  cursor: pointer;
+}
+tr.row:hover td {
+  background: #262626;
+}
+tr.row.sel td {
+  background: var(--accent-dim);
+}
+td .pdf-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  margin-right: 6px;
+}
+td .no-pdf {
+  background: #555;
+}
+
+/* ---------- details ---------- */
+.details {
+  overflow: auto;
+  padding: 10px 12px;
+  flex: 1;
+}
+.field {
+  margin-bottom: 9px;
+}
+.field label {
+  display: block;
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+  margin-bottom: 3px;
+}
+.field input,
+.field textarea {
+  width: 100%;
+}
+.field textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+.meta-actions {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+/* ---------- pdf ---------- */
+.pdf-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.pdf-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+  flex: 0 0 auto;
+}
+.pdf-scroll {
+  flex: 1;
+  overflow: auto;
+  background: #151515;
+  padding: 12px;
+  text-align: center;
+}
+.pdf-scroll canvas {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+  margin-bottom: 12px;
+  max-width: 100%;
+}
+
+.empty {
+  padding: 24px;
+  color: var(--fg-dim);
+  font-size: 0.867rem;
+  text-align: center;
+}
+.err {
+  color: #ff8080;
+  font-size: 0.8rem;
+  padding: 6px 10px;
+}
+.badge {
+  font-size: 0.733rem;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  color: var(--fg-dim);
+}

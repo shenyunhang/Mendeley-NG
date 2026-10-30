@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist/
+*.tsbuildinfo
+
+# smoke run screenshots, reproducible with `npm run smoke`
+smoke.png
+smoke-pdf.png
+
+.DS_Store
+Thumbs.db

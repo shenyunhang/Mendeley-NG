@@ -1,0 +1,350 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Doc, Folder, Library, SyncStatus } from '../shared/types'
+import FolderTree from './components/FolderTree'
+import DocTable from './components/DocTable'
+import DetailsPanel from './components/DetailsPanel'
+import PdfViewer from './components/PdfViewer'
+import { toBibtex, toRis } from './lib/export'
+
+type SortKey = 'title' | 'authors' | 'year' | 'source' | 'citation_key'
+
+export default function App() {
+  const [lib, setLib] = useState<Library | null>(null)
+  const [folders, setFolders] = useState<Folder[]>([])
+  const [folderId, setFolderId] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [selId, setSelId] = useState<string | null>(null)
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({
+    key: 'year',
+    dir: -1
+  })
+  const [status, setStatus] = useState<SyncStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [rightTab, setRightTab] = useState<'pdf' | 'details'>('details')
+  const [err, setErr] = useState<string | null>(null)
+  const [pdfDir, setPdfDir] = useState('')
+  const [fontSize, setFontSize] = useState(15)
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    window.api.loadLibrary().then((r) => {
+      if (r && !('error' in r) && r.docs) {
+        setLib(r)
+        setFolders(r.folders ?? [])
+      }
+    })
+    window.api.getConfig().then((c) => {
+      setPdfDir(c.pdfDir)
+      if (c.fontSize) {
+        fontRef.current = c.fontSize
+        setFontSize(c.fontSize)
+      }
+    })
+    const off = window.api.onSyncStatus(setStatus)
+    return off
+  }, [])
+
+  // one knob scales the whole UI, because every size in styles.css is in rem
+  useEffect(() => {
+    document.documentElement.style.setProperty('--ui-fs', fontSize + 'px')
+  }, [fontSize])
+
+  const fontRef = useRef(15)
+  const bumpFont = useCallback((d: number) => {
+    const next = Math.min(24, Math.max(11, fontRef.current + d))
+    fontRef.current = next
+    setFontSize(next)
+    window.api.setConfig({ fontSize: next })
+  }, [])
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+        return
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault()
+        bumpFont(1)
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+        e.preventDefault()
+        bumpFont(-1)
+      }
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [bumpFont])
+
+  const doSync = useCallback(async () => {
+    setBusy(true)
+    setErr(null)
+    const r = await window.api.sync(true)
+    if (r && 'error' in r) {
+      setErr(r.error)
+    } else if (r) {
+      setLib({ docs: r.docs, folders: r.folders, syncedAt: new Date().toISOString() })
+      setFolders(r.folders)
+    }
+    setBusy(false)
+  }, [])
+
+  const docs = lib?.docs ?? []
+
+  const folderCount = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const d of docs) {
+      for (const f of d.folder_uuids ?? []) m.set(f, (m.get(f) ?? 0) + 1)
+    }
+    return m
+  }, [docs])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    let out = docs
+    if (folderId) out = out.filter((d) => (d.folder_uuids ?? []).includes(folderId!))
+    if (q) {
+      out = out.filter((d) => {
+        const hay = [
+          d.title,
+          d.source,
+          d.citation_key,
+          d.doi,
+          (d.authors ?? []).map((a) => `${a.first_name ?? ''} ${a.last_name ?? ''}`).join(' ')
+        ]
+          .join(' ')
+          .toLowerCase()
+        return hay.includes(q)
+      })
+    }
+    const { key, dir } = sort
+    const val = (d: Doc): string | number => {
+      if (key === 'authors') {
+        const a = d.authors?.[0]
+        return ((a?.last_name ?? '') + ' ' + (a?.first_name ?? '')).trim().toLowerCase()
+      }
+      if (key === 'title') return (d.title ?? '').toLowerCase()
+      if (key === 'source') return (d.source ?? '').toLowerCase()
+      if (key === 'citation_key') return (d.citation_key ?? '').toLowerCase()
+      return d.year ?? 0
+    }
+    return [...out].sort((a, b) => {
+      const x = val(a)
+      const y = val(b)
+      if (x === y) return (a.title ?? '').localeCompare(b.title ?? '')
+      return (x < y ? -1 : 1) * dir
+    })
+  }, [docs, folderId, query, sort])
+
+  const selected = useMemo(
+    () => filtered.find((d) => d.id === selId) ?? null,
+    [filtered, selId]
+  )
+
+  const exportBib = () => {
+    const list = selected ? [selected] : filtered
+    download(toBibtex(list), 'library.bib')
+  }
+  const exportRis = () => {
+    const list = selected ? [selected] : filtered
+    download(toRis(list), 'library.ris')
+  }
+
+  return (
+    <div className="app">
+      <div className="toolbar">
+        <button className="primary" onClick={doSync} disabled={busy}>
+          {busy ? '同步中…' : '同步云端'}
+        </button>
+        <button onClick={exportBib} disabled={!filtered.length}>
+          导出 BibTeX
+        </button>
+        <button onClick={exportRis} disabled={!filtered.length}>
+          导出 RIS
+        </button>
+        <input
+          ref={searchRef}
+          style={{ width: 320 }}
+          placeholder="搜索标题 / 作者 / 期刊 / citation key  (Ctrl+F)"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <span className="grow" />
+        <button
+          style={{ padding: '3px 9px' }}
+          title="缩小界面字号"
+          onClick={() => bumpFont(-1)}
+        >
+          A−
+        </button>
+        <span className="badge" title="界面字号（CSS px，系统缩放仍会再乘一次）">
+          {fontSize}
+        </span>
+        <button
+          style={{ padding: '3px 9px' }}
+          title="放大界面字号"
+          onClick={() => bumpFont(1)}
+        >
+          A+
+        </button>
+        {status?.message && (
+          <span className="status" title={status.message}>
+            {status.message}
+          </span>
+        )}
+        <span className="badge">{filtered.length} / {docs.length}</span>
+      </div>
+
+      {err && <div className="err">同步失败：{err}　（可能需要导入 token.json）</div>}
+
+      <div className="body">
+        <div className="pane pane-left">
+          <div className="pane-head">
+            <span>文件夹</span>
+            <span className="grow" />
+            <button
+              style={{ padding: '2px 6px', fontSize: '0.733rem' }}
+              onClick={async () => {
+                const n = prompt('新文件夹名称')
+                if (!n) return
+                const f = await window.api.createFolder(n)
+                setFolders((fs) => [...fs, f])
+              }}
+            >
+              +
+            </button>
+          </div>
+          <FolderTree
+            folders={folders}
+            counts={folderCount}
+            total={docs.length}
+            selected={folderId}
+            onSelect={setFolderId}
+            onDrop={async (fid, did) => {
+              await window.api.addToFolder(fid, did)
+              setLib((l) =>
+                l
+                  ? {
+                      ...l,
+                      docs: l.docs.map((d) =>
+                        d.id === did
+                          ? { ...d, folder_uuids: [...(d.folder_uuids ?? []), fid] }
+                          : d
+                      )
+                    }
+                  : l
+              )
+            }}
+          />
+        </div>
+
+        <div className="pane pane-mid">
+          <div className="pane-head">
+            <span>文献</span>
+            <span className="grow" />
+            <span style={{ fontSize: '0.733rem' }}>
+              {pdfDir ? 'PDF: ' + pdfDir.slice(-42) : '未设置 PDF 目录'}
+            </span>
+            <button
+              style={{ padding: '2px 6px', fontSize: '0.733rem' }}
+              onClick={async () => {
+                const p = await window.api.pickPdfDir()
+                if (p) {
+                  setPdfDir(p)
+                  await doSync()
+                }
+              }}
+            >
+              改目录
+            </button>
+          </div>
+          <DocTable
+            docs={filtered}
+            fontSize={fontSize}
+            sort={sort}
+            onSort={(k) =>
+              setSort((s) =>
+                s.key === k ? { key: k, dir: (s.dir * -1) as 1 | -1 } : { key: k, dir: 1 }
+              )
+            }
+            selectedId={selId}
+            onSelect={(d) => {
+              setSelId(d.id)
+              setRightTab(d.localPdf ? 'pdf' : 'details')
+            }}
+          />
+        </div>
+
+        <div className="pane pane-right">
+          <div className="pane-head">
+            <button
+              className={rightTab === 'details' ? 'primary' : ''}
+              style={{ padding: '3px 10px', fontSize: '0.8rem' }}
+              onClick={() => setRightTab('details')}
+            >
+              详情
+            </button>
+            <button
+              className={rightTab === 'pdf' ? 'primary' : ''}
+              style={{ padding: '3px 10px', fontSize: '0.8rem' }}
+              onClick={() => setRightTab('pdf')}
+            >
+              PDF
+            </button>
+            <span className="grow" />
+            {selected?.citation_key && (
+              <span className="badge">{selected.citation_key}</span>
+            )}
+          </div>
+          {!selected ? (
+            <div className="empty">选中左侧一条文献查看详情或 PDF</div>
+          ) : rightTab === 'details' ? (
+            <DetailsPanel
+              doc={selected}
+              folders={folders}
+              onSaved={(d) =>
+                setLib((l) =>
+                  l ? { ...l, docs: l.docs.map((x) => (x.id === d.id ? d : x)) } : l
+                )
+              }
+              onToggleFolder={async (fid, has) => {
+                if (has) await window.api.removeFromFolder(fid, selected.id)
+                else await window.api.addToFolder(fid, selected.id)
+                setLib((l) =>
+                  l
+                    ? {
+                        ...l,
+                        docs: l.docs.map((x) =>
+                          x.id === selected.id
+                            ? {
+                                ...x,
+                                folder_uuids: has
+                                  ? (x.folder_uuids ?? []).filter((f) => f !== fid)
+                                  : [...(x.folder_uuids ?? []), fid]
+                              }
+                            : x
+                        )
+                      }
+                    : l
+                )
+              }}
+            />
+          ) : (
+            <PdfViewer doc={selected} />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function download(text: string, name: string) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = name
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+}
