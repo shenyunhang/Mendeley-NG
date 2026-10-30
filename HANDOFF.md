@@ -252,8 +252,17 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 9. **全文检索**　✅ 已完成：只索引每篇前 3 页，文本落一个平文件 + 偏移表，
    不用倒排索引（60 MB 直接 indexOf 扫只要几十毫秒，倒排表比原文还大）。
    增量：文件 mtime+size 没变就跳过。删掉的文献留下的空洞只有「重建」能回收。
+   建索引是并发的（最多 4 条车道，且不超过核数-1）、可随时「停止」、
+   每篇有 20 秒上限、进度条显示当前在读的文件名。
    **坑**：主进程里跑 pdf.js 需要把 `pdf.worker.mjs` 复制到 `out/main/`，
    否则每一篇都报 Setting up fake worker failed（见第 5 节第 28 条）。
+   **坑**：偏移一律按 **UTF-16 code unit** 计，不能拿 `fs.statSync().size`
+   当偏移——一个汉字 3 字节但 1 个 code unit，第一个非 ASCII 文档之后
+   全部偏移都会偏短，命中会指到别的篇上。
+   **坑**：每篇要有超时。pdf.js 碰到坏文件（xref 断了、流不结束）会无限跑，
+   串行队列里只要有一篇这样，整条队列就永远停住——这正是「创建索引会卡死」
+   的真正原因。超时里必须 `doc.destroy()`，光 resolve 掉 race 只是放弃
+   promise，worker 线程还在烧 CPU。
 10. **PDF 文本选区高亮**　✅ 已完成
     替换现在的矩形拖框，接 text layer 拿真实选区，顺带能复制文本。
 
