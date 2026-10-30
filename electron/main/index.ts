@@ -812,6 +812,38 @@ async function runSmoke() {
   expect('prefetch serves a step back', backOne.src === 'cache', backOne)
   expect('prefetch serves a step forward', fwdAgain.src === 'cache', fwdAgain)
 
+  // Ctrl + wheel is the zoom gesture, and it is the one thing a reader tries
+  // before looking for the buttons.  A plain wheel over the page must leave
+  // the zoom alone, or every scroll past a paper would resize it.
+  const zoomPct = () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const s=[...document.querySelectorAll(".pdf-bar span")]'
+      + '.map(x=>(x.textContent||"").trim()).find(t=>/^\\d+%$/.test(t));return s||null})()'
+    )
+  const wheel = (ctrl: boolean, dy: number) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const p=document.querySelector(".pdf-pane");if(!p)return 0;`
+      + `const c=p.querySelector("canvas");const r=(c||p).getBoundingClientRect();`
+      + `p.dispatchEvent(new WheelEvent("wheel",{deltaY:${dy},ctrlKey:${ctrl},`
+      + `bubbles:true,cancelable:true,clientX:Math.round(r.left+r.width/2),`
+      + `clientY:Math.round(r.top+r.height/2)}));return 1})()`
+    )
+  const pctOf = (s: string | null) => (s ? parseInt(s, 10) : NaN)
+  const z0 = await zoomPct()
+  await wheel(false, -120)
+  await new Promise((r) => setTimeout(r, 500))
+  const z1 = await zoomPct()
+  await wheel(true, -120)
+  await new Promise((r) => setTimeout(r, 700))
+  const z2 = await zoomPct()
+  log('zoom', { z0, plain: z1, ctrl: z2 })
+  expect('a plain wheel leaves the zoom alone', z1 === z0, { z0, plain: z1 })
+  expect('ctrl + wheel zooms the page in', pctOf(z2) > pctOf(z0), { z0, ctrl: z2 })
+  await wheel(true, 120)
+  await new Promise((r) => setTimeout(r, 700))
+  const z3 = await zoomPct()
+  expect('ctrl + wheel zooms back out', pctOf(z3) < pctOf(z2), { ctrl: z2, back: z3 })
+
   // Continuous scrolling lays every page out in one column.  Only the pages
   // in view get a canvas painted into them, so the run checks both that the
   // column exists and that scrolling it paints more and moves the page box.

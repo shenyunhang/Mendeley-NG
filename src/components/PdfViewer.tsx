@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { Annotation, CloudAnnotation, Doc, PdfPos } from '../../shared/types'
@@ -44,6 +44,12 @@ const PALETTE = ['#ffe066', '#a9e34b', '#74c0fc', '#ffa8a8', '#d0bfff']
  * fight the user.
  */
 type ZoomMode = 'manual' | 'fit-width' | 'fit-page'
+
+/** Past either end the page is either a few pixels or unusably large.  Named
+ *  because there are four places that zoom and they must agree. */
+const MIN_SCALE = 0.2
+const MAX_SCALE = 6
+const clampScale = (s: number) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s))
 
 /** Depth-first walk of the outline tree into a flat, indented list. */
 function flattenOutline(items: OutlineNode[], depth = 0): OutlineRow[] {
@@ -314,6 +320,78 @@ export default function PdfViewer({
     return () => clearTimeout(t)
   }, [page, doc.id, doc.localPdf, numPages, resumeReady])
 
+  /** Where the cursor was on the page when a zoom started, kept so the point
+   *  under it can be put back afterwards. */
+  const anchor = useRef<{
+    el: HTMLElement
+    fx: number
+    fy: number
+    x: number
+    y: number
+  } | null>(null)
+
+  /**
+   * Ctrl + wheel, which is the zoom gesture on every platform and the shape
+   * Chromium reports a trackpad pinch in as well.
+   *
+   * The listener is registered by hand on the window in the capture phase for
+   * two reasons.  React attaches `wheel` passively, and preventDefault from a
+   * passive listener is ignored — the browser would zoom the whole page
+   * instead of the document.  And it cannot be hung on the pane element,
+   * because the pane is not in the tree until a document has loaded.
+   */
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      const pane = paneRef.current
+      if (!pane || !pane.contains(e.target as Node)) return
+      e.preventDefault()
+      // a line or a page of delta means something very different from a pixel
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1
+      const d = e.deltaY * unit
+      if (!d) return
+      const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
+      const page = el?.closest('.pg-box, canvas') as HTMLElement | null
+      if (page) {
+        const r = page.getBoundingClientRect()
+        if (r.width && r.height) {
+          anchor.current = {
+            el: page,
+            fx: (e.clientX - r.left) / r.width,
+            fy: (e.clientY - r.top) / r.height,
+            x: e.clientX,
+            y: e.clientY
+          }
+        }
+      }
+      // exponential, so one notch feels the same at 50% as at 400%
+      setZoomMode('manual')
+      setScale((s) => clampScale(s * Math.exp(-d * 0.002)))
+    }
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    return () => window.removeEventListener('wheel', onWheel, { capture: true })
+  }, [])
+
+  /**
+   * Put the anchored point back under the cursor.
+   *
+   * Without this the page slides out from under the pointer and the gesture
+   * feels like it missed, even though the scale did change.  It runs in a
+   * layout effect so the scroll is corrected in the same frame as the new
+   * size, before the reader sees the wrong position.
+   */
+  useLayoutEffect(() => {
+    const a = anchor.current
+    if (!a) return
+    anchor.current = null
+    const sc = continuous ? contRef.current : scrollRef.current
+    if (!sc) return
+    const r = a.el.getBoundingClientRect()
+    if (!r.width || !r.height) return
+    sc.scrollLeft += r.left + a.fx * r.width - a.x
+    sc.scrollTop += r.top + a.fy * r.height - a.y
+  }, [scale, continuous])
+
   /** Page size in PDF points, fetched on demand and cached. */
   const sizeOf = useCallback(
     async (n: number): Promise<Size | null> => {
@@ -379,7 +457,7 @@ export default function PdfViewer({
     const byWidth = availW / s.w
     const next =
       zoomMode === 'fit-width' ? byWidth : Math.min(byWidth, availH / s.h)
-    setScale(Math.max(0.2, Math.min(6, next)))
+    setScale(clampScale(next))
   }, [zoomMode, page, sizes, tick, continuous])
 
   /**
@@ -1444,20 +1522,25 @@ export default function PdfViewer({
         </button>
         <span style={{ marginLeft: 8 }} />
         <button
-          title="缩小（切到手动缩放）"
+          title="缩小（Ctrl + 滚轮也行）"
           onClick={() => {
             setZoomMode('manual')
-            setScale((s) => Math.max(0.2, s - 0.2))
+            setScale((s) => clampScale(s - 0.2))
           }}
         >
           −
         </button>
-        <span style={{ minWidth: 46, textAlign: 'center' }}>{Math.round(scale * 100)}%</span>
+        <span
+          style={{ minWidth: 46, textAlign: 'center' }}
+          title="按住 Ctrl 滚动滚轮即可缩放"
+        >
+          {Math.round(scale * 100)}%
+        </span>
         <button
-          title="放大（切到手动缩放）"
+          title="放大（Ctrl + 滚轮也行）"
           onClick={() => {
             setZoomMode('manual')
-            setScale((s) => Math.min(6, s + 0.2))
+            setScale((s) => clampScale(s + 0.2))
           }}
         >
           ＋
