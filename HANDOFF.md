@@ -104,6 +104,17 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
     但 Mendeley Desktop 下载的本地副本**可能与之不同**，坐标按本地页尺寸换算时要注意。
 11. **`GET /files/{id}` 不是返回字节，而是 303 到 S3 预签名地址**。
     那个地址自带签名，不要再带 Authorization 头跟着跳。
+12. **`POST /documents` 只接受固定的 type 集合**，实测 `encyclopedia` / `dictionary` / `misc` /
+    `standard` / `film_broadcast` / `music_score` / `artistic_work` / `map` /
+    `personal_communication` / `legal_rule` / `legal_case` 全部 400（文档里却列着）。
+    可用的是 `journal` `conference_proceedings` `book` `book_section` `thesis` `report`
+    `generic` `web_page` `working_paper` `patent` `magazine_article` `newspaper_article`
+    `computer_program` `statute` `case` `bill` `hearing`。
+13. **想不依赖 pdf.js 从 PDF 里抽文本是行不通的**。试过纯 zlib + 正则取 `Tj`/`TJ` 字符串，
+    在四篇真实论文上对比 pdf.js 的召回率只有 **0% / 1.8% / 1.9% / 14.2%**：
+    subset 嵌入字体的字符串是字形索引而不是 Unicode，抽出来的是字体表和数字。
+    全文检索只能用 pdf.js（渲染层里有），代价是要建一个几十 MB 的索引，
+    索引哪些页、要不要落盘，是做之前要拍的决定。
 
 ## 6. 环境与打包的坑
 
@@ -140,7 +151,7 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 | 回收站 / 删除 / 恢复 | ✅ | ❌ | API 有 `/trash`、`POST /documents/{id}/trash` |
 | 导出 BibTeX / RIS | ✅ | ✅ | 缺 EndNote XML |
 | 库内检索（`/search/documents`） | ✅ | ⚠️ | 现在是本地过滤，没走 API，也没做高阶筛选 |
-| 全文检索（搜 PDF 正文） | ✅ | ❌ | 需要文本层 + 本地索引 |
+| 全文检索（搜 PDF 正文） | ✅ | ❌ | 需要文本层 + 本地索引，见第 5 节第 12 条 |
 | 标签 / 笔记 / 星级 / 已读 | ✅ | ❌ | — |
 | Word / LibreOffice 引用插件 | ✅ | ❌ | CSL + 插件体系，量级不同，见第 9 节 |
 | 引用样式格式化（复制格式化引文） | ✅ | ❌ | 需引入 citeproc |
