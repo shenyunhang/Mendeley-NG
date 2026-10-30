@@ -9,10 +9,12 @@ import {
   loadConfig,
   loadLibrary,
   loadNotes,
+  loadReading,
   saveAnnotations,
   saveConfig,
   saveLibrary,
-  saveNotes
+  saveNotes,
+  saveReading
 } from './store'
 import { attachPdfs, parseName } from './pdfindex'
 import { lookup, resolveIdentifier } from './lookup'
@@ -507,6 +509,38 @@ async function runSmoke() {
   )
   await shot('smoke-pdf')
 
+  // Reading position.  A library this size is never read in one sitting, so
+  // reopening a paper has to land where it was left rather than on page one.
+  // Checked by leaving a paper on page 3, opening another, and coming back.
+  const readPos = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>{'
+      + 'const rows=[...document.querySelectorAll("div.row")]'
+      + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+      + 'if(rows.length<2)return JSON.stringify({skip:"need two rows with a pdf"});'
+      + 'const wait=(ms)=>new Promise(r=>setTimeout(r,ms));'
+      + 'const setP=(n)=>{const i=document.querySelector(".pdf-bar input");if(!i)return;'
+      + 'const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+      + 's.call(i,String(n));i.dispatchEvent(new Event("input",{bubbles:true}));};'
+      + 'rows[0].click();await wait(3000);'
+      + 'setP(3);await wait(1500);'
+      + 'const at=document.querySelector(".pdf-bar input").value;'
+      + 'const bar=()=>document.querySelector(".pdf-bar input").value;'
+      + 'rows[1].click();await wait(3500);'
+      + 'const other=bar();'
+      + 'rows[0].click();await wait(4500);'
+      + 'return JSON.stringify({at,other,back:bar(),'
+      + 'msg:(document.querySelector(".pdf-msg")||{}).textContent||null})})()'
+    )
+  )
+  log('reading position', readPos)
+  expect(
+    'the reader reopens where it was left',
+    readPos.at !== '1' && readPos.back === readPos.at,
+    readPos
+  )
+  expect('reopening says why it is not on page one', /上次读到/.test(readPos.msg ?? ''), readPos)
+
   // A formatted citation is what a reference manager is actually for, so the
   // run copies one and reads it back.  Both the clipboard and the style are
   // restored: a smoke test has no business eating what the user had copied or
@@ -856,6 +890,10 @@ async function runSmoke() {
   // standing between a smoke run and the user's real highlights
   const annPath = path.join(app.getPath('userData'), 'library', 'annotations.json')
   const annBackup = fs.existsSync(annPath) ? fs.readFileSync(annPath) : null
+  // same for where the reader left each paper: the run opens real PDFs, which
+  // is enough to overwrite the position of whichever one it happened to open
+  const readPath = path.join(app.getPath('userData'), 'library', 'reading.json')
+  const readBackup = fs.existsSync(readPath) ? fs.readFileSync(readPath) : null
   const beforeCount = await w.webContents.executeJavaScript(
     '(async()=>{const a=await window.api.loadAnnotations();window.__before=a;return a.length})()'
   )
@@ -1302,6 +1340,8 @@ async function runSmoke() {
   await new Promise((r) => setTimeout(r, 300))
 
   if (annBackup) fs.writeFileSync(annPath, annBackup)
+  if (readBackup) fs.writeFileSync(readPath, readBackup)
+  else fs.rmSync(readPath, { force: true })
   const afterCount = await w.webContents.executeJavaScript(
     '(async()=>(await window.api.loadAnnotations()).length)()'
   )
@@ -1566,6 +1606,19 @@ ipcMain.handle('annotations:save', (_e, list: Annotation[]) => {
 ipcMain.handle('notes:load', () => loadNotes())
 ipcMain.handle('notes:save', (_e, notes: Record<string, string>) => {
   saveNotes(notes)
+  return { ok: true }
+})
+
+// Reading position is a whole-file rewrite per change, but a change is one
+// debounced write per document left, not one per page turned, so it stays
+// cheap.  Kept in the main process so the renderer cannot lose it by
+// navigating away mid-write.
+ipcMain.handle('reading:load', () => loadReading())
+let reading: Record<string, number> | null = null
+ipcMain.handle('reading:set', (_e, docId: string, page: number) => {
+  if (reading === null) reading = loadReading()
+  reading[docId] = Math.max(1, Math.floor(Number(page) || 1))
+  saveReading(reading)
   return { ok: true }
 })
 

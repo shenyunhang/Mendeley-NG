@@ -160,6 +160,8 @@ export default function PdfViewer({
   sizesRef.current = sizes
   const pageRef = useRef(page)
   pageRef.current = page
+  const idRef = useRef(doc.id)
+  idRef.current = doc.id
 
   // Continuous scrolling is a reading habit, not a per-document decision, so
   // it is remembered like the theme rather than reset on every open.
@@ -207,6 +209,12 @@ export default function PdfViewer({
     setPage(1)
     setErr(null)
     setPdf(null)
+    // reset rather than left at the previous document's count, so nothing
+    // decides an opening page against a length this document does not have
+    setNumPages(0)
+    // and forget that this document was already opened, or coming back to it
+    // would look like a re-render rather than an opening
+    setOpenedAt('')
     setSizes({})
     setMsg(null)
     setOutline(null)
@@ -237,15 +245,74 @@ export default function PdfViewer({
     }
   }, [doc.localPdf])
 
-  // declared after the load effect above so that it wins the race on a
-  // document change: opening a full-text hit has to land on the right page
-  // rather than on page 1
+  // Where the reader left off.  Loaded once, and only consulted once the
+  // document's length is known, because a remembered page says nothing about
+  // the file that is there now.
+  // A ref, not state: the position is written back as the reader goes, and a
+  // copy that was only ever read once at mount would send a paper back to
+  // where it was when the app started rather than where it was left.
+  const resumeRef = useRef<Record<string, number>>({})
+  const [resumeReady, setResumeReady] = useState(false)
   useEffect(() => {
-    if (!jumpTo) return
-    setPage(Math.min(Math.max(1, jumpTo.page), numPages || jumpTo.page))
-    if (continuous) requestAnimationFrame(() => scrollToPage(jumpTo.page))
+    window.api
+      .loadReading()
+      .then((m) => {
+        resumeRef.current = m ?? {}
+      })
+      .catch(() => {
+        resumeRef.current = {}
+      })
+      .finally(() => setResumeReady(true))
+  }, [])
+
+  // Which page a document opens at, decided in one place: a jump wins over
+  // the remembered position, and neither can be applied before the document
+  // has a length.  The key is what keeps this from re-deciding — and
+  // therefore from yanking the reader back — on every later render.
+  const [openedAt, setOpenedAt] = useState('')
+  // A jump is a one-off instruction, not part of the document.  Without this
+  // the nonce from the last full-text hit would still be sitting there when
+  // the reader moves to another paper, and that paper would open at a page
+  // nobody asked for.
+  const jumped = useRef(0)
+  useEffect(() => {
+    if (!resumeReady || !numPages || !doc.localPdf) return
+    const key = `${doc.id}|${numPages}|${jumpTo?.nonce ?? 0}`
+    if (key === openedAt) return
+    setOpenedAt(key)
+    const fresh = !!jumpTo && jumped.current !== jumpTo.nonce
+    if (fresh) jumped.current = jumpTo!.nonce
+    const want = fresh ? jumpTo!.page : resumeRef.current[doc.id] ?? 1
+    const at = Math.min(Math.max(1, want), numPages)
+    setPage(at)
+    if (continuous && at > 1) requestAnimationFrame(() => scrollToPage(at))
+    // A document that opens somewhere other than page one has to say why,
+    // or it looks like the page counter is broken.
+    setMsg(!fresh && at > 1 ? `回到上次读到的第 ${at} 页` : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jumpTo])
+  }, [resumeReady, numPages, doc.id, doc.localPdf, jumpTo, openedAt])
+
+  // Written back on a delay, and the delay reads where the reader *now* is
+  // rather than where it was when the timer was armed.  That distinction is
+  // the whole difficulty here: the render that switches documents still
+  // carries the previous document's page, so anything eager writes the old
+  // page onto the new document — and onto the value the restore above is
+  // about to read, which then opens the paper on page one.
+  //
+  // Page one is not stored: it is where a document opens when there is
+  // nothing to remember, and writing it for every paper looked at would fill
+  // the file with noise.
+  useEffect(() => {
+    if (!resumeReady || !numPages || !doc.localPdf) return
+    const t = setTimeout(() => {
+      const id = idRef.current
+      const p = pageRef.current
+      if (p <= 1) return
+      resumeRef.current[id] = p
+      void window.api.setReading(id, p).catch(() => {})
+    }, 600)
+    return () => clearTimeout(t)
+  }, [page, doc.id, doc.localPdf, numPages, resumeReady])
 
   /** Page size in PDF points, fetched on demand and cached. */
   const sizeOf = useCallback(

@@ -16,6 +16,7 @@ const libFile = () => path.join(dir(), 'library.json')
 const annFile = () => path.join(dir(), 'annotations.json')
 const cfgFile = () => path.join(dir(), 'config.json')
 const notesFile = () => path.join(dir(), 'notes.json')
+const readFile = () => path.join(dir(), 'reading.json')
 
 export type Config = AppConfig
 
@@ -92,6 +93,35 @@ export function saveNotes(notes: Record<string, string>) {
   const tmp = notesFile() + '.tmp'
   fs.writeFileSync(tmp, JSON.stringify(notes, null, 1), 'utf-8')
   fs.renameSync(tmp, notesFile())
+}
+
+/**
+ * Where in each document the reader was last left: document id to page.
+ *
+ * There is no endpoint for this either — Mendeley Reference Manager does not
+ * sync reading position across devices — so it lives here like the notes.
+ * Values are validated on the way in because the page a document was closed
+ * at says nothing about the page count of the file that is there now, and a
+ * stale one would open a document on a page that does not exist.
+ */
+export function loadReading(): Record<string, number> {
+  try {
+    const raw = JSON.parse(fs.readFileSync(readFile(), 'utf-8')) as Record<string, unknown>
+    const out: Record<string, number> = {}
+    for (const [k, v] of Object.entries(raw)) {
+      const n = Number(v)
+      if (Number.isFinite(n) && n >= 1) out[k] = Math.floor(n)
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+export function saveReading(m: Record<string, number>) {
+  const tmp = readFile() + '.tmp'
+  fs.writeFileSync(tmp, JSON.stringify(m), 'utf-8')
+  fs.renameSync(tmp, readFile())
 }
 
 export function saveAnnotations(list: Annotation[]) {

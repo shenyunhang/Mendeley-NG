@@ -61,6 +61,8 @@ export interface Api {
   saveAnnotations: (list: Annotation[]) => Promise<{ ok: boolean }>
   loadNotes: () => Promise<Record<string, string>>
   saveNotes: (notes: Record<string, string>) => Promise<{ ok: boolean }>
+  loadReading: () => Promise<Record<string, number>>
+  setReading: (docId: string, page: number) => Promise<{ ok: boolean }>
   createDoc: (body: Record<string, unknown>) => Promise<Doc>
   openRefFiles: () => Promise<{ name: string; text: string }[]>
   lookupMeta: (docId: string) => Promise<MetaCandidate[]>

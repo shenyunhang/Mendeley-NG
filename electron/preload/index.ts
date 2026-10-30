@@ -86,6 +86,9 @@ const api = {
   loadNotes: () => ipcRenderer.invoke('notes:load') as Promise<Record<string, string>>,
   saveNotes: (notes: Record<string, string>) =>
     ipcRenderer.invoke('notes:save', notes) as Promise<{ ok: boolean }>,
+  loadReading: () => ipcRenderer.invoke('reading:load') as Promise<Record<string, number>>,
+  setReading: (docId: string, page: number) =>
+    ipcRenderer.invoke('reading:set', docId, page) as Promise<{ ok: boolean }>,
   createDoc: (body: Record<string, unknown>) =>
     ipcRenderer.invoke('doc:create', body) as Promise<Doc>,
   openRefFiles: () =>
