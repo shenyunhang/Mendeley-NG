@@ -3,6 +3,8 @@
 替代 Mendeley Desktop 1.19.8 的文献管理器。Electron + React + pdf.js，直接读写你的
 Mendeley 云端库。
 
+> 要接手开发，看 [HANDOFF.md](HANDOFF.md)：现状、架构、API 的坑、待办都在里面。
+
 写它的唯一理由：1.19.8 是 Qt 5.10.1 编译的，它声明自己感知 DPI 但支持不完整，
 按物理像素渲染、不吃系统缩放倍率，所以在 4K 屏上字只有别的程序一半大；
 改注册表强制 `DPIUNAWARE` 又会换来整窗模糊。Chromium 则是按系统 scale factor
