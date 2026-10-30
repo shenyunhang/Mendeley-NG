@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { Annotation, CloudAnnotation, Doc, PdfPos } from '../../shared/types'
@@ -118,7 +118,7 @@ export default function PdfViewer({
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit-width')
   const [tick, setTick] = useState(0)
   const [outline, setOutline] = useState<OutlineRow[] | null>(null)
-  const [showOutline, setShowOutline] = useState(false)
+  const [side, setSide] = useState<'none' | 'outline' | 'anns'>('none')
   const [err, setErr] = useState<string | null>(null)
   const [anns, setAnns] = useState<Annotation[]>([])
   const [drag, setDrag] = useState<Rect | null>(null)
@@ -558,6 +558,21 @@ export default function PdfViewer({
     a.pos ? a.pos.some((p) => p.page === page) : a.page === page
   )
 
+  /** Everything on this document, in reading order, for the sidebar. */
+  const annsByPage = useMemo(
+    () =>
+      [...anns].sort((a, b) => {
+        const pa = a.pos?.[0]?.page ?? a.page
+        const pb = b.pos?.[0]?.page ?? b.page
+        if (pa !== pb) return pa - pb
+        // same page: top of the page first, remembering PDF y counts upwards
+        const ya = a.pos?.[0]?.y ?? 0
+        const yb = b.pos?.[0]?.y ?? 0
+        return yb - ya
+      }),
+    [anns]
+  )
+
   const download = async () => {
     if (busy) return
     setBusy(true)
@@ -645,12 +660,19 @@ export default function PdfViewer({
           整页
         </button>
         <button
-          className={showOutline ? 'primary' : ''}
+          className={side === 'outline' ? 'primary' : ''}
           disabled={!outline?.length}
           title={outline?.length ? '显示 PDF 目录' : '这个 PDF 没有目录'}
-          onClick={() => setShowOutline((v) => !v)}
+          onClick={() => setSide((v) => (v === 'outline' ? 'none' : 'outline'))}
         >
           目录
+        </button>
+        <button
+          className={side === 'anns' ? 'primary' : ''}
+          title="列出本篇全部标注，点一条跳到那一页"
+          onClick={() => setSide((v) => (v === 'anns' ? 'none' : 'anns'))}
+        >
+          标注 {anns.length ? `(${anns.length})` : ''}
         </button>
         <span style={{ flex: 1 }} />
         <button onClick={syncCloud} disabled={busy}>
@@ -697,21 +719,46 @@ export default function PdfViewer({
       )}
 
       <div className="pdf-body">
-        {showOutline && outline?.length ? (
+        {side !== 'none' && (
           <div className="pdf-outline">
-            {outline.map((r, i) => (
-              <div
-                key={i}
-                className="ol-row"
-                style={{ paddingLeft: 6 + r.depth * 12 }}
-                title={r.node.title}
-                onClick={() => goTo(r.node)}
-              >
-                {r.node.title || '(无标题)'}
+            {side === 'outline'
+              ? (outline ?? []).map((r, i) => (
+                  <div
+                    key={i}
+                    className="ol-row"
+                    style={{ paddingLeft: 6 + r.depth * 12 }}
+                    title={r.node.title}
+                    onClick={() => goTo(r.node)}
+                  >
+                    {r.node.title || '(无标题)'}
+                  </div>
+                ))
+              : annsByPage.map((a) => (
+                  <div
+                    key={a.id}
+                    className="ol-row"
+                    onClick={() => {
+                      setPage(a.page)
+                      setSel(a.id)
+                      setNote(a.note ?? '')
+                    }}
+                    title={a.note || a.text || '高亮'}
+                  >
+                    <span
+                      className="ann-dot"
+                      style={{ background: a.color }}
+                    />
+                    <span className="pg">p{a.page}</span>
+                    {a.note || a.text || (a.type === 'note' ? '笔记' : '高亮')}
+                  </div>
+                ))}
+            {side === 'anns' && !annsByPage.length && (
+              <div className="empty" style={{ padding: '0.4rem 0.6rem' }}>
+                这篇还没有标注
               </div>
-            ))}
+            )}
           </div>
-        ) : null}
+        )}
         <div className="pdf-scroll" ref={scrollRef}>
           <div
             ref={wrapRef}

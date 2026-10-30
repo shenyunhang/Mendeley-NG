@@ -296,7 +296,8 @@ async function runSmoke() {
   const clickBar = (label: string) =>
     w.webContents.executeJavaScript(
       `(()=>{const b=[...document.querySelectorAll(".pdf-bar button")]`
-      + `.find(x=>x.textContent.trim()==="${label}");if(!b)return "missing";b.click();return "ok"})()`
+      // startsWith, because the annotations button carries a count
+      + `.find(x=>x.textContent.trim().startsWith("${label}"));if(!b)return "missing";b.click();return "ok"})()`
     )
   log('fit-width', await measure())
   log('click 整页', await clickBar('整页'))
@@ -363,10 +364,25 @@ async function runSmoke() {
   const made = await w.webContents.executeJavaScript(
     '(async()=>{const a=await window.api.loadAnnotations();const before=window.__before;'
     + 'const added=a.filter(x=>!before.some(y=>y.id===x.id));'
-    + 'const out=JSON.stringify({added:added.length,rects:added[0]?added[0].rects:null,pos:added[0]?added[0].pos:null});'
-    + 'await window.api.saveAnnotations(before);return out})()'
+    + 'return JSON.stringify({added:added.length,rects:added[0]?added[0].rects:null,pos:added[0]?added[0].pos:null})})()'
   )
-  log('selection highlight (restored)', 'before', beforeCount, made)
+  log('selection highlight', 'before', beforeCount, made)
+
+  // the annotation sidebar has to list a highlight that was just made, so it
+  // is checked here rather than before, and the restore happens after
+  log('click 标注', await clickBar('标注'))
+  await new Promise((r) => setTimeout(r, 400))
+  log(
+    'annotation sidebar',
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({rows:[...document.querySelectorAll(".ol-row")].length,'
+      + 'first:(document.querySelector(".ol-row")||{}).textContent||null,'
+      + 'dots:document.querySelectorAll(".ann-dot").length})'
+    )
+  )
+  await w.webContents.executeJavaScript(
+    '(async()=>await window.api.saveAnnotations(window.__before))()'
+  )
   if (annBackup) fs.writeFileSync(annPath, annBackup)
   const afterCount = await w.webContents.executeJavaScript(
     '(async()=>(await window.api.loadAnnotations()).length)()'

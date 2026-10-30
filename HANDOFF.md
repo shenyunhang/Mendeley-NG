@@ -257,7 +257,7 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 | 按标识符添加条目 | ✅ | ⚠️ | ✅ | `GET /catalog?doi=` 可用，成本极低 |
 | PDF 目录 / 大纲 | ✅ | ❌ | ✅ | `pdf.getOutline()` 现成的 |
 | 适配宽度 / 整页缩放 | ✅ | ✅ | ✅ | 只有百分比缩放 |
-| 标注侧栏（本篇/跨篇列表） | ✅ | ✅（Notebook） | ❌ | 现在只能靠翻页找高亮 |
+| 标注侧栏（本篇/跨篇列表） | ✅ | ✅（Notebook） | ⚠️ | 本篇已可做，跨篇列表没做 |
 | 导出 EndNote XML | ✅ | ✅ | ✅ | 只有 BibTeX / RIS |
 | 标签 | ✅ | ⚠️ | ✅ | API `tags` 可读写 |
 | 星级 / 已读 | ❌ | ❌ | ✅ | API `starred` / `read` 可写 |
@@ -279,7 +279,7 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
     arXiv id 要走 `export.arxiv.org` 那条路。
 20. **PDF 目录（大纲）侧栏**（P2）　✅ 已完成：`pdf.getOutline()`，点条目跳页。
 21. **缩放模式**　✅ 已完成：适配宽度 / 适配整页，和现有百分比并存。
-22. **标注侧栏**（P2）：列出本篇全部标注，点一条跳到对应页并选中。
+22. **标注侧栏**（P2）　✅ 已完成（本篇），跨篇未做：列出本篇全部标注，点一条跳到对应页并选中。
 23. **导出 EndNote XML**（P2）　✅ 已完成：补齐导入侧已有的第三种格式。
 24. **标签 / 星级 / 已读**（P2，原 12 拆开）　✅ 已完成
     `tags` 可读写、`starred` / `read` 是文献自带字段，都能直接上云。
