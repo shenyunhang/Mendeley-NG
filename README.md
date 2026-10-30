@@ -127,6 +127,28 @@ scripts/get-token.mjs       OAuth 授权码流程，产出 token.json
 scripts/check-api.mjs       API 冒烟测试（不启 GUI）
 ```
 
+## 发布
+
+安装包**不进 git**（二进制会让仓库无谓膨胀），走 GitHub Release 分发。
+
+### 自动（推荐）
+
+`.github/workflows/release.yml` 会在推送 `v*` tag 时用 GitHub 的 Windows runner 编译并把 exe 挂到 Release：
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+公开仓库的标准 runner 免费、不限分钟，产物存储也免费。
+
+### 手动
+
+不想配 CI 的话，本地 `npm run dist`，然后到仓库页 Releases → Create a new release，
+把 `dist/Mendeley-NG-<版本>-Setup.exe` 拖进去发布。
+
+也可以在 Actions 页面手动触发上面那个 workflow（不推 tag 也行），
+产物会作为 30 天有效期的 artifact 上传，不会创建 Release。
+
 ## 提交即推送（可选）
 
 仓库里带了一个 `post-commit` 钩子，提交完自动推到远端，任务做完不用再记得 `git push`：

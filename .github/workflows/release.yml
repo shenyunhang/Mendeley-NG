@@ -1,0 +1,54 @@
+# Builds the Windows installer and attaches it to a Release.
+#
+# Triggered by pushing a v* tag, or by hand from the Actions tab (a manual run
+# uploads the installer as a 30-day artifact instead of publishing it).
+#
+# This repo is public, so GitHub-hosted standard runners cost nothing and the
+# artifact storage is free too.
+
+name: Build Windows installer
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # --publish never: we create the release ourselves below, so electron-builder
+      # must not try to publish (and must not look for a GitHub token of its own)
+      - run: npm run dist -- --publish never
+
+      - name: Show what was built
+        shell: bash
+        run: ls -la dist/*.exe
+
+      - name: Attach installer to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.exe --generate-notes
+
+      - name: Upload as a build artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mendeley-NG-Windows
+          path: dist/*.exe
+          retention-days: 30
