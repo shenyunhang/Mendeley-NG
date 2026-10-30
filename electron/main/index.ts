@@ -420,6 +420,44 @@ async function runSmoke() {
   expect('prefetch serves a step back', backOne.src === 'cache', backOne)
   expect('prefetch serves a step forward', fwdAgain.src === 'cache', fwdAgain)
 
+  // Continuous scrolling lays every page out in one column.  Only the pages
+  // in view get a canvas painted into them, so the run checks both that the
+  // column exists and that scrolling it paints more and moves the page box.
+  // The mode is switched back off at the end: it is stored in the config, and
+  // a smoke run has no business leaving the user's reader rearranged.
+  const contInfo = () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const e=document.querySelector(".pdf-cont");'
+      + 'return JSON.stringify({pages:document.querySelectorAll(".pg-wrap").length,'
+      + 'painted:[...document.querySelectorAll(".pg-wrap canvas")].filter(c=>c.width>0).length,'
+      + 'page:document.querySelector(".pdf-bar input").value,'
+      + 'top:e?Math.round(e.scrollTop):-1})})()'
+    )
+  const contScroll = (where: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const e=document.querySelector(".pdf-cont");if(!e)return 0;`
+      + `e.scrollTop=${where};e.dispatchEvent(new Event("scroll"));return 1})()`
+    )
+  log('click 连续', await clickBar('连续'))
+  await new Promise((r) => setTimeout(r, 3000))
+  await contScroll('0')
+  await new Promise((r) => setTimeout(r, 2500))
+  const cTop = JSON.parse(await contInfo())
+  log('continuous at top', cTop)
+  await contScroll('e.scrollHeight')
+  await new Promise((r) => setTimeout(r, 3000))
+  const cBottom = JSON.parse(await contInfo())
+  log('continuous at bottom', cBottom)
+  expect('continuous lays out every page', cTop.pages === 4, cTop)
+  expect('continuous paints pages in view', cTop.painted > 0, cTop)
+  expect('continuous paints further down', cBottom.painted > 0, cBottom)
+  expect('scrolling the column moves the page box', cBottom.page !== cTop.page, {
+    top: cTop.page,
+    bottom: cBottom.page
+  })
+  log('click 连续 again', await clickBar('连续'))
+  await new Promise((r) => setTimeout(r, 1200))
+
   // The selection layer is what turns a rubber band into a real highlight, so
   // the run makes a synthetic selection and checks that it produces sane
   // rectangles.  The annotation file is restored afterwards; leaving a stray

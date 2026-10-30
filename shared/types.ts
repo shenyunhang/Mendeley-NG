@@ -141,6 +141,8 @@ export interface AppConfig {
   /** 'dark' unless the user has switched; drives a data attribute on <html>
    *  and the whole palette with it. */
   theme?: 'dark' | 'light'
+  /** Scroll all pages in one column instead of one page at a time. */
+  pdfContinuous?: boolean
 }
 
 /** Progress of an auto-update, pushed from main to the renderer. */

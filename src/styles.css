@@ -473,6 +473,23 @@ td .no-pdf {
      page, and a clamped canvas keeps its height and so loses its aspect */
 }
 
+/* continuous column: one box per page, spaced by the wrapper's own height */
+.pdf-cont {
+  padding: 12px;
+}
+.pdf-cont canvas {
+  margin-bottom: 0;
+}
+.pg-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  margin: 0 auto;
+}
+.pg-box {
+  position: relative;
+}
+
 .empty {
   padding: 24px;
   color: var(--fg-dim);

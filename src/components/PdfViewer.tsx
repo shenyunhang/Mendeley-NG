@@ -63,6 +63,9 @@ interface OutlineRow {
 const FIT_PAD = 24
 const SCROLLBAR = 18
 
+/** Gap between pages in continuous mode, in CSS px. */
+const PGAP = 14
+
 /**
  * Mendeley stores annotation positions in raw PDF points, but with a trap:
  * the field called `top_left` holds the point with the *smaller* y, which is
@@ -119,6 +122,7 @@ export default function PdfViewer({
   const [tick, setTick] = useState(0)
   const [outline, setOutline] = useState<OutlineRow[] | null>(null)
   const [side, setSide] = useState<'none' | 'outline' | 'anns'>('none')
+  const [continuous, setContinuous] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [anns, setAnns] = useState<Annotation[]>([])
   const [drag, setDrag] = useState<Rect | null>(null)
@@ -134,8 +138,46 @@ export default function PdfViewer({
   const pending = useRef<ReturnType<pdfjs.PDFPageProxy['render']> | null>(null)
   const renderId = useRef(0)
   const dragStart = useRef<{ x: number; y: number } | null>(null)
+  const dragBox = useRef<DOMRect | null>(null)
+  const dragPage = useRef<number | null>(null)
   const sizesRef = useRef(sizes)
   sizesRef.current = sizes
+  const pageRef = useRef(page)
+  pageRef.current = page
+
+  // Continuous scrolling is a reading habit, not a per-document decision, so
+  // it is remembered like the theme rather than reset on every open.
+  useEffect(() => {
+    window.api
+      .getConfig()
+      .then((c) => {
+        if (typeof c.pdfContinuous === 'boolean') setContinuous(c.pdfContinuous)
+      })
+      .catch(() => {
+        /* a default of one page at a time is fine */
+      })
+  }, [])
+
+  const toggleContinuous = () => {
+    setContinuous((v) => {
+      const next = !v
+      void window.api.setConfig({ pdfContinuous: next }).catch(() => {})
+      return next
+    })
+  }
+
+  /** Canvases and text layers of the continuous column, keyed by page. */
+  const contCanvas = useRef(new Map<number, HTMLCanvasElement>())
+  const contLayer = useRef(new Map<number, HTMLDivElement>())
+  /** What each page was last painted at, so a scroll does not repaint it. */
+  const painted = useRef(new Map<number, string>())
+  const contBusy = useRef(new Set<number>())
+  const contPending = useRef(
+    new Map<number, ReturnType<pdfjs.PDFPageProxy['render']>>()
+  )
+  /** Pages currently inside the observer's margin. */
+  const visible = useRef(new Set<number>())
+  const contRef = useRef<HTMLDivElement>(null)
 
   // load annotations for this document
   useEffect(() => {
@@ -225,7 +267,17 @@ export default function PdfViewer({
   useEffect(() => {
     if (zoomMode === 'manual') return
     const el = scrollRef.current
-    const s = sizes[page]
+    // In continuous mode the scale must not depend on which page happens to be
+    // at the top: it would change as the user scrolls, which relaid out the
+    // column and moved the scroll position, which changed the page again.
+    // Fitting the widest page keeps one stable scale for the whole column.
+    let s = sizes[page]
+    if (continuous) {
+      for (const k of Object.keys(sizes)) {
+        const c = sizes[Number(k)]
+        if (c && (!s || c.w > s.w)) s = c
+      }
+    }
     if (!el || !s || !s.w || !s.h) return
     const box = el.getBoundingClientRect()
     const availW = box.width - FIT_PAD - SCROLLBAR
@@ -235,7 +287,7 @@ export default function PdfViewer({
     const next =
       zoomMode === 'fit-width' ? byWidth : Math.min(byWidth, availH / s.h)
     setScale(Math.max(0.2, Math.min(6, next)))
-  }, [zoomMode, page, sizes, tick])
+  }, [zoomMode, page, sizes, tick, continuous])
 
   /**
    * Neighbouring pages, rendered ahead of time into offscreen canvases so a
@@ -342,7 +394,8 @@ export default function PdfViewer({
 
   const render = useCallback(async () => {
     const canvas = canvasRef.current
-    if (!pdf || !canvas) return
+    // in continuous mode the single-page canvas is not what is on screen
+    if (!pdf || !canvas || continuous) return
     const dpr = window.devicePixelRatio || 1
     const key = prefetchKey(page, scale, dpr)
     let cached = prefetch.current.get(key)
@@ -429,7 +482,7 @@ export default function PdfViewer({
 
     // Warm the neighbours now that the page the user asked for is on screen.
     warmAround(page, scale)
-  }, [pdf, page, scale, numPages, renderTo])
+  }, [pdf, page, scale, numPages, renderTo, continuous])
 
   /**
    * An invisible layer of one span per text run, laid out to match the glyphs.
@@ -437,8 +490,12 @@ export default function PdfViewer({
    * the words instead of a hand-drawn box.  The text is transparent and the
    * browser's own selection colour is what the user sees.
    */
-  const drawTextLayer = async (pg: pdfjs.PDFPageProxy, viewport: pdfjs.PageViewport) => {
-    const layer = layerRef.current
+  const drawTextLayer = async (
+    pg: pdfjs.PDFPageProxy,
+    viewport: pdfjs.PageViewport,
+    into?: HTMLElement | null
+  ) => {
+    const layer = into ?? layerRef.current
     if (!layer) return
     layer.innerHTML = ''
     const tc = await pg.getTextContent()
@@ -470,9 +527,171 @@ export default function PdfViewer({
     })
   }
 
+  /**
+   * Paint one page of the continuous column.  Idempotent: a page already
+   * painted at the current scale and pixel ratio is left alone, which is what
+   * keeps a scroll from re-rendering everything it passes.
+   */
+  const paintPage = useCallback(
+    async (n: number, s: number) => {
+      const canvas = contCanvas.current.get(n)
+      if (!pdf || !canvas || contBusy.current.has(n)) return
+      const dpr = window.devicePixelRatio || 1
+      const k = prefetchKey(n, s, dpr)
+      if (painted.current.get(n) === k) return
+      const pg = await pdf.getPage(n)
+      const viewport = pg.getViewport({ scale: s })
+      canvas.width = Math.floor(viewport.width * dpr)
+      canvas.height = Math.floor(viewport.height * dpr)
+      canvas.style.width = `${viewport.width}px`
+      canvas.style.height = `${viewport.height}px`
+      const ctx = canvas.getContext('2d')!
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.clearRect(0, 0, viewport.width, viewport.height)
+      contBusy.current.add(n)
+      // one canvas, one render at a time: pdf.js refuses to touch a canvas
+      // that already has a render in flight
+      const task = pg.render({ canvasContext: ctx, viewport })
+      contPending.current.set(n, task)
+      try {
+        await task.promise
+      } catch (e) {
+        if ((e as { name?: string })?.name === 'RenderingCancelledException') return
+        throw e
+      } finally {
+        contBusy.current.delete(n)
+        contPending.current.delete(n)
+      }
+      painted.current.set(n, k)
+      await drawTextLayer(pg, viewport, contLayer.current.get(n))
+    },
+    [pdf]
+  )
+
+  /** Repaint whatever is on screen, e.g. after the scale moved. */
+  const repaintVisible = useCallback(
+    (s: number) => {
+      for (const n of [...visible.current].sort((a, b) => a - b)) {
+        paintPage(n, s).catch(() => {
+          /* a page that fails to paint stays blank until it is scrolled to */
+        })
+      }
+    },
+    [paintPage]
+  )
+
+  // every page has to have a known size before the column can be laid out,
+  // because the scroll height is the sum of them
+  useEffect(() => {
+    if (!pdf || !continuous) return
+    let dead = false
+    ;(async () => {
+      for (let n = 1; n <= numPages; n++) {
+        if (dead) return
+        await sizeOf(n)
+      }
+    })()
+    return () => {
+      dead = true
+    }
+  }, [pdf, continuous, numPages, sizeOf])
+
+  // paint pages as they come into view, with a margin so a flick of the wheel
+  // lands on something already drawn
+  useEffect(() => {
+    const root = contRef.current
+    if (!continuous || !root || typeof IntersectionObserver === 'undefined') return
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const n = Number((e.target as HTMLElement).dataset.page)
+          if (!Number.isFinite(n)) continue
+          if (e.isIntersecting) visible.current.add(n)
+          else visible.current.delete(n)
+        }
+        repaintVisible(scale)
+      },
+      { root, rootMargin: '700px 0px' }
+    )
+    for (const el of root.querySelectorAll('[data-page]')) io.observe(el)
+    return () => io.disconnect()
+  }, [continuous, numPages, sizes, scale, repaintVisible])
+
+  // a new scale invalidates every bitmap, and the observer will not fire again
+  // for pages that are already on screen, so they are repainted by hand
+  useEffect(() => {
+    if (!continuous) return
+    contPending.current.forEach((t) => t.cancel())
+    contPending.current.clear()
+    contBusy.current.clear()
+    painted.current.clear()
+    visible.current.clear()
+    const root = contRef.current
+    if (!root) return
+    // the column is about to be relaid out at the new size, so ask again on
+    // the next frame rather than measuring heights that are still old
+    requestAnimationFrame(() => {
+      for (const el of root.querySelectorAll('[data-page]')) {
+        const n = Number((el as HTMLElement).dataset.page)
+        if (Number.isFinite(n)) visible.current.add(n)
+      }
+      repaintVisible(scale)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scale, continuous])
+
+  /** Scroll the column so that page `n` is at the top. */
+  const scrollToPage = (n: number) => {
+    const el = contRef.current
+    if (!el) return
+    let top = 0
+    for (let i = 1; i < n; i++) {
+      const s = sizesRef.current[i]
+      if (!s) return
+      top += s.h * scale + PGAP
+    }
+    el.scrollTo({ top })
+  }
+
+  /** Keep the page box in step with whatever the user has scrolled to. */
+  const onContScroll = () => {
+    const el = contRef.current
+    if (!el) return
+    // a line below the very top edge, so a page is "current" once it occupies
+    // most of the view rather than the instant it peeks in
+    const y = el.scrollTop + 24
+    let top = 0
+    for (let n = 1; n <= numPages; n++) {
+      const s = sizesRef.current[n]
+      if (!s) return
+      const h = s.h * scale + PGAP
+      if (y < top + h) {
+        if (n !== pageRef.current) setPage(n)
+        return
+      }
+      top += h
+    }
+  }
+
+  /** The selection, resolved to the page it was made on and to rects in that
+   *  page's own 0..1 coordinates.  In continuous mode the column has one text
+   *  layer per page, so the layers on screen are tried in reading order. */
+  const selectionRects = (): { page: number; rects: Rect[] } => {
+    const layers: Array<[number, HTMLElement]> = continuous
+      ? [...visible.current]
+          .sort((a, b) => a - b)
+          .map((n) => [n, contLayer.current.get(n)] as [number, HTMLElement])
+          .filter((x) => x[1])
+      : [[page, layerRef.current as HTMLElement]]
+    for (const [n, layer] of layers) {
+      const rects = rectsInLayer(layer)
+      if (rects.length) return { page: n, rects }
+    }
+    return { page, rects: [] }
+  }
+
   /** Rects covering the current browser selection, in 0..1 page coordinates. */
-  const rectsFromSelection = (): Rect[] => {
-    const layer = layerRef.current
+  const rectsInLayer = (layer: HTMLElement): Rect[] => {
     const sel = window.getSelection()
     if (!layer || !sel || sel.isCollapsed || !sel.rangeCount) return []
     const box = layer.getBoundingClientRect()
@@ -523,20 +742,24 @@ export default function PdfViewer({
     })
   }, [render])
 
-  /** Rects to draw for `a` on `page`, in 0..1 with y from the top. */
-  const rectsFor = (a: Annotation): Rect[] => {
+  /** Rects to draw for `a` on page `n`, in 0..1 with y from the top. */
+  const rectsFor = (a: Annotation, n: number): Rect[] => {
     if (a.pos && a.pos.length) {
       const out: Rect[] = []
       for (const p of a.pos) {
-        if (p.page !== page) continue
+        if (p.page !== n) continue
         const s = sizes[p.page]
         if (!s) continue
         out.push(posToRect(p, s))
       }
       return out
     }
-    return a.page === page ? a.rects : []
+    return a.page === n ? a.rects : []
   }
+
+  /** Annotations that belong on page `n`. */
+  const annsOn = (n: number) =>
+    anns.filter((a) => (a.pos?.length ? a.pos.some((p) => p.page === n) : a.page === n))
 
   /** Positions for `a` in PDF points, deriving them from rects if needed. */
   const posFor = async (a: Annotation): Promise<PdfPos[]> => {
@@ -557,19 +780,20 @@ export default function PdfViewer({
     setAnns(next)
   }
 
-  const commitHighlight = async (rects: Rect[]) => {
+  /** Save a highlight on page `on`, in that page's own 0..1 rects. */
+  const commitHighlight = async (rects: Rect[], on: number) => {
     if (!rects.length) return
-    const s = await sizeOf(page)
+    const s = await sizeOf(on)
     const a: Annotation = {
-      id: `${doc.id}-${page}-${Date.now()}`,
+      id: `${doc.id}-${on}-${Date.now()}`,
       docId: doc.id,
-      page,
+      page: on,
       type: 'highlight',
       color: '#ffe066',
       rects,
       // keep the authoritative copy in PDF points so a cloud round trip does
       // not drift when the page is later rendered at another zoom level
-      pos: s ? rects.map((r) => rectToPos(r, page, s)) : undefined,
+      pos: s ? rects.map((r) => rectToPos(r, on, s)) : undefined,
       created: new Date().toISOString()
     }
     const all = await window.api.loadAnnotations()
@@ -662,17 +886,31 @@ export default function PdfViewer({
     await persist(anns.map((a) => (a.id === id ? { ...a, note: text } : a)))
   }
 
+  /** Which page a mouse event landed on, and the box to measure it against.
+   *  In continuous mode the column has one such box per page, so the event
+   *  itself is the only reliable way to tell them apart. */
+  const pageBox = (e: React.MouseEvent): { page: number; box: DOMRect } => {
+    const host = (e.currentTarget as HTMLElement).closest('[data-page]')
+    if (host) {
+      const n = Number((host as HTMLElement).dataset.page)
+      if (Number.isFinite(n)) return { page: n, box: host.getBoundingClientRect() }
+    }
+    return { page, box: wrapRef.current!.getBoundingClientRect() }
+  }
+
   const onDown = (e: React.MouseEvent) => {
-    const box = wrapRef.current!.getBoundingClientRect()
+    const { page: p, box } = pageBox(e)
+    dragPage.current = p
     dragStart.current = { x: e.clientX - box.left, y: e.clientY - box.top }
+    dragBox.current = box
     setDrag(null)
   }
   const onMove = (e: React.MouseEvent) => {
-    if (!dragStart.current) return
+    if (!dragStart.current || !dragBox.current) return
     // while the browser is building a text selection, drawing a rubber band
     // on top of it is just noise
     if (!(window.getSelection()?.isCollapsed ?? true)) return
-    const box = wrapRef.current!.getBoundingClientRect()
+    const box = dragBox.current
     const x = e.clientX - box.left
     const y = e.clientY - box.top
     setDrag({
@@ -684,16 +922,17 @@ export default function PdfViewer({
   }
   const onUp = async () => {
     // a real text selection wins: it follows the words rather than a box
-    const picked = rectsFromSelection()
-    if (picked.length) {
-      await commitHighlight(picked)
+    const picked = selectionRects()
+    if (picked.rects.length) {
+      await commitHighlight(picked.rects, picked.page)
       window.getSelection()?.removeAllRanges()
     } else if (drag && drag.w > 0.01 && drag.h > 0.005) {
-      await commitHighlight([drag])
+      await commitHighlight([drag], dragPage.current ?? page)
     } else {
       setSel(null)
     }
     dragStart.current = null
+    dragBox.current = null
     setDrag(null)
   }
 
@@ -707,15 +946,58 @@ export default function PdfViewer({
       const ref = Array.isArray(dest) ? dest[0] : null
       if (!ref) return
       const idx = await pdf.getPageIndex(ref)
-      if (Number.isFinite(idx)) setPage(idx + 1)
+      if (Number.isFinite(idx)) {
+        setPage(idx + 1)
+        // in continuous mode the column has to be moved as well; the page box
+        // alone only labels the page, it does not bring it into view
+        if (continuous) requestAnimationFrame(() => scrollToPage(idx + 1))
+      }
     } catch {
       /* outlines pointing at a missing destination are common enough */
     }
   }
 
   const selected = anns.find((a) => a.id === sel) || null
-  const pageAnns = anns.filter((a) =>
-    a.pos ? a.pos.some((p) => p.page === page) : a.page === page
+  const pageAnns = annsOn(page)
+
+  /** One highlight rectangle, shared by the single page and the column. */
+  const overlay = (a: Annotation, r: Rect, key: string) => (
+    <div
+      key={key}
+      title={a.note || '高亮'}
+      onClick={() => {
+        setSel(a.id)
+        setNote(a.note || '')
+      }}
+      style={{
+        position: 'absolute',
+        left: `${r.x * 100}%`,
+        top: `${r.y * 100}%`,
+        width: `${r.w * 100}%`,
+        height: `${r.h * 100}%`,
+        background: a.color,
+        opacity: 0.32,
+        cursor: 'pointer',
+        mixBlendMode: 'multiply',
+        boxShadow: sel === a.id ? '0 0 0 1px var(--accent)' : undefined
+      }}
+    />
+  )
+
+  /** The box being dragged out, before it becomes a highlight. */
+  const rubberBand = (d: Rect) => (
+    <div
+      style={{
+        position: 'absolute',
+        left: `${d.x * 100}%`,
+        top: `${d.y * 100}%`,
+        width: `${d.w * 100}%`,
+        height: `${d.h * 100}%`,
+        background: '#ffe066',
+        opacity: 0.35,
+        pointerEvents: 'none'
+      }}
+    />
   )
 
   /** Everything on this document, in reading order, for the sidebar. */
@@ -765,7 +1047,14 @@ export default function PdfViewer({
   return (
     <div className="pdf-pane">
       <div className="pdf-bar">
-        <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+        <button
+          onClick={() => {
+            const n = Math.max(1, page - 1)
+            setPage(n)
+            if (continuous) scrollToPage(n)
+          }}
+          disabled={page <= 1}
+        >
           ←
         </button>
         <input
@@ -773,14 +1062,21 @@ export default function PdfViewer({
           value={page}
           onChange={(e) => {
             const n = parseInt(e.target.value, 10)
-            if (Number.isFinite(n)) setPage(Math.min(Math.max(1, n), numPages || 1))
+            if (!Number.isFinite(n)) return
+            const p = Math.min(Math.max(1, n), numPages || 1)
+            setPage(p)
+            if (continuous) scrollToPage(p)
           }}
         />
         <span>
           / {numPages || '…'}
         </span>
         <button
-          onClick={() => setPage((p) => Math.min(numPages, p + 1))}
+          onClick={() => {
+            const n = Math.min(numPages, page + 1)
+            setPage(n)
+            if (continuous) scrollToPage(n)
+          }}
           disabled={page >= numPages}
         >
           →
@@ -818,6 +1114,13 @@ export default function PdfViewer({
           onClick={() => setZoomMode('fit-page')}
         >
           整页
+        </button>
+        <button
+          className={continuous ? 'primary' : ''}
+          title="所有页排成一列连续滚动，而不是一次一页"
+          onClick={toggleContinuous}
+        >
+          连续
         </button>
         <button
           className={side === 'outline' ? 'primary' : ''}
@@ -901,6 +1204,7 @@ export default function PdfViewer({
                       setPage(a.page)
                       setSel(a.id)
                       setNote(a.note ?? '')
+                      if (continuous) scrollToPage(a.page)
                     }}
                     title={a.note || a.text || '高亮'}
                   >
@@ -919,57 +1223,74 @@ export default function PdfViewer({
             )}
           </div>
         )}
-        <div className="pdf-scroll" ref={scrollRef}>
-          <div
-            ref={wrapRef}
-            style={{ position: 'relative', display: 'inline-block' }}
-            onMouseDown={onDown}
-            onMouseMove={onMove}
-            onMouseUp={onUp}
-          >
-            <canvas ref={canvasRef} style={{ display: 'block' }} />
-            {pageAnns.map((a) =>
-              rectsFor(a).map((r, i) => (
-                <div
-                  key={a.id + i}
-                  title={a.note || '高亮'}
-                  onClick={() => {
-                    setSel(a.id)
-                    setNote(a.note || '')
-                  }}
-                  style={{
-                    position: 'absolute',
-                    left: `${r.x * 100}%`,
-                    top: `${r.y * 100}%`,
-                    width: `${r.w * 100}%`,
-                    height: `${r.h * 100}%`,
-                    background: a.color,
-                    opacity: 0.32,
-                    cursor: 'pointer',
-                    mixBlendMode: 'multiply',
-                    boxShadow: sel === a.id ? '0 0 0 1px var(--accent)' : undefined
-                  }}
-                />
-              ))
-            )}
-            {drag && (
-              <div
-                style={{
-                  position: 'absolute',
-                  left: `${drag.x * 100}%`,
-                  top: `${drag.y * 100}%`,
-                  width: `${drag.w * 100}%`,
-                  height: `${drag.h * 100}%`,
-                  background: '#ffe066',
-                  opacity: 0.35,
-                  pointerEvents: 'none'
-                }}
-              />
-            )}
-            {/* invisible, selectable, and the reason highlights follow words */}
-            <div className="tx-layer" ref={layerRef} />
+        {!continuous ? (
+          <div className="pdf-scroll" ref={scrollRef}>
+            <div
+              ref={wrapRef}
+              style={{ position: 'relative', display: 'inline-block' }}
+              onMouseDown={onDown}
+              onMouseMove={onMove}
+              onMouseUp={onUp}
+            >
+              <canvas ref={canvasRef} style={{ display: 'block' }} />
+              {pageAnns.map((a) =>
+                rectsFor(a, page).map((r, i) => overlay(a, r, `${a.id}-${i}`))
+              )}
+              {drag && rubberBand(drag)}
+              {/* invisible, selectable, the reason highlights follow words */}
+              <div className="tx-layer" ref={layerRef} />
+            </div>
           </div>
-        </div>
+        ) : (
+          <div
+            className="pdf-scroll pdf-cont"
+            ref={contRef}
+            onScroll={onContScroll}
+          >
+            {/* one box per page: the sum of their heights is the scroll range,
+                and only the ones in view get a canvas painted into them */}
+            {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => {
+              const s = sizes[n]
+              const h = s ? s.h * scale : 0
+              const w = s ? s.w * scale : 0
+              return (
+                <div
+                  key={n}
+                  className="pg-wrap"
+                  data-page={n}
+                  style={{ height: h ? h + PGAP : undefined, width: w || undefined }}
+                  onMouseDown={onDown}
+                  onMouseMove={onMove}
+                  onMouseUp={onUp}
+                >
+                  <div
+                    className="pg-box"
+                    style={{ width: w || undefined, height: h || undefined }}
+                  >
+                    <canvas
+                      ref={(el) => {
+                        if (el) contCanvas.current.set(n, el)
+                        else contCanvas.current.delete(n)
+                      }}
+                      style={{ display: 'block' }}
+                    />
+                    {annsOn(n).map((a) =>
+                      rectsFor(a, n).map((r, i) => overlay(a, r, `${a.id}-${i}`))
+                    )}
+                    {drag && dragPage.current === n && rubberBand(drag)}
+                    <div
+                      className="tx-layer"
+                      ref={(el) => {
+                        if (el) contLayer.current.set(n, el)
+                        else contLayer.current.delete(n)
+                      }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
