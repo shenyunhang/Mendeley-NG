@@ -301,3 +301,48 @@ td .no-pdf {
   background: var(--bg-3);
   color: var(--fg-dim);
 }
+
+/* ---------- folder tree: nesting and per-row actions ---------- */
+.folder-row.drag {
+  background: var(--accent-dim);
+  outline: 1px solid var(--accent);
+}
+.folder-row .twisty {
+  width: 12px;
+  flex: 0 0 12px;
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+  text-align: center;
+  cursor: default;
+}
+.folder-row .acts {
+  display: none;
+  gap: 2px;
+  margin-left: 4px;
+}
+.folder-row:hover .acts,
+.folder-row.sel .acts {
+  display: flex;
+}
+button.mini {
+  padding: 0 4px;
+  font-size: 0.733rem;
+  line-height: 1.5;
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-dim);
+}
+button.mini:hover {
+  background: #3d3d3d;
+  color: var(--fg);
+}
+.folder-row input.rename {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  font-size: 0.867rem;
+}
+.drop-root {
+  flex: 1;
+  min-height: 24px;
+}

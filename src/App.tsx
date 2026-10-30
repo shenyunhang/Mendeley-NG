@@ -5,6 +5,7 @@ import DocTable from './components/DocTable'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
 import { toBibtex, toRis } from './lib/export'
+import { buildTree } from './lib/tree'
 
 type SortKey = 'title' | 'authors' | 'year' | 'source' | 'citation_key'
 
@@ -118,18 +119,31 @@ export default function App() {
 
   const docs = lib?.docs ?? []
 
+  const tree = useMemo(() => buildTree(folders), [folders])
+
+  /** rollup: a parent also counts and shows what is inside its children */
   const folderCount = useMemo(() => {
     const m = new Map<string, number>()
     for (const d of docs) {
       for (const f of d.folder_uuids ?? []) m.set(f, (m.get(f) ?? 0) + 1)
     }
-    return m
-  }, [docs])
+    const rolled = new Map<string, number>()
+    for (const f of folders) {
+      const ids = tree.subtree.get(f.id) ?? [f.id]
+      let n = 0
+      for (const i of ids) n += m.get(i) ?? 0
+      rolled.set(f.id, n)
+    }
+    return rolled
+  }, [docs, folders, tree])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     let out = docs
-    if (folderId) out = out.filter((d) => (d.folder_uuids ?? []).includes(folderId!))
+    if (folderId) {
+      const ids = new Set(tree.subtree.get(folderId) ?? [folderId])
+      out = out.filter((d) => (d.folder_uuids ?? []).some((f) => ids.has(f)))
+    }
     if (q) {
       out = out.filter((d) => {
         const hay = [
@@ -294,6 +308,29 @@ export default function App() {
                     }
                   : l
               )
+            }}
+            onRename={async (fid, name) => {
+              const f = await window.api.patchFolder(fid, { name })
+              setFolders((fs) => fs.map((x) => (x.id === fid ? f : x)))
+              setLib((l) => (l ? { ...l, folders: l.folders.map((x) => (x.id === fid ? f : x)) } : l))
+            }}
+            onDelete={async (fid) => {
+              const f = folders.find((x) => x.id === fid)
+              const kids = (tree.subtree.get(fid) ?? [fid]).length - 1
+              const msg = kids
+                ? `删除文件夹「${f?.name}」及其 ${kids} 个子文件夹？其中的文献不会被删除。`
+                : `删除文件夹「${f?.name}」？其中的文献不会被删除。`
+              if (!confirm(msg)) return
+              await window.api.deleteFolder(fid)
+              const gone = new Set(tree.subtree.get(fid) ?? [fid])
+              setFolders((fs) => fs.filter((x) => !gone.has(x.id)))
+              setLib((l) => (l ? { ...l, folders: l.folders.filter((x) => !gone.has(x.id)) } : l))
+              if (folderId && gone.has(folderId)) setFolderId(null)
+            }}
+            onMove={async (fid, parentId) => {
+              const f = await window.api.patchFolder(fid, { parent_id: parentId })
+              setFolders((fs) => fs.map((x) => (x.id === fid ? f : x)))
+              setLib((l) => (l ? { ...l, folders: l.folders.map((x) => (x.id === fid ? f : x)) } : l))
             }}
           />
         </div>

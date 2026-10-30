@@ -307,6 +307,25 @@ ipcMain.handle(
   }
 )
 
+ipcMain.handle(
+  'folder:patch',
+  async (_e, id: string, body: { name?: string; parent_id?: string | null }) => {
+    const c = ensureClient()
+    const f = await c.patchFolder(id, body)
+    const lib = loadLibrary()
+    if (lib) saveLibrary(lib.docs, lib.folders.map((x) => (x.id === id ? f : x)))
+    return f
+  }
+)
+
+ipcMain.handle('folder:delete', async (_e, id: string) => {
+  const c = ensureClient()
+  await c.deleteFolder(id)
+  const lib = loadLibrary()
+  if (lib) saveLibrary(lib.docs, lib.folders.filter((x) => x.id !== id && x.parent_id !== id))
+  return { ok: true }
+})
+
 ipcMain.handle('folder:create', async (_e, name: string) => {
   const c = ensureClient()
   const f = await c.createFolder(name)

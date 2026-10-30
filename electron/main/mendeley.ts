@@ -191,6 +191,18 @@ export class Mendeley {
     })
   }
 
+  /** Rename, or move by passing a new parent_id (null moves it to the root). */
+  async patchFolder(id: string, body: { name?: string; parent_id?: string | null }): Promise<Folder> {
+    return this.request<Folder>('PATCH', '/folders/' + id, {
+      body,
+      contentType: CT_FOLDER
+    })
+  }
+
+  async deleteFolder(id: string): Promise<void> {
+    await this.request('DELETE', '/folders/' + id)
+  }
+
   async addToFolder(folderId: string, docId: string): Promise<void> {
     await this.request('POST', `/folders/${folderId}/documents`, {
       body: { id: docId }

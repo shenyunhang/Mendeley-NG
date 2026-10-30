@@ -21,6 +21,11 @@ export interface Api {
   addToFolder: (folderId: string, docId: string) => Promise<{ ok: boolean }>
   removeFromFolder: (folderId: string, docId: string) => Promise<{ ok: boolean }>
   createFolder: (name: string) => Promise<Folder>
+  patchFolder: (
+    id: string,
+    body: { name?: string; parent_id?: string | null }
+  ) => Promise<Folder>
+  deleteFolder: (id: string) => Promise<{ ok: boolean }>
   loadAnnotations: () => Promise<Annotation[]>
   saveAnnotations: (list: Annotation[]) => Promise<{ ok: boolean }>
   checkUpdate: () => Promise<{

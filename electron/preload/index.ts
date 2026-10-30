@@ -34,6 +34,11 @@ const api = {
   removeFromFolder: (folderId: string, docId: string) =>
     ipcRenderer.invoke('folder:remove', folderId, docId) as Promise<{ ok: boolean }>,
   createFolder: (name: string) => ipcRenderer.invoke('folder:create', name) as Promise<Folder>,
+  patchFolder: (
+    id: string,
+    body: { name?: string; parent_id?: string | null }
+  ) => ipcRenderer.invoke('folder:patch', id, body) as Promise<Folder>,
+  deleteFolder: (id: string) => ipcRenderer.invoke('folder:delete', id) as Promise<{ ok: boolean }>,
 
   loadAnnotations: () => ipcRenderer.invoke('annotations:load') as Promise<Annotation[]>,
   saveAnnotations: (list: Annotation[]) => ipcRenderer.invoke('annotations:save', list),
