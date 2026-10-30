@@ -145,10 +145,17 @@ export interface AppConfig {
   pdfContinuous?: boolean
   /** Which columns the document table shows, in order. */
   cols?: string[]
+  /** How to name downloaded PDFs.  Placeholders: title, year, authors,
+   *  journal, key, type, doi. */
+  pdfNameTemplate?: string
   /** Named column layouts.  Unlike a saved search, a view does not filter:
    *  it only decides what the rows look like. */
   views?: SavedView[]
 }
+
+/** How local PDFs are named unless the user says otherwise.  Shared so the
+ *  dialog can offer it as the starting point and main can fall back to it. */
+export const DEFAULT_PDF_TEMPLATE = '{authors} - {year} - {title}'
 
 /** A named column layout for the document table. */
 export interface SavedView {

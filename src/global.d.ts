@@ -32,6 +32,12 @@ export interface Api {
     body: { name?: string; parent_id?: string | null }
   ) => Promise<Folder>
   deleteFolder: (id: string) => Promise<{ ok: boolean }>
+  renamePdfs: (template: string, apply: boolean) => Promise<{
+    total: number
+    renamed: number
+    skipped: number
+    sample: string[]
+  }>
   loadAnnotations: () => Promise<Annotation[]>
   pullAnnotations: (docId: string) => Promise<CloudAnnotation[]>
   pushAnnotations: (

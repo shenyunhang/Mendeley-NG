@@ -8,6 +8,7 @@ import type {
   SyncStatus,
   UpdateState
 } from '../shared/types'
+import { DEFAULT_PDF_TEMPLATE } from '../shared/types'
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
 import DupesView from './components/DupesView'
@@ -98,6 +99,7 @@ export default function App() {
   const [cols, setCols] = useState<ColKey[]>(() => normaliseCols(undefined))
   const [views, setViews] = useState<SavedView[]>([])
   const [showCols, setShowCols] = useState(false)
+  const [nameTemplate, setNameTemplate] = useState(DEFAULT_PDF_TEMPLATE)
   const [undo, setUndo] = useState<UndoEntry[]>([])
   const searchRef = useRef<HTMLInputElement>(null)
   // the keydown listener is installed once, so it has to reach the undo stack
@@ -116,6 +118,7 @@ export default function App() {
       setSaved(c.savedSearches ?? [])
       setViews(c.views ?? [])
       setCols(normaliseCols(c.cols))
+      if (c.pdfNameTemplate) setNameTemplate(c.pdfNameTemplate)
       setTheme(c.theme === 'light' ? 'light' : 'dark')
       if (c.fontSize) {
         fontRef.current = c.fontSize
@@ -452,6 +455,38 @@ export default function App() {
     setLib((l) =>
       l ? { ...l, docs: l.docs.map((d) => (d.id === id ? { ...d, ...prev } : d)) } : l
     )
+  }
+
+  /**
+   * The file name template.  Setting it is harmless, but it only affects
+   * downloads until the user says to rename what is already on disk, and
+   * renaming is shown as a preview first because it moves real files.
+   */
+  const askNameTemplate = () => {
+    setAsk({
+      title: 'PDF 文件名模板（可用 {title} {year} {authors} {journal} {key} {type} {doi}）',
+      initial: nameTemplate,
+      onOk: async (v) => {
+        setAsk(null)
+        const next = v.trim() || DEFAULT_PDF_TEMPLATE
+        setNameTemplate(next)
+        window.api.setConfig({ pdfNameTemplate: next })
+        const plan = await window.api.renamePdfs(next, false)
+        if (!plan.total) return
+        const go = confirm(
+          `按新模板要改名 ${plan.total} 个本地 PDF。\n\n` +
+            plan.sample.join('\n') +
+            (plan.total > plan.sample.length ? `\n…还有 ${plan.total - plan.sample.length} 个` : '') +
+            '\n\n现在就改？（同名的会跳过，不会覆盖）'
+        )
+        if (!go) return
+        const r = await window.api.renamePdfs(next, true)
+        await window.api.loadLibrary().then((res) => {
+          if (res && !('error' in res) && res.docs) setLib(res)
+        })
+        setErr(r.renamed ? `已重命名 ${r.renamed} 个文件${r.skipped ? `，跳过 ${r.skipped} 个` : ''}` : null)
+      }
+    })
   }
 
   const batchFolder = async (folderId: string) => {
@@ -970,6 +1005,13 @@ export default function App() {
               }}
             >
               改目录
+            </button>
+            <button
+              style={{ padding: '2px 6px', fontSize: '0.733rem' }}
+              title="设置下载与重命名 PDF 用的文件名模板"
+              onClick={askNameTemplate}
+            >
+              命名
             </button>
           </div>
           {multi.length > 1 && (

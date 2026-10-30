@@ -32,11 +32,27 @@ jobs:
 
       # --publish never: we create the release ourselves below, so electron-builder
       # must not try to publish (and must not look for a GitHub token of its own)
+      #
+      # CSC_LINK / CSC_KEY_PASSWORD are how electron-builder finds the code
+      # signing certificate.  When they are absent it skips signing without
+      # complaining, and the installer still builds — so the next step is what
+      # actually tells us whether it happened.
       - run: npm run dist -- --publish never
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
 
       - name: Show what was built
         shell: bash
         run: ls -la dist/*.exe
+
+      # A missing certificate must not break a fork's build, but a build that
+      # was handed one and still came out unsigned is a real failure.
+      - name: Check the installer is signed
+        shell: bash
+        env:
+          REQUIRE_SIGNATURE: ${{ secrets.CSC_LINK != '' && '1' || '0' }}
+        run: npm run signcheck
 
       # latest.yml is what electron-updater reads to find this release, so it
       # has to sit next to the installer on the release page

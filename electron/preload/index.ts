@@ -45,6 +45,14 @@ const api = {
     body: { name?: string; parent_id?: string | null }
   ) => ipcRenderer.invoke('folder:patch', id, body) as Promise<Folder>,
   deleteFolder: (id: string) => ipcRenderer.invoke('folder:delete', id) as Promise<{ ok: boolean }>,
+  /** Rename local PDFs to a template.  `apply: false` only reports the plan. */
+  renamePdfs: (template: string, apply: boolean) =>
+    ipcRenderer.invoke('pdf:rename', template, apply) as Promise<{
+      total: number
+      renamed: number
+      skipped: number
+      sample: string[]
+    }>,
 
   loadAnnotations: () => ipcRenderer.invoke('annotations:load') as Promise<Annotation[]>,
   pullAnnotations: (docId: string) =>

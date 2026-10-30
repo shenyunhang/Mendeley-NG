@@ -24,6 +24,7 @@ import type {
   Folder,
   SyncStatus
 } from '../../shared/types'
+import { DEFAULT_PDF_TEMPLATE } from '../../shared/types'
 
 let win: BrowserWindow | null = null
 let client: Mendeley | null = null
@@ -416,6 +417,45 @@ async function runSmoke() {
     })});return 1})()`
   )
   await new Promise((r) => setTimeout(r, 300))
+
+  // The file naming template.  Only its preview is exercised: actually
+  // renaming moves files on disk, so confirm is stubbed to refuse and the
+  // template is put back afterwards.
+  const tpl0 = cfg0.pdfNameTemplate
+  await w.webContents.executeJavaScript('(()=>{window.confirm=()=>false;return 1})()')
+  log(
+    'click 命名',
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
+      + '.find(x=>x.textContent.trim()==="命名");if(!b)return "missing";b.click();return "ok"})()'
+    )
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  const tplDlg = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({modal:!!document.querySelector(".modal"),'
+      + 'value:(document.querySelector(".modal input")||{}).value||null})'
+    )
+  )
+  log('name template dialog', tplDlg)
+  expect(
+    'naming template dialog opens on the default',
+    /\{authors\}/.test(tplDlg.value ?? ''),
+    tplDlg
+  )
+  await w.webContents.executeJavaScript(
+    '(()=>{const i=document.querySelector(".modal input");if(!i)return 0;'
+    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+    + 'set.call(i,"{year} - {title}");i.dispatchEvent(new Event("input",{bubbles:true}));'
+    + 'const b=[...document.querySelectorAll(".modal-acts button")]'
+    + '.find(x=>x.textContent.trim()==="确定");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 800))
+  await w.webContents.executeJavaScript(
+    `(async()=>{await window.api.setConfig({`
+    + `pdfNameTemplate:${JSON.stringify(tpl0 ?? '{authors} - {year} - {title}')}});`
+    + `delete window.confirm;return 1})()`
+  )
 
   const shot = async (name: string) => {
     const p = path.join(app.getPath('temp'), 'mendeley-ng-' + name + '.png')
@@ -911,10 +951,19 @@ ipcMain.handle('notes:save', (_e, notes: Record<string, string>) => {
   return { ok: true }
 })
 
-/** Name a downloaded PDF the way Mendeley Desktop would, so that the title
- *  matcher in pdfindex.ts picks it up again on the next scan instead of
- *  leaving it as an orphan file. */
-function pdfNameFor(doc: Doc | undefined, fallback?: string): string {
+/** Placeholders a naming template can use.  Kept next to the function that
+ *  expands them so the two cannot drift apart. */
+const PDF_NAME_FIELDS = ['title', 'year', 'authors', 'journal', 'key', 'type', 'doi']
+
+/** Name a downloaded PDF from a template.  Segments left empty by a missing
+ *  field are dropped rather than leaving a run of dangling separators, so
+ *  `{authors} - {year} - {title}` on a paper with no year does not produce
+ *  "Knuth -  - On writing". */
+function pdfNameFor(
+  doc: Doc | undefined,
+  fallback?: string,
+  template: string = DEFAULT_PDF_TEMPLATE
+): string {
   const safe = (s: string) =>
     (s || '')
       .replace(/[\\/:*?"<>|\r\n\t]+/g, ' ')
@@ -927,12 +976,66 @@ function pdfNameFor(doc: Doc | undefined, fallback?: string): string {
     if (!first) return ''
     return doc!.authors!.length > 1 ? `${first} et al.` : first
   })()
-  const parts = [author, doc?.year ? String(doc.year) : '', safe(doc?.title ?? '')]
-    .filter(Boolean)
-    .join(' - ')
-  const base = safe(parts || safe(fallback || 'download') || 'download')
+  const vals: Record<string, string> = {
+    title: safe(doc?.title ?? ''),
+    year: doc?.year ? String(doc.year) : '',
+    authors: author,
+    journal: safe(doc?.source ?? ''),
+    key: safe(doc?.citation_key ?? ''),
+    type: safe(doc?.type ?? ''),
+    doi: safe(doc?.identifiers?.doi ?? doc?.doi ?? '')
+  }
+  const expanded = safe(template).replace(/\{(\w+)\}/g, (_, k: string) => vals[k] ?? '')
+  // split on the separator and drop the empty pieces, then put them back
+  const parts = expanded.split(/\s*-\s*/).filter((s) => s.trim())
+  const base = safe(parts.join(' - ') || safe(fallback || '') || 'download')
   return (base.slice(0, 150) || 'download') + '.pdf'
 }
+
+/**
+ * Rename every local PDF to the template, or say what it would do.
+ * `apply: false` is a preview: renaming files on disk is not something to
+ * discover the shape of by doing it.
+ */
+ipcMain.handle(
+  'pdf:rename',
+  async (_e, template: string, apply: boolean) => {
+    const lib = loadLibrary()
+    if (!lib) return { total: 0, renamed: 0, skipped: 0, sample: [] as string[] }
+    const plan: { doc: Doc; from: string; to: string }[] = []
+    for (const d of lib.docs) {
+      const from = d.localPdf
+      if (!from || !fs.existsSync(from)) continue
+      const to = path.join(path.dirname(from), pdfNameFor(d, undefined, template))
+      if (path.normalize(to) === path.normalize(from)) continue
+      plan.push({ doc: d, from, to })
+    }
+    const sample = plan.slice(0, 5).map((p) => `${path.basename(p.from)}  ->  ${path.basename(p.to)}`)
+    if (!apply) return { total: plan.length, renamed: 0, skipped: 0, sample }
+
+    let renamed = 0
+    let skipped = 0
+    const touched = new Set<string>()
+    for (const p of plan) {
+      // a name that is already taken is left alone rather than overwritten:
+      // two papers can legitimately want the same file name
+      if (fs.existsSync(p.to)) {
+        skipped++
+        continue
+      }
+      try {
+        fs.renameSync(p.from, p.to)
+        p.doc.localPdf = p.to
+        touched.add(p.doc.id)
+        renamed++
+      } catch {
+        skipped++
+      }
+    }
+    if (renamed) saveLibrary(lib.docs, lib.folders)
+    return { total: plan.length, renamed, skipped, sample }
+  }
+)
 
 ipcMain.handle('doc:create', async (_e, body: Record<string, unknown>) => {
   const c = ensureClient()
@@ -1020,7 +1123,7 @@ ipcMain.handle(
     const cfg = loadConfig()
     const dir = cfg.pdfDir || DEFAULT_PDF_DIR
     fs.mkdirSync(dir, { recursive: true })
-    const dest = path.join(dir, pdfNameFor(doc, name))
+    const dest = path.join(dir, pdfNameFor(doc, name, cfg.pdfNameTemplate))
     if (buf.length) fs.writeFileSync(dest, buf)
     doc.localPdf = dest
     doc.file_attached = true
@@ -1046,9 +1149,12 @@ ipcMain.handle('pdf:download', async (_e, docId: string) => {
     fs.mkdirSync(dir, { recursive: true })
     const lib = loadLibrary()
     const doc = lib?.docs.find((d) => d.id === docId)
-    let dest = path.join(dir, pdfNameFor(doc, meta.file_name))
+    let dest = path.join(dir, pdfNameFor(doc, meta.file_name, cfg.pdfNameTemplate))
     for (let n = 2; fs.existsSync(dest) && n < 50; n++) {
-      dest = path.join(dir, pdfNameFor(doc, meta.file_name).replace(/\.pdf$/, ` (${n}).pdf`))
+      dest = path.join(
+        dir,
+        pdfNameFor(doc, meta.file_name, cfg.pdfNameTemplate).replace(/\.pdf$/, ` (${n}).pdf`)
+      )
     }
     fs.writeFileSync(dest, buf)
     if (lib && doc) {

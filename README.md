@@ -110,10 +110,12 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 浏览 | 三栏：文件夹树 / 文献列表 / 详情或 PDF。列表是虚拟滚动，几千行也不卡 |
 | 搜索 | Ctrl+F，覆盖标题、作者、发表处、citation key、DOI |
 | 保存的搜索 | 把文件夹 + 搜索词 + 星标存成虚拟文件夹，存在本地配置里 |
-| 排序 | 点列头切换升降序 |
+| 列定制 | 工具栏「列」勾选要显示的列、上下调顺序，可存成命名视图 |
+| 排序 | 点列头切换升降序（年份 / 标题 / 作者 / 发表处 / Key / 星标 / 添加时间） |
 | 文件夹 | 嵌套树：新建、重命名、删除、拖到别的文件夹改父级、拖回顶层 |
 | 归文件夹 | 把文献行拖到左侧文件夹即可加入；详情面板可勾选移出 |
 | 读 PDF | pdf.js，按 `devicePixelRatio` 出后备缓冲，高 DPI 下不虚 |
+| 连续滚动 | 「连续」把所有页排成一列滚着读；单页模式下预取相邻页，翻页不等 |
 | 高亮 | 选中文字即高亮，可改色、加笔记、删除 |
 | 缩放 | 适宽 / 整页，跟着窗口变；手动缩放后不再被覆盖 |
 | PDF 目录 | 读 PDF 自带的 outline，点击跳到对应页 |
@@ -126,6 +128,8 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 标记 | 星标 / 已读 / 标签，点一下就写回云端；工具栏 ★ 只看星标，未读加粗 |
 | 笔记 | 每篇一条，**只存本地**：Mendeley 没有 /notes 接口，界面里写明了不同步 |
 | 批量 | Shift 选范围、Ctrl 加减选；批量加入文件夹 / 移入回收站 / 导出 |
+| 撤销 | Ctrl+Z 或工具栏「撤销」：覆盖删除、合并、批量加文件夹 |
+| 安装包签名 | CI 已接好，配上证书即签名；`npm run signcheck` 可自查是否签上 |
 | 补全元数据 | 查 Crossref 与 arXiv，列出候选让你挑，不自动覆盖 |
 | 按标识符添加 | 粘 DOI / arXiv id / 标题，查到后确认再建条目，不需要 PDF |
 | 查重合并 | 按 DOI / arXiv id / 标题找重复；合并只补缺失字段 |
@@ -141,9 +145,9 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
   兜底。"Object detection" 对 "Lifelong Object Detection" 得分 0.78，是两篇不同的
   文章，必须拒掉；查不到顶多是少补几个字段，查错了会污染引用。
 - **合并只补缺失字段，落败的进回收站而不是删掉**。合并是不可逆操作里最容易
-  手滑的，让它可恢复比让它快更重要。
+  手滑的，让它可恢复比让它快更重要——现在还有撤销栈兜底。
 
-还没做的：全文检索（搜 PDF 正文）、连续滚动、撤销栈。
+还没做的：全文检索（搜 PDF 正文）。
 原因和优先级都在 [HANDOFF.md](HANDOFF.md) 第 8 节。
 
 ## 结构
@@ -199,6 +203,32 @@ Release 附件必须同时包含**安装包和 `latest.yml`**：后者是 `elect
 
 也可以在 Actions 页面手动触发上面那个 workflow（不推 tag 也行），
 产物会作为 30 天有效期的 artifact 上传，不会创建 Release。
+
+### 代码签名（消除 SmartScreen 警告）
+
+未签名的安装包在 Windows 上每次安装都会弹 SmartScreen 的"未知发布者"，
+需要点两次"更多信息 → 仍要运行"才能装。消除它只有一个办法：**用代码签名证书签名**，
+没有别的取巧途径。
+
+本仓库的 CI 已经接好了，只是默认没有证书所以不签。要启用：
+
+1. 买一张 Windows 代码签名证书（OV 即可，IV 会更快建立声誉；
+   各 CA 价格差异很大，属个人开支）。拿到 `.pfx`/`.p12` 和它的密码。
+2. 把 pfx 转成 base64 单行文本：
+   ```bash
+   base64 -w0 cert.pfx > cert.b64      # Linux / Git Bash
+   certutil -encode cert.pfx cert.b64  # Windows cmd
+   ```
+3. 到仓库 Settings → Secrets and variables → Actions 建两个 secret：
+   - `CSC_LINK` = 上面那串 base64
+   - `CSC_KEY_PASSWORD` = pfx 的密码
+
+`electron-builder` 读到这两个环境变量就会自动签名，读不到就**静默跳过**——
+安装包照样能编出来、照样能跑，看不出区别。所以 CI 多了一步
+`npm run signcheck`，直接问 Windows 拿签名状态：没有证书时只警告，
+有证书却没签上则直接判失败。本地也能跑 `npm run signcheck` 自查。
+
+新证书的声誉要下载量积累一段时间才会完全消失提示，这是 SmartScreen 的机制，不是配置问题。
 
 ## 提交即推送（可选）
 
