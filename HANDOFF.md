@@ -444,8 +444,8 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 | --- | --- | --- |
 | 49 | **错误条可关闭** | `err` 一旦出现就一直挂在顶部，只有下一次操作才会顶掉它；读完想关关不掉 |
 | 50 | **表格 / 查重里的硬编码深色跟上主题** | `DocTable` 行底是 `1px solid #2c2c2c`，`DupesView` 选中行是 `#1f2a20`，浅色主题下是黑线压黑底 |
-| 51 | **Esc 关掉所有浮层** | 设置、列选择、候选元数据框没有 Esc。`AskDialog` / `RowMenu` / `BatchEdit` 有，不一致 |
-| 52 | **列选择点外面就收起** | 浮层卡片只能再点一次「列」才关，改完列要额外一次点击 |
+| 51 | **Esc 关掉浮层** | 设置和列选择只能靠鼠标关，而设置盖住整个窗口——恰恰是最想按键的时候 |
+| ~~52~~ | ~~列选择点外面就收起~~ | 不必做：`.col-picker` 上已经有 `onMouseLeave={onClose}`，鼠标一离开卡片就收起 |
 | 53 | **换筛选后不再留「幽灵」文献** | `selId` 不随筛选失效：搜个词之后右栏还显示那篇，而「复制引文」会作用到一篇列表里看不见的文献 |
 | 54 | **Ctrl+A 全选当前结果 / Esc 取消多选** | 5600 篇里挑 200 篇只能 shift 拖到底；取消多选现在要把鼠标移到「取消选择」按钮上 |
 | 55 | **导出走保存对话框** | 永远写 `library.bib`，第二次导出变成 `library (1).bib`，也不知道写到哪去了 |
@@ -467,10 +467,13 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 - **50 光改 CSS 变量没用**：颜色写在 inline style 里，优先级高于 class，
   必须把 inline 那行删掉，让它落到 `.row` / `.dupe-row` 的 CSS 上，
   再由 `[data-theme=light]` 去翻。
-- **51 Esc 要 capture 且 `stopPropagation`**：`PdfViewer` 已经在用 Esc 关查找框，
-  阅读器开着的时候 Esc 必须先被它消费掉，不能一路冒到 App 把浮层也关了。
-- **52 用 `pointerdown` 不是 `click`**：拖分隔条松手时那一下 click 会误关浮层。
-  判定要排除浮层自身，否则第一次点里面的复选框就把卡片关了。
+- **51 Esc 归 `App` 统一管，一次只关最上面那个**：`PdfViewer` 已经在用 Esc 关查找框，
+  但只在查找框开着时 `stopPropagation`，所以关着的时候 Esc 能正常冒泡到 `App`。
+  `App` 的 handler 里 `settings` / `showCols` 是 state，**依赖数组必须带上它们**——
+  闭包在挂载时捕获的是 false，Esc 会彻底没反应。
+  候选元数据框**不加** Esc：它长在右栏里、自带「收起」按钮，而一个内嵌面板抢走
+  Esc 之后，外面真盖住窗口的浮层就再也收不到了。
+- ~~52~~ 已取消，见上表。
 - **53 不能一刀切清空 `selId`**：切列顺序、改字号都不碰 `filtered` 的内容，
   不该清。只在**当前 `filtered` 里找不到 `selId`** 时才让选中失效，
   而且要保留 `multi` 里其它仍然可见的选中项。

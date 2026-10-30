@@ -259,6 +259,23 @@ export default function App() {
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      // Esc closes whatever is floating over the library, and only that:
+      // dismissing the sheet and the card under it on one press would make
+      // the key do twice what it was asked.  Both of these used to need the
+      // mouse, which is most jarring exactly where the key is most likely to
+      // be pressed — while something is covering the window.
+      if (e.key === 'Escape') {
+        if (settings) {
+          e.preventDefault()
+          setSettings(false)
+          return
+        }
+        if (showCols) {
+          e.preventDefault()
+          setShowCols(false)
+          return
+        }
+      }
       // Arrow keys, Enter and Delete belong to the table only when nothing
       // else has claimed them: inside a search box, a note box or a rename box
       // they have to keep doing what they do there, and on a focused button
@@ -329,7 +346,10 @@ export default function App() {
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [bumpFont])
+    // settings and showCols are read here, so the listener has to be rebuilt
+    // when either moves: a closure captured at mount would still see them
+    // as false and Esc would do nothing at all
+  }, [bumpFont, settings, showCols])
 
   /** `full` re-pulls the whole library.  Incremental is the default because a
    *  5.6k-document pull takes long enough to be annoying, but deletions are

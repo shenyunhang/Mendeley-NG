@@ -1360,11 +1360,52 @@ async function runSmoke() {
     `window.api.setConfig({ftPages:${JSON.parse(cfgBefore).ftPages ?? 3}})`
   )
   await new Promise((r) => setTimeout(r, 400))
+  // Esc is the way out of anything floating over the library, and the
+  // settings sheet covers the whole window, which is exactly when having to
+  // go and find the button is most annoying.
   await w.webContents.executeJavaScript(
-    '(()=>{const b=[...document.querySelectorAll(".settings button")]'
-    + '.find(x=>x.textContent.trim()==="完成");if(b)b.click();return 1})()'
+    'window.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}))'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  const escSettings = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({settings:document.querySelectorAll(".settings").length,'
+      + 'cols:document.querySelectorAll(".col-picker").length})'
+    )
+  )
+  log('esc over the settings', escSettings)
+  expect('esc closes the settings sheet', escSettings.settings === 0, escSettings)
+  // the same key over the column card: it is a floating card like the sheet,
+  // so it has to answer to the same key
+  log(
+    'click 列',
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+      + '.find(x=>x.textContent.trim()==="列");if(!b)return "missing";b.click();return "ok"})()'
+    )
   )
   await new Promise((r) => setTimeout(r, 300))
+  const colsOpened = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({cols:document.querySelectorAll(".col-picker").length})'
+    )
+  )
+  log('column card opened', colsOpened)
+  // a card that never opened would make the assertion below pass for the
+  // wrong reason, so the opening is checked first
+  expect('the column card opens', colsOpened.cols === 1, colsOpened)
+  await w.webContents.executeJavaScript(
+    'window.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}))'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  const escCols = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({settings:document.querySelectorAll(".settings").length,'
+      + 'cols:document.querySelectorAll(".col-picker").length})'
+    )
+  )
+  log('esc over the column card', escCols)
+  expect('esc closes the column card', escCols.cols === 0, escCols)
 
   // Draggable pane edges.  The widths are remembered, so the run puts them
   // back afterwards; everything else here is measured geometry.
