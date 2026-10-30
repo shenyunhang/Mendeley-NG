@@ -13,10 +13,65 @@
   --accent-dim: #2d5f8f;
   --warn: #d4a24a;
   --ok: #5cb85c;
+  /* named slots for what used to be literals: a second theme only works if
+     every colour is a variable */
+  --row-line: #2c2c2c;
+  --hover: #262626;
+  --btn-hover: #353535;
+  --mini-hover: #3d3d3d;
+  --muted: #555;
+  --multi: #2b3a4d;
+  --pdf-bg: #151515;
+  --pdf-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+  --panel-head: #1e1e1e;
+  --panel: #1b1f27;
+  --cand-hover: #262b34;
+  --msg-bg: #1c2430;
+  --danger-border: #7a3b3b;
+  --danger-fg: #ff9b9b;
+  --danger-bg: #4a2626;
+  --err: #ff8080;
+  --sep: #333;
+  --star-on: #ffd43b;
+  --star-off: #4d4d4d;
   --row-h: 2rem;
+  color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei',
     'PingFang SC', sans-serif;
   font-size: var(--ui-fs, 15px);
+}
+
+:root[data-theme='light'] {
+  --bg: #f4f5f7;
+  --bg-2: #ffffff;
+  --bg-3: #eceff3;
+  --border: #d6dae0;
+  --fg: #1c1e21;
+  --fg-dim: #666b72;
+  --accent: #0b62d6;
+  --accent-dim: #c9ddf7;
+  --warn: #a0641a;
+  --ok: #2e7d32;
+  --row-line: #e4e7ec;
+  --hover: #e8ebf0;
+  --btn-hover: #e2e5ea;
+  --mini-hover: #dfe3e9;
+  --muted: #b6bcc4;
+  --multi: #cfe2f8;
+  --pdf-bg: #8b8f95;
+  --pdf-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  --panel-head: #f0f2f5;
+  --panel: #eaeff7;
+  --cand-hover: #d9e4f5;
+  --msg-bg: #e3edfa;
+  --danger-border: #d09a9a;
+  --danger-fg: #a4262c;
+  --danger-bg: #f7dcdd;
+  --err: #b3261e;
+  --sep: #cfd4da;
+  --star-on: #e0a800;
+  --star-off: #b8bec6;
+  color-scheme: light;
 }
 
 * {
@@ -44,7 +99,7 @@ button {
   cursor: pointer;
 }
 button:hover:not(:disabled) {
-  background: #353535;
+  background: var(--btn-hover);
 }
 button:disabled {
   opacity: 0.45;
@@ -200,7 +255,7 @@ textarea:focus {
   padding: 0 8px;
   height: var(--row-h);
   font-size: 0.867rem;
-  border-bottom: 1px solid #2c2c2c;
+  border-bottom: 1px solid var(--row-line);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -209,7 +264,7 @@ tr.row {
   cursor: pointer;
 }
 tr.row:hover td {
-  background: #262626;
+  background: var(--hover);
 }
 tr.row.sel td {
   background: var(--accent-dim);
@@ -223,7 +278,7 @@ td .pdf-dot {
   margin-right: 6px;
 }
 td .no-pdf {
-  background: #555;
+  background: var(--muted);
 }
 
 /* ---------- details ---------- */
@@ -370,7 +425,7 @@ td .no-pdf {
 }
 
 .row.multi {
-  background: #2b3a4d;
+  background: var(--multi);
 }
 
 .batch-bar {
@@ -407,12 +462,12 @@ td .no-pdf {
   flex: 1;
   min-width: 0;
   overflow: auto;
-  background: #151515;
+  background: var(--pdf-bg);
   padding: 12px;
   text-align: center;
 }
 .pdf-scroll canvas {
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--pdf-shadow);
   margin-bottom: 12px;
   /* no max-width: zooming past the pane width has to scroll, not squash the
      page, and a clamped canvas keeps its height and so loses its aspect */
@@ -425,7 +480,7 @@ td .no-pdf {
   text-align: center;
 }
 .err {
-  color: #ff8080;
+  color: var(--err);
   font-size: 0.8rem;
   padding: 6px 10px;
 }
@@ -468,7 +523,7 @@ button.mini {
   color: var(--fg-dim);
 }
 button.mini:hover {
-  background: #3d3d3d;
+  background: var(--mini-hover);
   color: var(--fg);
 }
 .folder-row input.rename {
@@ -483,18 +538,18 @@ button.mini:hover {
 }
 
 button.danger {
-  border-color: #7a3b3b;
-  color: #ff9b9b;
+  border-color: var(--danger-border);
+  color: var(--danger-fg);
 }
 button.danger:hover:not(:disabled) {
-  background: #4a2626;
+  background: var(--danger-bg);
 }
 .trash-row {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 5px 10px;
-  border-bottom: 1px solid #2c2c2c;
+  border-bottom: 1px solid var(--row-line);
   font-size: 0.867rem;
 }
 .trash-row .t {
@@ -545,14 +600,14 @@ button.danger:hover:not(:disabled) {
   background: rgba(90, 170, 255, 0.4);
 }
 .dupe-group {
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--sep);
 }
 .dupe-head {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 5px 10px;
-  background: #1e1e1e;
+  background: var(--panel-head);
   font-size: 0.8rem;
 }
 .cand-box {
@@ -560,7 +615,7 @@ button.danger:hover:not(:disabled) {
   max-height: 40%;
   overflow: auto;
   border-bottom: 1px solid var(--border);
-  background: #1b1f27;
+  background: var(--panel);
 }
 .cand-head {
   display: flex;
@@ -571,19 +626,19 @@ button.danger:hover:not(:disabled) {
   color: var(--fg-dim);
   position: sticky;
   top: 0;
-  background: #1b1f27;
+  background: var(--panel);
 }
 .cand-row {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 5px 10px;
-  border-bottom: 1px solid #2c2c2c;
+  border-bottom: 1px solid var(--row-line);
   font-size: 0.867rem;
   cursor: pointer;
 }
 .cand-row:hover {
-  background: #262b34;
+  background: var(--cand-hover);
 }
 .cand-row .t {
   flex: 1;
@@ -599,7 +654,7 @@ button.danger:hover:not(:disabled) {
 .pdf-msg {
   padding: 4px 10px;
   border-bottom: 1px solid var(--border);
-  background: #1c2430;
+  background: var(--msg-bg);
   color: var(--fg-dim);
   font-size: 0.733rem;
   cursor: default;
@@ -610,14 +665,14 @@ button.danger:hover:not(:disabled) {
   gap: 6px;
   padding: 5px 10px;
   border-bottom: 1px solid var(--border);
-  background: #1e1e1e;
+  background: var(--panel-head);
   font-size: 0.8rem;
 }
 .swatch {
   width: 1.15rem;
   height: 1.15rem;
   padding: 0;
-  border: 1px solid #333;
+  border: 1px solid var(--sep);
   border-radius: 3px;
   cursor: pointer;
   outline-offset: 1px;

@@ -81,6 +81,7 @@ export default function App() {
   } | null>(null)
   const [pdfDir, setPdfDir] = useState('')
   const [fontSize, setFontSize] = useState(15)
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -93,6 +94,7 @@ export default function App() {
     window.api.getConfig().then((c) => {
       setPdfDir(c.pdfDir)
       setSaved(c.savedSearches ?? [])
+      setTheme(c.theme === 'light' ? 'light' : 'dark')
       if (c.fontSize) {
         fontRef.current = c.fontSize
         setFontSize(c.fontSize)
@@ -110,6 +112,13 @@ export default function App() {
   useEffect(() => {
     document.documentElement.style.setProperty('--ui-fs', fontSize + 'px')
   }, [fontSize])
+
+  // the palette is picked entirely by this attribute, including native
+  // scrollbars and form controls through color-scheme
+  useEffect(() => {
+    if (theme === 'light') document.documentElement.dataset.theme = 'light'
+    else delete document.documentElement.dataset.theme
+  }, [theme])
 
   // the point of the feature: no second click. once the installer is on disk we
   // quit and let it run, and it relaunches the app when it finishes
@@ -512,7 +521,7 @@ export default function App() {
           className={onlyStarred ? 'primary' : ''}
           onClick={() => setOnlyStarred((v) => !v)}
           title="只看星标"
-          style={{ color: onlyStarred ? undefined : '#ffd43b' }}
+          style={{ color: onlyStarred ? undefined : 'var(--star-on)' }}
         >
           ★
         </button>
@@ -527,7 +536,7 @@ export default function App() {
         {upd && UPD_TEXT[upd.phase] && (
           <span
             className="status"
-            style={{ color: upd.phase === 'error' ? '#ff8080' : 'var(--accent)' }}
+            style={{ color: upd.phase === 'error' ? 'var(--err)' : 'var(--accent)' }}
             title={upd.message ?? ''}
           >
             {UPD_TEXT[upd.phase]?.(upd)}
@@ -549,6 +558,17 @@ export default function App() {
           onClick={() => bumpFont(1)}
         >
           A+
+        </button>
+        <button
+          style={{ padding: '3px 9px' }}
+          title={theme === 'light' ? '切到深色' : '切到浅色'}
+          onClick={() => {
+            const next = theme === 'light' ? 'dark' : 'light'
+            setTheme(next)
+            window.api.setConfig({ theme: next })
+          }}
+        >
+          {theme === 'light' ? '☀' : '☾'}
         </button>
         {status?.message && (
           <span className="status" title={status.message}>

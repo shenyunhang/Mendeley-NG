@@ -145,7 +145,7 @@ export default function DocTable({
                   <div style={{ paddingLeft: 6 }}>
                     <span
                       className="star"
-                      style={{ color: d.starred ? '#ffd43b' : '#4d4d4d' }}
+                      style={{ color: d.starred ? 'var(--star-on)' : 'var(--star-off)' }}
                       title={d.starred ? '取消星标' : '加星标'}
                       onClick={(e) => {
                         // without this the click also selects the row, and a

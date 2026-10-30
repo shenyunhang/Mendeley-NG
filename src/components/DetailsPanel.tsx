@@ -384,7 +384,7 @@ export default function DetailsPanel({
           {saving ? '保存中…' : dirty ? '保存到云端' : '无改动'}
         </button>
         {msg && (
-          <span style={{ fontSize: 12, color: msg.startsWith('已') ? 'var(--ok)' : '#ff8080' }}>
+          <span style={{ fontSize: 12, color: msg.startsWith('已') ? 'var(--ok)' : 'var(--err)' }}>
             {msg}
           </span>
         )}

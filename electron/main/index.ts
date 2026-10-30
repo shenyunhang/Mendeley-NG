@@ -303,6 +303,17 @@ async function runSmoke() {
   }
   await shot('smoke')
 
+  // a screenshot of the light palette, set through the DOM rather than the
+  // button so the run does not leave the user's config switched over
+  await w.webContents.executeJavaScript(
+    '(()=>{document.documentElement.dataset.theme="light";return document.documentElement.dataset.theme})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  await shot('smoke-light')
+  await w.webContents.executeJavaScript(
+    '(()=>{delete document.documentElement.dataset.theme;return "reset"})()'
+  )
+
   // click the first row and give pdf.js time to paint, so the run also proves
   // the reader works and that the canvas is backed at device resolution
   const clicked = await w.webContents.executeJavaScript(

@@ -138,6 +138,9 @@ export interface AppConfig {
   /** Base UI font size in CSS px; the OS scale factor is applied on top. */
   fontSize?: number
   savedSearches?: SavedSearch[]
+  /** 'dark' unless the user has switched; drives a data attribute on <html>
+   *  and the whole palette with it. */
+  theme?: 'dark' | 'light'
 }
 
 /** Progress of an auto-update, pushed from main to the renderer. */
