@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  Annotation,
   Doc,
   Folder,
   FtHit,
@@ -31,6 +32,7 @@ import {
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
 import RowMenu, { type RowMenuItem } from './components/RowMenu'
+import NotesView from './components/NotesView'
 import { extractIds } from './lib/pdfmeta'
 import { toBibtex, toEndnoteXml, toRis } from './lib/export'
 import { buildTree } from './lib/tree'
@@ -121,6 +123,10 @@ export default function App() {
   const [jump, setJump] = useState<{ page: number; nonce: number } | null>(null)
   /** The open row menu, positioned where the right click landed. */
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string } | null>(null)
+  /** Every annotation in the store, for the cross-document list.  Loaded when
+   *  the list is opened rather than kept in step: annotations are written by
+   *  the reader, and a copy that goes stale would silently hide new ones. */
+  const [allAnns, setAllAnns] = useState<Annotation[] | null>(null)
   const [undo, setUndo] = useState<UndoEntry[]>([])
   const searchRef = useRef<HTMLInputElement>(null)
   // the keydown listener is installed once, so it has to reach the undo stack
@@ -717,6 +723,26 @@ export default function App() {
     }
   }
 
+  /**
+   * The cross-document annotation list.  It reloads the store every time it
+   * is opened rather than tracking it: the reader writes annotations on its
+   * own, and a cached copy would quietly hide anything marked since.
+   */
+  const openNotes = async () => setAllAnns(await window.api.loadAnnotations())
+
+  const deleteAnnotation = async (id: string) => {
+    const all = await window.api.loadAnnotations()
+    const gone = all.find((a) => a.id === id)
+    const next = all.filter((a) => a.id !== id)
+    await window.api.saveAnnotations(next)
+    setAllAnns(next)
+    // the cloud copy is deleted after the local one is safely written, and a
+    // failure there leaves a stray cloud highlight rather than a lost local one
+    if (gone?.remoteId) {
+      await window.api.deleteRemoteAnnotation(gone.remoteId).catch(() => {})
+    }
+  }
+
   /** Move `list` to the trash.  Shared by the batch bar and the row menu. */
   const trashDocs = async (list: Doc[]) => {
     if (!list.length) return
@@ -953,6 +979,12 @@ export default function App() {
           title="按 DOI / arXiv id / 标题找重复条目"
         >
           查重
+        </button>
+        <button
+          onClick={() => void openNotes()}
+          title="列出全部标注，跨所有文献，点一条直接翻到那一页"
+        >
+          全部标注
         </button>
         <button
           onClick={async () => {
@@ -1209,6 +1241,26 @@ export default function App() {
               setRightTab('pdf')
               setJump({ page: p, nonce: Date.now() })
             }}
+          />
+        ) : allAnns ? (
+          <NotesView
+            anns={allAnns}
+            docs={docs}
+            onClose={() => setAllAnns(null)}
+            onOpen={(d, p) => {
+              setAllAnns(null)
+              setSelId(d.id)
+              setRightTab(d.localPdf ? 'pdf' : 'details')
+              setJump({ page: p, nonce: Date.now() })
+            }}
+            onDelete={(id) => void deleteAnnotation(id)}
+            onCopy={(a, d) =>
+              void window.api.copyText(
+                [a.note || a.text || '', d ? `${d.title ?? ''} · p${a.pos?.[0]?.page ?? a.page}` : '']
+                  .filter(Boolean)
+                  .join('\n')
+              )
+            }
           />
         ) : dupes ? (
           <DupesView

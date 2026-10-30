@@ -615,6 +615,89 @@ td .no-pdf {
   vertical-align: middle;
 }
 
+/* every annotation in the library, grouped by the paper it belongs to */
+.notes-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+}
+.notes-only {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  color: var(--fg-dim);
+}
+.notes-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+  font-size: 0.8rem;
+}
+.notes-group {
+  margin-bottom: 6px;
+}
+.notes-doc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--bg-2);
+  color: var(--fg-dim);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notes-count {
+  flex: 0 0 auto;
+  min-width: 16px;
+  text-align: center;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent-dim);
+  color: var(--fg);
+  font-size: 0.667rem;
+  font-weight: 400;
+}
+.notes-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 14px;
+  cursor: pointer;
+}
+.notes-row:hover {
+  background: var(--bg-3);
+}
+.notes-row .pg {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+}
+.notes-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notes-row .grow {
+  flex: 1;
+}
+.notes-act {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  font-size: 0.667rem;
+}
+
 .ol-row .pg {
   color: var(--fg-dim);
   margin-right: 6px;

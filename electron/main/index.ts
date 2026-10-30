@@ -840,6 +840,66 @@ async function runSmoke() {
       + 'dots:document.querySelectorAll(".ann-dot").length})'
     )
   )
+  // The cross-document annotation list.  It runs here, after a highlight has
+  // been made, so there is something to list; and it only reads, because
+  // deleting one of the user's real annotations is not a smoke run's business.
+  log(
+    'click 全部标注',
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+      + '.find(x=>x.textContent.trim()==="全部标注");if(!b)return "missing";b.click();return "ok"})()'
+    )
+  )
+  await new Promise((r) => setTimeout(r, 700))
+  const notesInfo = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        'JSON.stringify({rows:document.querySelectorAll(".notes-row").length,'
+        + 'groups:document.querySelectorAll(".notes-group").length,'
+        + 'dots:document.querySelectorAll(".notes-row .ann-dot").length,'
+        + 'doc:(document.querySelector(".notes-doc")||{}).textContent||null,'
+        + 'open:document.querySelectorAll(".notes-list").length})'
+      )
+    )
+  const n0 = await notesInfo()
+  log('notes view', n0)
+  expect('the annotation list spans documents', n0.rows > 0 && n0.groups > 0, n0)
+  expect('every listed annotation carries its colour', n0.dots === n0.rows, n0)
+  // filtering has to actually narrow the list, and an empty result has to be
+  // an empty list rather than a crash
+  const firstText = await w.webContents.executeJavaScript(
+    '(()=>{const t=document.querySelector(".notes-text");return t?t.textContent.trim().slice(0,20):""})()'
+  )
+  const setNotesFilter = (v: string) =>
+    w.webContents.executeJavaScript(
+      '(()=>{const i=document.querySelector(".notes-bar input");if(!i)return 0;'
+      + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+      + `set.call(i,${JSON.stringify(v)});i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+    )
+  await setNotesFilter('zzzz-no-such-annotation-zzzz')
+  await new Promise((r) => setTimeout(r, 400))
+  const nNone = await notesInfo()
+  log('notes filtered to nothing', nNone)
+  expect('filtering the annotation list can empty it', nNone.rows === 0, nNone)
+  await setNotesFilter(firstText)
+  await new Promise((r) => setTimeout(r, 400))
+  const nHit = await notesInfo()
+  log('notes filtered to a hit', nHit)
+  expect('filtering the annotation list finds a known annotation', nHit.rows > 0, {
+    firstText,
+    nHit
+  })
+  await setNotesFilter('')
+  await new Promise((r) => setTimeout(r, 400))
+  // clicking one has to leave the list and open that paper at that page
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=document.querySelector(".notes-row");if(!r)return 0;r.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 900))
+  const nAfter = await notesInfo()
+  log('after clicking an annotation', nAfter)
+  expect('clicking an annotation opens its paper', nAfter.open === 0, nAfter)
+
   await w.webContents.executeJavaScript(
     '(async()=>await window.api.saveAnnotations(window.__before))()'
   )
