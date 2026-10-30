@@ -423,6 +423,10 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
   「后台跑 + 推进度 + 可取消」，并发 2–3、失败跳过。
 - **47 的 `type` 只能用白名单**：服务端只接受固定集合（见第 5 节第 12 条），
   复用 `BatchEdit` 那份列表。
+- **Ctrl+滚轮缩放不能用 React 的 `onWheel`**：React 把 `wheel` 注册成 passive
+  listener，`preventDefault()` 会被忽略，结果变成整个窗口缩放而不是页面缩放。
+  必须 `window.addEventListener("wheel", h, { passive: false, capture: true })`。
+  也不能挂在 pane 元素上——文档没加载时 pane 还不在 DOM 里。
 
 ### 9.3 差距可以接受，先不做
 
