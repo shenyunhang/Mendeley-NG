@@ -48,6 +48,8 @@ export default function App() {
   const [importing, setImporting] = useState<Entry[] | null>(null)
   const [adding, setAdding] = useState(false)
   const [onlyStarred, setOnlyStarred] = useState(false)
+  const [multi, setMulti] = useState<string[]>([])
+  const lastIdx = useRef<number | null>(null)
   const [pdfDir, setPdfDir] = useState('')
   const [fontSize, setFontSize] = useState(15)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -196,6 +198,91 @@ export default function App() {
     [filtered, selId]
   )
 
+  /**
+   * Selection follows the file manager the user already knows: shift-click
+   * spans a range, ctrl-click toggles one, a plain click replaces.  The last
+   * clicked index is the anchor for the next range, and it is kept in a ref
+   * because it is not something the table should re-render for.
+   */
+  const onRowSelect = (
+    d: Doc,
+    index: number,
+    mod: { shift: boolean; add: boolean }
+  ) => {
+    if (mod.shift && lastIdx.current != null) {
+      const a = Math.min(lastIdx.current, index)
+      const b = Math.max(lastIdx.current, index)
+      setMulti(filtered.slice(a, b + 1).map((x) => x.id))
+    } else if (mod.add) {
+      setMulti((m) => (m.includes(d.id) ? m.filter((x) => x !== d.id) : [...m, d.id]))
+    } else {
+      setMulti([d.id])
+    }
+    lastIdx.current = index
+    setSelId(d.id)
+    setRightTab(d.localPdf ? 'pdf' : 'details')
+  }
+
+  /** What an export or a batch action applies to: the multi-selection when
+   *  there is one, else the single selected row, else the whole view. */
+  const target = useMemo(() => {
+    if (multi.length > 1) return docs.filter((d) => multi.includes(d.id))
+    if (selected) return [selected]
+    return filtered
+  }, [multi, selected, filtered, docs])
+
+  const [batchMsg, setBatchMsg] = useState<string | null>(null)
+
+  const batchFolder = async (folderId: string) => {
+    const list = multi.length > 1 ? docs.filter((d) => multi.includes(d.id)) : []
+    if (!list.length) return
+    let n = 0
+    for (const d of list) {
+      if ((d.folder_uuids ?? []).includes(folderId)) continue
+      try {
+        await window.api.addToFolder(folderId, d.id)
+        n++
+      } catch {
+        /* one failure should not abandon the rest of the batch */
+      }
+    }
+    setLib((l) =>
+      l
+        ? {
+            ...l,
+            docs: l.docs.map((d) =>
+              multi.includes(d.id) && !(d.folder_uuids ?? []).includes(folderId)
+                ? { ...d, folder_uuids: [...(d.folder_uuids ?? []), folderId] }
+                : d
+            )
+          }
+        : l
+    )
+    setBatchMsg(`已把 ${n} 条加入文件夹`)
+    setTimeout(() => setBatchMsg(null), 2500)
+  }
+
+  const batchTrash = async () => {
+    const list = multi.length > 1 ? docs.filter((d) => multi.includes(d.id)) : []
+    if (!list.length) return
+    if (!confirm(`把选中的 ${list.length} 条移入回收站？可在回收站里恢复。`)) return
+    const gone = new Set(list.map((d) => d.id))
+    let n = 0
+    for (const d of list) {
+      try {
+        await window.api.trashDoc(d.id)
+        n++
+      } catch {
+        /* keep going; the ones that failed stay in the library */
+      }
+    }
+    setLib((l) => (l ? { ...l, docs: l.docs.filter((d) => !gone.has(d.id)) } : l))
+    setMulti([])
+    setSelId(null)
+    setBatchMsg(`已移入回收站 ${n} 条`)
+    setTimeout(() => setBatchMsg(null), 2500)
+  }
+
   /** Starred / read / tags.  These are per-user flags rather than metadata,
    *  so they are patched straight away instead of waiting for a save button. */
   const setFlags = useCallback(async (d: Doc, patch: Partial<Doc>) => {
@@ -204,18 +291,9 @@ export default function App() {
     setLib((l) => (l ? { ...l, docs: l.docs.map((x) => (x.id === d.id ? merged : x)) } : l))
   }, [])
 
-  const exportBib = () => {
-    const list = selected ? [selected] : filtered
-    download(toBibtex(list), 'library.bib')
-  }
-  const exportRis = () => {
-    const list = selected ? [selected] : filtered
-    download(toRis(list), 'library.ris')
-  }
-  const exportEndnote = () => {
-    const list = selected ? [selected] : filtered
-    download(toEndnoteXml(list), 'library.xml')
-  }
+  const exportBib = () => download(toBibtex(target), 'library.bib')
+  const exportRis = () => download(toRis(target), 'library.ris')
+  const exportEndnote = () => download(toEndnoteXml(target), 'library.xml')
 
   const [dropping, setDropping] = useState(false)
   const [importMsg, setImportMsg] = useState<string | null>(null)
@@ -559,6 +637,36 @@ export default function App() {
               改目录
             </button>
           </div>
+          {multi.length > 1 && (
+            <div className="batch-bar">
+              <span>已选 {multi.length} 条</span>
+              <select
+                value=""
+                onChange={(e) => {
+                  const fid = e.target.value
+                  e.currentTarget.value = ''
+                  if (fid) batchFolder(fid)
+                }}
+                title="把选中的文献加入文件夹"
+              >
+                <option value="">＋ 加入文件夹…</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+              <button className="danger" onClick={batchTrash}>
+                移入回收站
+              </button>
+              <button onClick={exportBib}>导出 BibTeX</button>
+              <button onClick={exportRis}>导出 RIS</button>
+              <button onClick={exportEndnote}>导出 EndNote</button>
+              <span style={{ flex: 1 }} />
+              <button onClick={() => setMulti([])}>取消选择</button>
+            </div>
+          )}
+          {batchMsg && <div className="pdf-msg">{batchMsg}</div>}
           <DocTable
             docs={filtered}
             fontSize={fontSize}
@@ -568,14 +676,12 @@ export default function App() {
                 s.key === k ? { key: k, dir: (s.dir * -1) as 1 | -1 } : { key: k, dir: 1 }
               )
             }
+            multi={multi}
             selectedId={selId}
             onToggleStar={(d) => {
               setFlags(d, { starred: !d.starred }).catch((e) => setErr(String(e)))
             }}
-            onSelect={(d) => {
-              setSelId(d.id)
-              setRightTab(d.localPdf ? 'pdf' : 'details')
-            }}
+            onSelect={onRowSelect}
           />
         </div>
         )}

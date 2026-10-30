@@ -11,8 +11,12 @@ interface Props {
   sort: { key: string; dir: 1 | -1 }
   onSort: (k: SortKey) => void
   selectedId: string | null
-  onSelect: (d: Doc) => void
+  /** `index` is the position in the sorted, filtered list, which is what a
+   *  shift-click range has to span. */
+  onSelect: (d: Doc, index: number, mod: { shift: boolean; add: boolean }) => void
   onToggleStar: (d: Doc) => void
+  /** ids of every row in the current multi-selection */
+  multi: string[]
   /** base UI font size; the row height follows it, so the virtualiser has to
    *  re-measure whenever it changes */
   fontSize: number
@@ -35,6 +39,7 @@ export default function DocTable({
   selectedId,
   onSelect,
   onToggleStar,
+  multi,
   fontSize
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
@@ -103,6 +108,7 @@ export default function DocTable({
           <div style={{ height: v.getTotalSize(), position: 'relative' }}>
             {v.getVirtualItems().map((vi) => {
               const d = docs[vi.index]
+              const picked = multi.includes(d.id)
               const au = d.authors?.[0]
               const name = au
                 ? [au.last_name, au.first_name].filter(Boolean).join(' ')
@@ -110,12 +116,16 @@ export default function DocTable({
               return (
                 <div
                   key={d.id}
-                  className={'row' + (selectedId === d.id ? ' sel' : '')}
+                  className={
+                    'row' + (selectedId === d.id ? ' sel' : '') + (picked ? ' multi' : '')
+                  }
                   draggable
                   onDragStart={(e) =>
                     e.dataTransfer.setData('text/doc-id', d.id)
                   }
-                  onClick={() => onSelect(d)}
+                  onClick={(e) =>
+                    onSelect(d, vi.index, { shift: e.shiftKey, add: e.ctrlKey || e.metaKey })
+                  }
                   style={{
                     position: 'absolute',
                     top: 0,

@@ -184,6 +184,30 @@ async function runSmoke() {
     '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
     + '.find(x=>x.textContent.trim()==="★");b.click();return 1})()'
   )
+
+  // shift-click selection, checked without any of the batch actions that
+  // would write to the library
+  log(
+    'shift-click',
+    await w.webContents.executeJavaScript(
+      '(()=>{const rows=[...document.querySelectorAll("div.row")];'
+      + 'if(rows.length<4)return "few rows";rows[0].click();'
+      + 'rows[3].dispatchEvent(new MouseEvent("click",{bubbles:true,shiftKey:true}));'
+      + 'return rows.length})()'
+    )
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  log(
+    'batch bar',
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({bar:(document.querySelector(".batch-bar span")||{}).textContent'
+      + '||null,picked:document.querySelectorAll("div.row.multi").length})'
+    )
+  )
+  await w.webContents.executeJavaScript(
+    '(()=>{const c=[...document.querySelectorAll(".batch-bar button")]'
+    + '.find(b=>b.textContent.trim()==="取消选择");if(c)c.click();return 1})()'
+  )
   const shot = async (name: string) => {
     const p = path.join(app.getPath('temp'), 'mendeley-ng-' + name + '.png')
     const img = await w.webContents.capturePage()

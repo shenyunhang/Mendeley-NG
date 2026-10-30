@@ -310,6 +310,25 @@ td .no-pdf {
   user-select: none;
 }
 
+.row.multi {
+  background: #2b3a4d;
+}
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.batch-bar select {
+  max-width: 220px;
+}
+
 .flag-row {
   display: flex;
   align-items: center;
