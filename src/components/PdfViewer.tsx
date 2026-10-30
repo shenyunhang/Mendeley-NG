@@ -140,6 +140,19 @@ export default function PdfViewer({
   const [outline, setOutline] = useState<OutlineRow[] | null>(null)
   const [side, setSide] = useState<'none' | 'outline' | 'anns'>('none')
   const [continuous, setContinuous] = useState(false)
+  /**
+   * Whether dragging over a page draws a highlight.
+   *
+   * It is off until asked for.  A tool that is always on turns every drag
+   * across a page into a mark on it, so the ordinary act of selecting a
+   * sentence to copy leaves a yellow box behind — and the reader has no way
+   * to know it happened until the page is full of them.
+   *
+   * It is deliberately not remembered, unlike continuous scrolling.  A
+   * reading habit is worth carrying across sessions; a drawing tool is not,
+   * and one left switched on quietly undoes the default this restores.
+   */
+  const [marking, setMarking] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [findQ, setFindQ] = useState('')
   const [findHits, setFindHits] = useState<FindHit[]>([])
@@ -1317,6 +1330,7 @@ export default function PdfViewer({
   }
 
   const onDown = (e: React.MouseEvent) => {
+    if (!marking) return
     const { page: p, box } = pageBox(e)
     dragPage.current = p
     dragStart.current = { x: e.clientX - box.left, y: e.clientY - box.top }
@@ -1339,6 +1353,9 @@ export default function PdfViewer({
     })
   }
   const onUp = async () => {
+    // with highlighting off, a drag is a text selection and nothing more:
+    // picking words to copy must not also mark the page
+    if (!marking) return
     // a real text selection wins: it follows the words rather than a box
     const picked = selectionRects()
     if (picked.rects.length) {
@@ -1575,6 +1592,17 @@ export default function PdfViewer({
           目录
         </button>
         <button
+          className={marking ? 'primary' : ''}
+          title={
+            marking
+              ? '高亮已开启：在页面上拖选即生成高亮。再点一次关掉，拖选就只是选中文字'
+              : '开启后，在页面上拖选即生成高亮。关闭时拖选只是选中文字，可以直接复制'
+          }
+          onClick={() => setMarking((v) => !v)}
+        >
+          高亮
+        </button>
+        <button
           className={side === 'anns' ? 'primary' : ''}
           title="列出本篇全部标注，点一条跳到那一页"
           onClick={() => setSide((v) => (v === 'anns' ? 'none' : 'anns'))}
@@ -1598,7 +1626,9 @@ export default function PdfViewer({
           云同步标注
         </button>
         <span style={{ color: 'var(--fg-dim)', marginLeft: 8 }}>
-          拖框可高亮 · 本页 {pageAnns.length} 条
+          {marking
+            ? `拖选即高亮 · 本页 ${pageAnns.length} 条`
+            : `拖选即选中文字，可以复制 · 本页 ${pageAnns.length} 条标注`}
         </span>
       </div>
 
@@ -1721,6 +1751,7 @@ export default function PdfViewer({
           <div className="pdf-scroll" ref={scrollRef}>
             <div
               ref={wrapRef}
+              className={marking ? 'marking' : undefined}
               style={{ position: 'relative', display: 'inline-block' }}
               onMouseDown={onDown}
               onMouseMove={onMove}
@@ -1751,7 +1782,7 @@ export default function PdfViewer({
               return (
                 <div
                   key={n}
-                  className="pg-wrap"
+                  className={marking ? 'pg-wrap marking' : 'pg-wrap'}
                   data-page={n}
                   style={{ height: h ? h + PGAP : undefined, width: w || undefined }}
                   onMouseDown={onDown}

@@ -1048,6 +1048,15 @@ button.danger:hover:not(:disabled) {
 .tx-layer span.tx::selection {
   background: rgba(90, 170, 255, 0.4);
 }
+
+/* highlighting is opt-in, so being in it has to be visible without reading
+   the toolbar: the pointer over a page stops being a text caret */
+.marking .tx-layer span.tx {
+  cursor: crosshair;
+}
+.marking canvas {
+  cursor: crosshair;
+}
 .dupe-group {
   border-bottom: 1px solid var(--sep);
 }

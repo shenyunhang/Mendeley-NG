@@ -967,17 +967,34 @@ async function runSmoke() {
     + 'box:{w:Math.round(box.width),h:Math.round(box.height)}})})()'
   )
   log('text layer', layerInfo)
-  await w.webContents.executeJavaScript(
-    '(()=>{const el=document.querySelector(".pdf-scroll").firstElementChild;'
-    + 'const b=el.getBoundingClientRect();'
-    + 'el.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,clientX:b.left+5,clientY:b.top+5}));return 1})()'
-  )
+  const addSinceBefore = () =>
+    w.webContents.executeJavaScript(
+      '(async()=>{const a=await window.api.loadAnnotations();const before=window.__before;'
+      + 'const added=a.filter(x=>!before.some(y=>y.id===x.id));'
+      + 'return JSON.stringify({added:added.length,rects:added[0]?added[0].rects:null,'
+      + 'pos:added[0]?added[0].pos:null})})()'
+    )
+  const mouseUpOnPage = () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const el=document.querySelector(".pdf-scroll").firstElementChild;'
+      + 'const b=el.getBoundingClientRect();'
+      + 'el.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,clientX:b.left+5,clientY:b.top+5}));return 1})()'
+    )
+  // Highlighting is opt-in, so the same selection made while it is off has to
+  // leave the page alone: picking words in order to copy them cannot also be
+  // a request to mark the paper.
+  await mouseUpOnPage()
+  await new Promise((r) => setTimeout(r, 1200))
+  const offMade = JSON.parse(await addSinceBefore())
+  log('selection with highlighting off', offMade)
+  expect('a selection made with highlighting off adds nothing', offMade.added === 0, offMade)
+  log('click 高亮', await clickBar('高亮'))
+  await new Promise((r) => setTimeout(r, 250))
+  // the selection is still there — nothing consumed it — so the same mouseup
+  // now has to produce the highlight
+  await mouseUpOnPage()
   await new Promise((r) => setTimeout(r, 1500))
-  const made = await w.webContents.executeJavaScript(
-    '(async()=>{const a=await window.api.loadAnnotations();const before=window.__before;'
-    + 'const added=a.filter(x=>!before.some(y=>y.id===x.id));'
-    + 'return JSON.stringify({added:added.length,rects:added[0]?added[0].rects:null,pos:added[0]?added[0].pos:null})})()'
-  )
+  const made = await addSinceBefore()
   log('selection highlight', 'before', beforeCount, made)
 
   // the annotation sidebar has to list a highlight that was just made, so it
