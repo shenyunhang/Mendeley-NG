@@ -125,6 +125,16 @@ scripts/get-token.mjs       OAuth 授权码流程，产出 token.json
 scripts/check-api.mjs       API 冒烟测试（不启 GUI）
 ```
 
+## 提交即推送（可选）
+
+仓库里带了一个 `post-commit` 钩子，提交完自动推到远端，任务做完不用再记得 `git push`：
+
+```bash
+cp scripts/hooks/post-commit .git/hooks/post-commit && chmod +x .git/hooks/post-commit
+```
+
+`.git/hooks` 不进版本库，所以每次 clone 后要装一次。临时不想推就 `GIT_AUTO_PUSH=0 git commit ...`。
+
 ## 开发用的自检
 
 ```bash

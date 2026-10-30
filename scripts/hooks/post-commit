@@ -1,0 +1,26 @@
+#!/bin/sh
+# Auto-push after every commit, so a finished task never sits only on disk.
+#
+# This is the tracked copy.  .git/hooks is not versioned, so install it once
+# per clone:
+#
+#     cp scripts/hooks/post-commit .git/hooks/post-commit && chmod +x .git/hooks/post-commit
+#
+# Skip a push with GIT_AUTO_PUSH=0 (handy when offline).
+
+[ "${GIT_AUTO_PUSH:-1}" = "0" ] && exit 0
+
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0
+[ "$branch" = "HEAD" ] && exit 0   # detached, nothing sensible to push
+
+# never block on an interactive credential prompt inside a hook
+export GIT_TERMINAL_PROMPT=0
+
+if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+  git push || echo "post-commit: push failed, run 'git push' by hand"
+else
+  git push -u origin "$branch" ||
+    echo "post-commit: push failed, run 'git push -u origin $branch' by hand"
+fi
+
+exit 0
