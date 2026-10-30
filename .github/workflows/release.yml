@@ -38,17 +38,21 @@ jobs:
         shell: bash
         run: ls -la dist/*.exe
 
-      - name: Attach installer to the release
+      # latest.yml is what electron-updater reads to find this release, so it
+      # has to sit next to the installer on the release page
+      - name: Attach installer and update manifest to the release
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.exe --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/*.exe dist/latest.yml --generate-notes
 
       - name: Upload as a build artifact
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         uses: actions/upload-artifact@v4
         with:
           name: Mendeley-NG-Windows
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/latest.yml
           retention-days: 30

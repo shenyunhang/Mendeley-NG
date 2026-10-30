@@ -12,6 +12,7 @@ import {
   saveLibrary
 } from './store'
 import { attachPdfs } from './pdfindex'
+import { initUpdater, type UpdateState } from './updater'
 import type { Annotation, AppConfig, Doc, Folder, SyncStatus } from '../../shared/types'
 
 let win: BrowserWindow | null = null
@@ -328,6 +329,9 @@ ipcMain.handle('pdf:read', async (_e, p: string) => {
     return { ok: false, error: String(e) }
   }
 })
+
+// updater events are pushed to the renderer, which renders them in the toolbar
+initUpdater((s: UpdateState) => win?.webContents.send('updater:state', s))
 
 ipcMain.handle('shell:openExternal', (_e, url: string) => {
   shell.openExternal(url)

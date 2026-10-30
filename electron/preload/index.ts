@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Annotation, AppConfig, Doc, Folder, Library, SyncStatus } from '../../shared/types'
+import type {
+  Annotation,
+  AppConfig,
+  Doc,
+  Folder,
+  Library,
+  SyncStatus,
+  UpdateState
+} from '../../shared/types'
 
 const api = {
   loadLibrary: () => ipcRenderer.invoke('library:load') as Promise<Library | { error: string } | null>,
@@ -29,6 +37,15 @@ const api = {
 
   loadAnnotations: () => ipcRenderer.invoke('annotations:load') as Promise<Annotation[]>,
   saveAnnotations: (list: Annotation[]) => ipcRenderer.invoke('annotations:save', list),
+
+  checkUpdate: () => ipcRenderer.invoke('updater:check') as Promise<{ version?: string | null; unsupported?: boolean; error?: string }>,
+  downloadUpdate: () => ipcRenderer.invoke('updater:download') as Promise<{ ok?: boolean; error?: string }>,
+  installUpdate: () => ipcRenderer.invoke('updater:install') as Promise<{ ok: boolean }>,
+  onUpdateState: (cb: (s: UpdateState) => void) => {
+    const h = (_e: unknown, s: UpdateState) => cb(s)
+    ipcRenderer.on('updater:state', h)
+    return () => ipcRenderer.removeListener('updater:state', h)
+  },
 
   /** PDFs are served over the custom mendeley:// scheme registered in main */
   pdfUrl: (absPath: string) =>

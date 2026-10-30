@@ -1,6 +1,6 @@
 {
   "name": "mendeley-ng",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A high-DPI-native replacement for Mendeley Desktop 1.19.8",
   "main": "out/main/index.js",
   "author": "shenyunhang",
@@ -15,12 +15,10 @@
     "dist": "electron-vite build && electron-builder --win --x64"
   },
   "dependencies": {
-    "@tanstack/react-virtual": "^3.13.12",
-    "pdfjs-dist": "^4.10.38",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "electron-updater": "^6.8.11"
   },
   "devDependencies": {
+    "@tanstack/react-virtual": "^3.13.12",
     "@types/node": "^22.10.5",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
@@ -28,6 +26,9 @@
     "electron": "^33.3.1",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "typescript": "^5.7.3",
     "vite": "^5.4.11"
   },
@@ -45,8 +46,12 @@
     },
     "files": [
       "out/**/*",
-      "package.json",
-      "!node_modules/**"
-    ]
+      "package.json"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "shenyunhang",
+      "repo": "Mendeley-NG"
+    }
   }
 }

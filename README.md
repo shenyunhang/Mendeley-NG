@@ -141,6 +141,12 @@ git tag v0.1.0 && git push origin v0.1.0
 
 公开仓库的标准 runner 免费、不限分钟，产物存储也免费。
 
+**版本号要先改 `package.json` 的 `version` 再打 tag**，两者需一致——安装包文件名和
+`latest.yml` 都取自它，不一致会让客户端的自更新判断错乱。
+
+Release 附件必须同时包含**安装包和 `latest.yml`**：后者是 `electron-updater` 用来
+发现新版本的清单，漏了它客户端点了更新也找不到东西。CI 已经处理，手动发布时别忘。
+
 ### 手动
 
 不想配 CI 的话，本地 `npm run dist`，然后到仓库页 Releases → Create a new release，

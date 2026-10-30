@@ -71,3 +71,11 @@ export interface AppConfig {
   /** Base UI font size in CSS px; the OS scale factor is applied on top. */
   fontSize?: number
 }
+
+/** Progress of an auto-update, pushed from main to the renderer. */
+export interface UpdateState {
+  phase: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error' | 'unsupported'
+  version?: string
+  percent?: number
+  message?: string
+}

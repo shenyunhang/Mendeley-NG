@@ -1,4 +1,12 @@
-import type { Annotation, AppConfig, Doc, Folder, Library, SyncStatus } from '../shared/types'
+import type {
+  Annotation,
+  AppConfig,
+  Doc,
+  Folder,
+  Library,
+  SyncStatus,
+  UpdateState
+} from '../shared/types'
 
 export interface Api {
   loadLibrary: () => Promise<Library | { error: string } | null>
@@ -15,6 +23,10 @@ export interface Api {
   createFolder: (name: string) => Promise<Folder>
   loadAnnotations: () => Promise<Annotation[]>
   saveAnnotations: (list: Annotation[]) => Promise<{ ok: boolean }>
+  checkUpdate: () => Promise<{ version?: string | null; unsupported?: boolean; error?: string }>
+  downloadUpdate: () => Promise<{ ok?: boolean; error?: string }>
+  installUpdate: () => Promise<{ ok: boolean }>
+  onUpdateState: (cb: (s: UpdateState) => void) => () => void
   pdfUrl: (absPath: string) => string
   openExternal: (url: string) => void
 }

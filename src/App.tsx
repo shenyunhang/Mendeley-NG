@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Doc, Folder, Library, SyncStatus } from '../shared/types'
+import type { Doc, Folder, Library, SyncStatus, UpdateState } from '../shared/types'
 import FolderTree from './components/FolderTree'
 import DocTable from './components/DocTable'
 import DetailsPanel from './components/DetailsPanel'
@@ -7,6 +7,18 @@ import PdfViewer from './components/PdfViewer'
 import { toBibtex, toRis } from './lib/export'
 
 type SortKey = 'title' | 'authors' | 'year' | 'source' | 'citation_key'
+
+/** Toolbar wording for each updater phase; null means "say nothing". */
+const UPD_TEXT: Record<UpdateState['phase'], ((s: UpdateState) => string) | null> = {
+  idle: null,
+  checking: () => '检查更新…',
+  available: (s) => `发现新版本 ${s.version}，开始下载`,
+  'not-available': () => '已是最新版本',
+  downloading: (s) => `下载中 ${s.percent ?? 0}%`,
+  downloaded: () => '安装并重启…',
+  error: (s) => `更新失败：${s.message ?? '未知错误'}`,
+  unsupported: (s) => s.message ?? '当前环境不支持更新'
+}
 
 export default function App() {
   const [lib, setLib] = useState<Library | null>(null)
@@ -22,6 +34,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [rightTab, setRightTab] = useState<'pdf' | 'details'>('details')
   const [err, setErr] = useState<string | null>(null)
+  const [upd, setUpd] = useState<UpdateState | null>(null)
   const [pdfDir, setPdfDir] = useState('')
   const [fontSize, setFontSize] = useState(15)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -41,13 +54,25 @@ export default function App() {
       }
     })
     const off = window.api.onSyncStatus(setStatus)
-    return off
+    const offUpd = window.api.onUpdateState(setUpd)
+    return () => {
+      off()
+      offUpd()
+    }
   }, [])
 
   // one knob scales the whole UI, because every size in styles.css is in rem
   useEffect(() => {
     document.documentElement.style.setProperty('--ui-fs', fontSize + 'px')
   }, [fontSize])
+
+  // the point of the feature: no second click. once the installer is on disk we
+  // quit and let it run, and it relaunches the app when it finishes
+  useEffect(() => {
+    if (upd?.phase !== 'downloaded') return
+    const t = setTimeout(() => window.api.installUpdate(), 700)
+    return () => clearTimeout(t)
+  }, [upd?.phase])
 
   const fontRef = useRef(15)
   const bumpFont = useCallback((d: number) => {
@@ -174,6 +199,18 @@ export default function App() {
         >
           导入 token
         </button>
+        <button
+          disabled={!!upd && ['checking', 'downloading', 'downloaded'].includes(upd.phase)}
+          onClick={async () => {
+            // one click does the whole thing: check, download, install, relaunch
+            const r = await window.api.checkUpdate()
+            if (r?.unsupported || r?.error) return
+            await window.api.downloadUpdate()
+          }}
+          title="从 GitHub Releases 拉取最新版本并自动安装重启"
+        >
+          {upd?.phase === 'downloading' ? `下载中 ${upd.percent ?? 0}%` : '检查更新'}
+        </button>
         <input
           ref={searchRef}
           style={{ width: 320 }}
@@ -182,6 +219,15 @@ export default function App() {
           onChange={(e) => setQuery(e.target.value)}
         />
         <span className="grow" />
+        {upd && UPD_TEXT[upd.phase] && (
+          <span
+            className="status"
+            style={{ color: upd.phase === 'error' ? '#ff8080' : 'var(--accent)' }}
+            title={upd.message ?? ''}
+          >
+            {UPD_TEXT[upd.phase]?.(upd)}
+          </span>
+        )}
         <button
           style={{ padding: '3px 9px' }}
           title="缩小界面字号"
