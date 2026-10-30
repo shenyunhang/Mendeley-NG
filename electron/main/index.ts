@@ -181,7 +181,36 @@ async function runSmoke() {
     '(()=>{const c=document.querySelector("canvas");return JSON.stringify({canvases:document.querySelectorAll("canvas").length,bufW:c&&c.width,bufH:c&&c.height,cssW:c&&c.style.width,dpr:devicePixelRatio})})()'
   )
   log('pdf', pdfInfo)
+  log(
+    'right pane',
+    await w.webContents.executeJavaScript(
+      '(()=>{const p=document.querySelector(".pane-right");return JSON.stringify((p?p.innerText:"(no pane)").slice(0,300))})()'
+    )
+  )
   await shot('smoke-pdf')
+
+  // zoom is the one thing a screenshot cannot prove: check that "fit width"
+  // really fills the pane and that "fit page" then fits the height too
+  const measure = () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const sc=document.querySelector(".pdf-scroll"),c=document.querySelector("canvas");'
+      + 'const b=sc.getBoundingClientRect(),r=c.getBoundingClientRect();'
+      + 'const pct=document.querySelector(".pdf-bar span[style*=\'min-width\']");'
+      + 'return JSON.stringify({pane:Math.round(b.width)+"x"+Math.round(b.height),'
+      + 'page:Math.round(r.width)+"x"+Math.round(r.height),zoom:pct?pct.textContent:"?"})})()'
+    )
+  const clickBar = (label: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const b=[...document.querySelectorAll(".pdf-bar button")]`
+      + `.find(x=>x.textContent.trim()==="${label}");if(!b)return "missing";b.click();return "ok"})()`
+    )
+  log('fit-width', await measure())
+  log('click 整页', await clickBar('整页'))
+  await new Promise((r) => setTimeout(r, 1200))
+  log('fit-page', await measure())
+  log('click 适宽', await clickBar('适宽'))
+  await new Promise((r) => setTimeout(r, 1200))
+  log('back to fit-width', await measure())
 
   // The selection layer is what turns a rubber band into a real highlight, so
   // the run makes a synthetic selection and checks that it produces sane

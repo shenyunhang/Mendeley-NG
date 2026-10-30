@@ -109,6 +109,9 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* without this a flex pane is floored at its content's min-content width,
+     so a zoomed-in PDF would widen the reader instead of scrolling it */
+  min-width: 0;
 }
 .pane-left {
   flex: 0 0 240px;
@@ -280,7 +283,8 @@ td .no-pdf {
 .pdf-scroll canvas {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
   margin-bottom: 12px;
-  max-width: 100%;
+  /* no max-width: zooming past the pane width has to scroll, not squash the
+     page, and a clamped canvas keeps its height and so loses its aspect */
 }
 
 .empty {

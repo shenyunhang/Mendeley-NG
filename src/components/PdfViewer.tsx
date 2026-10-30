@@ -31,6 +31,21 @@ interface TextRun {
 const PALETTE = ['#ffe066', '#a9e34b', '#74c0fc', '#ffa8a8', '#d0bfff']
 
 /**
+ * How the zoom is chosen.  `fit-width` and `fit-page` are recomputed from the
+ * viewport, so they survive a window resize; any manual zoom step drops back
+ * to `manual`, because silently snapping back on the next page turn would
+ * fight the user.
+ */
+type ZoomMode = 'manual' | 'fit-width' | 'fit-page'
+
+/** Room for the scroll container's own padding, plus a vertical scroll bar.
+ *  Both are reserved unconditionally: measuring `clientWidth` instead would
+ *  make the fitted scale depend on whether a scroll bar happens to be showing,
+ *  which is exactly the feedback loop that makes a fitted reader jitter. */
+const FIT_PAD = 24
+const SCROLLBAR = 18
+
+/**
  * Mendeley stores annotation positions in raw PDF points, but with a trap:
  * the field called `top_left` holds the point with the *smaller* y, which is
  * the visually *lower* corner, because PDF user space has its origin at the
@@ -82,6 +97,8 @@ export default function PdfViewer({
   const [numPages, setNumPages] = useState(0)
   const [page, setPage] = useState(1)
   const [scale, setScale] = useState(1.3)
+  const [zoomMode, setZoomMode] = useState<ZoomMode>('fit-width')
+  const [tick, setTick] = useState(0)
   const [err, setErr] = useState<string | null>(null)
   const [anns, setAnns] = useState<Annotation[]>([])
   const [drag, setDrag] = useState<Rect | null>(null)
@@ -93,6 +110,9 @@ export default function PdfViewer({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const layerRef = useRef<HTMLDivElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const pending = useRef<ReturnType<pdfjs.PDFPageProxy['render']> | null>(null)
+  const renderId = useRef(0)
   const dragStart = useRef<{ x: number; y: number } | null>(null)
   const sizesRef = useRef(sizes)
   sizesRef.current = sizes
@@ -126,6 +146,7 @@ export default function PdfViewer({
       .catch((e) => !dead && setErr(String(e)))
     return () => {
       dead = true
+      pending.current?.cancel()
     }
   }, [doc.localPdf])
 
@@ -161,6 +182,32 @@ export default function PdfViewer({
     }
   }, [pdf, anns, page, sizeOf])
 
+  // the fitted scale depends on the viewport, which changes with the window,
+  // the font size knob and the pane split; a ResizeObserver is what keeps it
+  // honest without polling
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setTick((t) => t + 1))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [doc.localPdf])
+
+  useEffect(() => {
+    if (zoomMode === 'manual') return
+    const el = scrollRef.current
+    const s = sizes[page]
+    if (!el || !s || !s.w || !s.h) return
+    const box = el.getBoundingClientRect()
+    const availW = box.width - FIT_PAD - SCROLLBAR
+    const availH = box.height - FIT_PAD
+    if (availW <= 0 || availH <= 0) return
+    const byWidth = availW / s.w
+    const next =
+      zoomMode === 'fit-width' ? byWidth : Math.min(byWidth, availH / s.h)
+    setScale(Math.max(0.2, Math.min(6, next)))
+  }, [zoomMode, page, sizes, tick])
+
   const render = useCallback(async () => {
     const canvas = canvasRef.current
     if (!pdf || !canvas) return
@@ -176,7 +223,22 @@ export default function PdfViewer({
     const ctx = canvas.getContext('2d')!
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, viewport.width, viewport.height)
-    await pg.render({ canvasContext: ctx, viewport }).promise
+    // A zoom change or a page turn can start a render while the previous one
+    // is still running, and pdf.js refuses to touch the same canvas twice:
+    // "Cannot use the same canvas during multiple render() operations".  The
+    // stale task has to be cancelled, and its rejection swallowed, or the
+    // pane would show that as a failure every time the window is resized.
+    pending.current?.cancel()
+    const id = ++renderId.current
+    const task = pg.render({ canvasContext: ctx, viewport })
+    pending.current = task
+    try {
+      await task.promise
+    } catch (e) {
+      if ((e as { name?: string })?.name === 'RenderingCancelledException') return
+      throw e
+    }
+    if (id !== renderId.current) return
     await drawTextLayer(pg, viewport)
   }, [pdf, page, scale])
 
@@ -265,7 +327,11 @@ export default function PdfViewer({
   }
 
   useEffect(() => {
-    render().catch((e) => setErr(String(e)))
+    render().catch((e) => {
+      // cancelling is a normal part of switching zoom, not a failure
+      if ((e as { name?: string })?.name === 'RenderingCancelledException') return
+      setErr(String(e))
+    })
   }, [render])
 
   /** Rects to draw for `a` on `page`, in 0..1 with y from the top. */
@@ -500,10 +566,39 @@ export default function PdfViewer({
           →
         </button>
         <span style={{ marginLeft: 8 }} />
-        <button onClick={() => setScale((s) => Math.max(0.5, s - 0.2))}>−</button>
+        <button
+          title="缩小（切到手动缩放）"
+          onClick={() => {
+            setZoomMode('manual')
+            setScale((s) => Math.max(0.2, s - 0.2))
+          }}
+        >
+          −
+        </button>
         <span style={{ minWidth: 46, textAlign: 'center' }}>{Math.round(scale * 100)}%</span>
-        <button onClick={() => setScale((s) => Math.min(4, s + 0.2))}>＋</button>
-        <button onClick={() => setScale(1.3)}>复位</button>
+        <button
+          title="放大（切到手动缩放）"
+          onClick={() => {
+            setZoomMode('manual')
+            setScale((s) => Math.min(6, s + 0.2))
+          }}
+        >
+          ＋
+        </button>
+        <button
+          className={zoomMode === 'fit-width' ? 'primary' : ''}
+          title="缩放到页宽，跟着窗口一起变"
+          onClick={() => setZoomMode('fit-width')}
+        >
+          适宽
+        </button>
+        <button
+          className={zoomMode === 'fit-page' ? 'primary' : ''}
+          title="缩放让整页完整可见"
+          onClick={() => setZoomMode('fit-page')}
+        >
+          整页
+        </button>
         <span style={{ flex: 1 }} />
         <button onClick={syncCloud} disabled={busy}>
           云同步标注
@@ -548,7 +643,7 @@ export default function PdfViewer({
         </div>
       )}
 
-      <div className="pdf-scroll">
+      <div className="pdf-scroll" ref={scrollRef}>
         <div
           ref={wrapRef}
           style={{ position: 'relative', display: 'inline-block' }}
