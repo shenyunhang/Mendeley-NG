@@ -182,6 +182,50 @@ async function runSmoke() {
   )
   log('pdf', pdfInfo)
   await shot('smoke-pdf')
+
+  // The selection layer is what turns a rubber band into a real highlight, so
+  // the run makes a synthetic selection and checks that it produces sane
+  // rectangles.  The annotation file is restored afterwards; leaving a stray
+  // highlight on a real paper would be a nasty side effect of a smoke test.
+  // snapshot at the file level, because the restore below is the only thing
+  // standing between a smoke run and the user's real highlights
+  const annPath = path.join(app.getPath('userData'), 'library', 'annotations.json')
+  const annBackup = fs.existsSync(annPath) ? fs.readFileSync(annPath) : null
+  const beforeCount = await w.webContents.executeJavaScript(
+    '(async()=>{const a=await window.api.loadAnnotations();window.__before=a;return a.length})()'
+  )
+  if (annBackup && beforeCount === 0 && JSON.parse(annBackup.toString() || '[]').length) {
+    log('WARNING: store holds annotations but the renderer saw none')
+  }
+  const layerInfo = await w.webContents.executeJavaScript(
+    '(()=>{const sp=[...document.querySelectorAll(".tx-layer span.tx")];'
+    + 'if(sp.length<10)return JSON.stringify({spans:sp.length});'
+    + 'const a=sp[20],b=sp[26];const r=document.createRange();'
+    + 'r.setStart(a.firstChild||a,0);r.setEnd(b.firstChild||b,Math.min(3,(b.textContent||"").length));'
+    + 'const s=getSelection();s.removeAllRanges();s.addRange(r);'
+    + 'const rr=r.getBoundingClientRect();const box=document.querySelector(".tx-layer").getBoundingClientRect();'
+    + 'return JSON.stringify({spans:sp.length,sel:{w:Math.round(rr.width),h:Math.round(rr.height)},'
+    + 'box:{w:Math.round(box.width),h:Math.round(box.height)}})})()'
+  )
+  log('text layer', layerInfo)
+  await w.webContents.executeJavaScript(
+    '(()=>{const el=document.querySelector(".pdf-scroll").firstElementChild;'
+    + 'const b=el.getBoundingClientRect();'
+    + 'el.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,clientX:b.left+5,clientY:b.top+5}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 1500))
+  const made = await w.webContents.executeJavaScript(
+    '(async()=>{const a=await window.api.loadAnnotations();const before=window.__before;'
+    + 'const added=a.filter(x=>!before.some(y=>y.id===x.id));'
+    + 'const out=JSON.stringify({added:added.length,rects:added[0]?added[0].rects:null,pos:added[0]?added[0].pos:null});'
+    + 'await window.api.saveAnnotations(before);return out})()'
+  )
+  log('selection highlight (restored)', 'before', beforeCount, made)
+  if (annBackup) fs.writeFileSync(annPath, annBackup)
+  const afterCount = await w.webContents.executeJavaScript(
+    '(async()=>(await window.api.loadAnnotations()).length)()'
+  )
+  log('annotations file restored ->', afterCount, 'entries')
   app.exit(0)
 }
 

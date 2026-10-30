@@ -17,6 +17,16 @@ interface Size {
   h: number
 }
 
+/** The subset of a pdf.js text item the selection layer needs.  pdfjs-dist
+ *  does not re-export `TextItem` from its entry point, so it is spelled out
+ *  here rather than casting through `any`. */
+interface TextRun {
+  str: string
+  transform: number[]
+  width: number
+  height: number
+}
+
 /** Highlight colours, roughly the ones Mendeley Desktop offered. */
 const PALETTE = ['#ffe066', '#a9e34b', '#74c0fc', '#ffa8a8', '#d0bfff']
 
@@ -81,6 +91,7 @@ export default function PdfViewer({
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const layerRef = useRef<HTMLDivElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const dragStart = useRef<{ x: number; y: number } | null>(null)
   const sizesRef = useRef(sizes)
@@ -166,7 +177,92 @@ export default function PdfViewer({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, viewport.width, viewport.height)
     await pg.render({ canvasContext: ctx, viewport }).promise
+    await drawTextLayer(pg, viewport)
   }, [pdf, page, scale])
+
+  /**
+   * An invisible layer of one span per text run, laid out to match the glyphs.
+   * Its only job is to make the page selectable, so that a highlight follows
+   * the words instead of a hand-drawn box.  The text is transparent and the
+   * browser's own selection colour is what the user sees.
+   */
+  const drawTextLayer = async (pg: pdfjs.PDFPageProxy, viewport: pdfjs.PageViewport) => {
+    const layer = layerRef.current
+    if (!layer) return
+    layer.innerHTML = ''
+    const tc = await pg.getTextContent()
+    const spans: HTMLElement[] = []
+    const wanted: number[] = []
+    for (const item of tc.items as unknown as TextRun[]) {
+      if (!item.str) continue
+      const tx = pdfjs.Util.transform(viewport.transform, item.transform)
+      const fontHeight = Math.hypot(tx[2], tx[3])
+      if (!fontHeight) continue
+      const span = document.createElement('span')
+      span.className = 'tx'
+      span.textContent = item.str
+      span.style.fontSize = `${fontHeight}px`
+      // pdf.js positions the baseline at tx[5]; the box top is one ascent up
+      span.style.left = `${tx[4]}px`
+      span.style.top = `${tx[5] - fontHeight}px`
+      layer.appendChild(span)
+      spans.push(span)
+      wanted.push(item.width * viewport.scale)
+    }
+    // measure every span before writing any scaleX, otherwise each read
+    // forces a layout and a dense page becomes noticeably sluggish
+    const widths = spans.map((s) => s.getBoundingClientRect().width)
+    spans.forEach((s, i) => {
+      if (widths[i] > 0.5 && wanted[i] > 0.5) {
+        s.style.transform = `scaleX(${wanted[i] / widths[i]})`
+      }
+    })
+  }
+
+  /** Rects covering the current browser selection, in 0..1 page coordinates. */
+  const rectsFromSelection = (): Rect[] => {
+    const layer = layerRef.current
+    const sel = window.getSelection()
+    if (!layer || !sel || sel.isCollapsed || !sel.rangeCount) return []
+    const box = layer.getBoundingClientRect()
+    const spans = Array.from(layer.querySelectorAll('span.tx'))
+    const raw: Rect[] = []
+    for (let r = 0; r < sel.rangeCount; r++) {
+      const range = sel.getRangeAt(r)
+      const rr = range.getBoundingClientRect()
+      for (const sp of spans) {
+        if (!range.intersectsNode(sp)) continue
+        const sr = (sp as HTMLElement).getBoundingClientRect()
+        const x0 = Math.max(sr.left, rr.left)
+        const x1 = Math.min(sr.right, rr.right)
+        const y0 = Math.max(sr.top, rr.top)
+        const y1 = Math.min(sr.bottom, rr.bottom)
+        if (x1 - x0 > 0.5 && y1 - y0 > 0.5) {
+          raw.push({ x: x0 - box.left, y: y0 - box.top, w: x1 - x0, h: y1 - y0 })
+        }
+      }
+    }
+    // a selection is one fragment per text run; stitch the ones on the same
+    // line back into a single rectangle per line
+    const lines: Rect[] = []
+    for (const r of raw.sort((a, b) => a.y - b.y || a.x - b.x)) {
+      const line = lines.find((l) => Math.abs(l.y - r.y) < 3)
+      if (line) {
+        const right = Math.max(line.x + line.w, r.x + r.w)
+        line.x = Math.min(line.x, r.x)
+        line.w = right - line.x
+        line.h = Math.max(line.h, r.h)
+      } else {
+        lines.push({ ...r })
+      }
+    }
+    return lines.map((l) => ({
+      x: l.x / box.width,
+      y: l.y / box.height,
+      w: l.w / box.width,
+      h: l.h / box.height
+    }))
+  }
 
   useEffect(() => {
     render().catch((e) => setErr(String(e)))
@@ -206,7 +302,8 @@ export default function PdfViewer({
     setAnns(next)
   }
 
-  const commitHighlight = async (r: Rect) => {
+  const commitHighlight = async (rects: Rect[]) => {
+    if (!rects.length) return
     const s = await sizeOf(page)
     const a: Annotation = {
       id: `${doc.id}-${page}-${Date.now()}`,
@@ -214,10 +311,10 @@ export default function PdfViewer({
       page,
       type: 'highlight',
       color: '#ffe066',
-      rects: [r],
+      rects,
       // keep the authoritative copy in PDF points so a cloud round trip does
       // not drift when the page is later rendered at another zoom level
-      pos: s ? [rectToPos(r, page, s)] : undefined,
+      pos: s ? rects.map((r) => rectToPos(r, page, s)) : undefined,
       created: new Date().toISOString()
     }
     const all = await window.api.loadAnnotations()
@@ -311,13 +408,16 @@ export default function PdfViewer({
   }
 
   const onDown = (e: React.MouseEvent) => {
-    const box = canvasRef.current!.getBoundingClientRect()
+    const box = wrapRef.current!.getBoundingClientRect()
     dragStart.current = { x: e.clientX - box.left, y: e.clientY - box.top }
     setDrag(null)
   }
   const onMove = (e: React.MouseEvent) => {
     if (!dragStart.current) return
-    const box = canvasRef.current!.getBoundingClientRect()
+    // while the browser is building a text selection, drawing a rubber band
+    // on top of it is just noise
+    if (!(window.getSelection()?.isCollapsed ?? true)) return
+    const box = wrapRef.current!.getBoundingClientRect()
     const x = e.clientX - box.left
     const y = e.clientY - box.top
     setDrag({
@@ -328,8 +428,16 @@ export default function PdfViewer({
     })
   }
   const onUp = async () => {
-    if (drag && drag.w > 0.01 && drag.h > 0.005) await commitHighlight(drag)
-    else setSel(null)
+    // a real text selection wins: it follows the words rather than a box
+    const picked = rectsFromSelection()
+    if (picked.length) {
+      await commitHighlight(picked)
+      window.getSelection()?.removeAllRanges()
+    } else if (drag && drag.w > 0.01 && drag.h > 0.005) {
+      await commitHighlight([drag])
+    } else {
+      setSel(null)
+    }
     dragStart.current = null
     setDrag(null)
   }
@@ -440,15 +548,15 @@ export default function PdfViewer({
         </div>
       )}
 
-      <div className="pdf-scroll" ref={wrapRef}>
-        <div style={{ position: 'relative', display: 'inline-block' }}>
-          <canvas
-            ref={canvasRef}
-            onMouseDown={onDown}
-            onMouseMove={onMove}
-            onMouseUp={onUp}
-            style={{ display: 'block' }}
-          />
+      <div className="pdf-scroll">
+        <div
+          ref={wrapRef}
+          style={{ position: 'relative', display: 'inline-block' }}
+          onMouseDown={onDown}
+          onMouseMove={onMove}
+          onMouseUp={onUp}
+        >
+          <canvas ref={canvasRef} style={{ display: 'block' }} />
           {pageAnns.map((a) =>
             rectsFor(a).map((r, i) => (
               <div
@@ -487,6 +595,8 @@ export default function PdfViewer({
               }}
             />
           )}
+          {/* invisible, selectable, and the reason highlights follow words */}
+          <div className="tx-layer" ref={layerRef} />
         </div>
       </div>
     </div>
