@@ -94,6 +94,16 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 7. **`file_attached` 会撒谎**，所以同步时会额外拉一次 `/files` 交叉核对。
 8. **`GET /metadata`（按 DOI / arXiv / PMID 反查元数据）官方文档自己标着 "Coming soon — Not implemented"**。
    想复刻 1.19.8 的 "Update Details" 别指望它，只能走 Crossref / arXiv / `/catalog` 自己兜底。
+9. **标注坐标是绝对 PDF 点，而 `top_left` 存的是 y 更小的那个点**，也就是视觉上的**左下角**
+   （PDF 用户空间原点在左下）。视觉顶部 = `pageHeight - max(y)`。
+   这个命名极具误导性，是拿三条既有云端高亮反查 pdf.js 文本项才敲定的，
+   并且在 PDF 标题上做过一次 push/pull 往返验证。改这块前务必重读 `PdfViewer.tsx` 顶部注释。
+10. **`POST /annotations` 缺 `filehash` 会被静默降级成普通 note 并丢掉 positions**；
+    `filehash + positions + text` → `sticky_note`；`filehash + positions` 且无 `text` → `highlight`。
+    所以高亮**绝不能带 text**。`filehash` 就是云端文件字节的 SHA-1，实测与 `/files` 返回的一致；
+    但 Mendeley Desktop 下载的本地副本**可能与之不同**，坐标按本地页尺寸换算时要注意。
+11. **`GET /files/{id}` 不是返回字节，而是 303 到 S3 预签名地址**。
+    那个地址自带签名，不要再带 Authorization 头跟着跳。
 
 ## 6. 环境与打包的坑
 
@@ -118,12 +128,12 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 | --- | :-: | :-: | --- |
 | 文献列表 / 详情 / 元数据编辑 | ✅ | ✅ | PATCH 已回写云端 |
 | 文件夹：新建 / 加入 / 移出 | ✅ | ✅ | — |
-| 文件夹：重命名 / 移动 / 删除 / 嵌套 | ✅ | ❌ | API 有 `PATCH` / `DELETE /folders/{id}`、`parent_id` |
+| 文件夹：重命名 / 移动 / 删除 / 嵌套 | ✅ | ✅ | `PATCH` / `DELETE /folders/{id}`、`parent_id` |
 | 云端同步 | ✅ | ⚠️ | 每次全量；缺增量 |
 | PDF 阅读 | ✅ | ✅ | 单页渲染，无连续滚动 |
-| PDF 高亮标注 | ✅ | ⚠️ | 仅本地 JSON；无删除 / 编辑 / 笔记；矩形框而非文本选区 |
-| 标注同步到云端 | ✅ | ❌ | API 有 `/annotations` 全套 |
-| 云端 PDF 下载到本地 | ✅ | ❌ | 只做本地匹配，云端有文件但本地没有的读不了 |
+| PDF 高亮标注 | ✅ | ⚠️ | 可删除 / 改色 / 加笔记；矩形框而非文本选区 |
+| 标注同步到云端 | ✅ | ✅ | 坐标须按 PDF 点换算，见第 6 节 |
+| 云端 PDF 下载到本地 | ✅ | ✅ | `GET /files/{id}` 是 303 到 S3 预签名地址 |
 | 导入文献（拖 PDF / BibTeX / RIS / EndNote） | ✅ | ❌ | API 有 `POST /documents` 与文件上传 |
 | Update Details（补全元数据） | ✅ | ❌ | `/metadata` 未实现，需 Crossref / arXiv 兜底 |
 | 查重与合并 | ✅ | ❌ | 1.19.8 的核心功能之一 |
