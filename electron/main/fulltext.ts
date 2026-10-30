@@ -20,10 +20,23 @@ function workerSrc(): string {
     path.join(app.getAppPath(), 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.worker.mjs')
   ]
   for (const c of candidates) {
+    let found = ''
     try {
-      if (fs.existsSync(c)) return pathToFileURL(c).href
+      if (fs.existsSync(c)) found = c
     } catch {
       /* app.getAppPath throws before the app is ready */
+    }
+    if (!found) continue
+    // In the packaged app the worker sits inside app.asar, and a runtime
+    // import() out of an archive is not something to rely on.  A real file
+    // next to it is, so copy it once into the temp directory.
+    if (!found.includes('.asar')) return pathToFileURL(found).href
+    try {
+      const out = path.join(app.getPath('temp'), 'mendeley-ng-pdf.worker.mjs')
+      fs.copyFileSync(found, out)
+      return pathToFileURL(out).href
+    } catch {
+      return pathToFileURL(found).href
     }
   }
   return ''
