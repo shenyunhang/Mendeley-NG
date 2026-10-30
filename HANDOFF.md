@@ -144,7 +144,10 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
     "Cannot use the same canvas during multiple render() operations"。
     必须 `cancel()` 上一个 RenderTask 并吞掉它的 `RenderingCancelledException`，
     否则每次改窗口大小右侧阅读器都会挂掉。
-23. **`tags` 清空后字段会消失**：PATCH `tags: []` 回来的响应里没有 `tags`
+24. **`window.prompt()` 在 Electron 里会抛异常**：`Error: prompt() is not supported.`
+    但它**存在**（`typeof` 返回 `function`），所以只有用户真的点那个按钮时才炸，
+    静态检查完全看不出来。`window.confirm` 是正常的，可以照用。
+    需要输入的地方一律走应用内弹窗（`src/components/AskDialog.tsx`）。23. **`tags` 清空后字段会消失**：PATCH `tags: []` 回来的响应里没有 `tags`
     （不是空数组）。所以详情面板的标签输入框要用"规范化后再比"判断是否改过，
     否则清空一次就会永远显示成脏的。
 
@@ -261,7 +264,7 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 | 导出 EndNote XML | ✅ | ✅ | ✅ | 只有 BibTeX / RIS |
 | 标签 | ✅ | ⚠️ | ✅ | API `tags` 可读写 |
 | 星级 / 已读 | ❌ | ❌ | ✅ | API `starred` / `read` 可写 |
-| 保存的搜索（智能文件夹） | ✅ | ❌ | ❌ | — |
+| 保存的搜索（智能文件夹） | ✅ | ❌ | ✅ | |
 | 快捷键 / 键盘导航 | ✅ | ⚠️ | ⚠️ | 只有 Ctrl+F 和字号 |
 | 文献级笔记 | ✅ | ✅ | ❌ | **`/notes` 不存在**，只能本地存 |
 | 自定义文件重命名规则 | ✅ | ❌ | ❌ | 现在固定 `作者 - 年份 - 标题` |
@@ -285,7 +288,7 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
     `tags` 可读写、`starred` / `read` 是文献自带字段，都能直接上云。
 25. **文献级笔记**（P2）：**`/notes` 端点不存在**，只能落本地
     （`<userData>/library/notes.json`）并在 UI 里说明不会同步。
-26. **保存的搜索**（P2）：把当前查询条件存成虚拟文件夹。
+26. **保存的搜索**（P2）　✅ 已完成：把当前查询条件存成虚拟文件夹。
 27. **自定义文件重命名**（P3）：模板化重命名已下载的 PDF。
 
 ### 9.3 差距可以接受，先不做

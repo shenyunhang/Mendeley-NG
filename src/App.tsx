@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Doc, Folder, Library, SyncStatus, UpdateState } from '../shared/types'
+import type {
+  Doc,
+  Folder,
+  Library,
+  SavedSearch,
+  SyncStatus,
+  UpdateState
+} from '../shared/types'
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
 import DupesView from './components/DupesView'
 import ImportView from './components/ImportView'
 import AddByIdView from './components/AddByIdView'
+import AskDialog from './components/AskDialog'
 import DocTable from './components/DocTable'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
@@ -26,6 +34,20 @@ const UPD_TEXT: Record<UpdateState['phase'], ((s: UpdateState) => string) | null
   downloaded: () => '安装并重启…',
   error: (s) => `更新失败：${s.message ?? '未知错误'}`,
   unsupported: (s) => s.message ?? '当前环境不支持更新'
+}
+
+/** Everything the search box looks at, in one lower-cased string.  Shared
+ *  with saved searches so a saved filter matches exactly what it saved. */
+function hay(d: Doc): string {
+  return [
+    d.title,
+    d.source,
+    d.citation_key,
+    d.doi,
+    (d.authors ?? []).map((a) => `${a.first_name ?? ''} ${a.last_name ?? ''}`).join(' ')
+  ]
+    .join(' ')
+    .toLowerCase()
 }
 
 export default function App() {
@@ -50,6 +72,13 @@ export default function App() {
   const [onlyStarred, setOnlyStarred] = useState(false)
   const [multi, setMulti] = useState<string[]>([])
   const lastIdx = useRef<number | null>(null)
+  const [saved, setSaved] = useState<SavedSearch[]>([])
+  const [activeSearch, setActiveSearch] = useState<string | null>(null)
+  const [ask, setAsk] = useState<{
+    title: string
+    initial: string
+    onOk: (v: string) => void
+  } | null>(null)
   const [pdfDir, setPdfDir] = useState('')
   const [fontSize, setFontSize] = useState(15)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -63,6 +92,7 @@ export default function App() {
     })
     window.api.getConfig().then((c) => {
       setPdfDir(c.pdfDir)
+      setSaved(c.savedSearches ?? [])
       if (c.fontSize) {
         fontRef.current = c.fontSize
         setFontSize(c.fontSize)
@@ -162,20 +192,7 @@ export default function App() {
       const ids = new Set(tree.subtree.get(folderId) ?? [folderId])
       out = out.filter((d) => (d.folder_uuids ?? []).some((f) => ids.has(f)))
     }
-    if (q) {
-      out = out.filter((d) => {
-        const hay = [
-          d.title,
-          d.source,
-          d.citation_key,
-          d.doi,
-          (d.authors ?? []).map((a) => `${a.first_name ?? ''} ${a.last_name ?? ''}`).join(' ')
-        ]
-          .join(' ')
-          .toLowerCase()
-        return hay.includes(q)
-      })
-    }
+    if (q) out = out.filter((d) => hay(d).includes(q))
     const { key, dir } = sort
     const val = (d: Doc): string | number => {
       if (key === 'authors') {
@@ -200,6 +217,76 @@ export default function App() {
     () => filtered.find((d) => d.id === selId) ?? null,
     [filtered, selId]
   )
+
+  /** Saving a search captures the three things that shape the list: the text,
+   *  the folder and the starred filter.  Sort order is deliberately not part
+   *  of it — it is a view of the same rows, not part of the question. */
+  const saveSearch = () => {
+    const parts = [
+      query.trim() ? `“${query.trim()}”` : '',
+      folderId ? folders.find((f) => f.id === folderId)?.name ?? '' : '',
+      onlyStarred ? '★' : ''
+    ].filter(Boolean)
+    if (!parts.length) return
+    setAsk({
+      title: '给这个搜索起个名字',
+      initial: parts.join(' · '),
+      onOk: (name) => {
+        setAsk(null)
+        if (!name) return
+        addSearch(name)
+      }
+    })
+  }
+
+  const addSearch = (name: string) => {
+    const next: SavedSearch[] = [
+      ...saved,
+      {
+        id: 's' + Date.now().toString(36),
+        name,
+        query: query.trim(),
+        folderId,
+        starred: onlyStarred
+      }
+    ]
+    setSaved(next)
+    setActiveSearch(next[next.length - 1].id)
+    window.api.setConfig({ savedSearches: next })
+  }
+
+  const applySearch = (s: SavedSearch) => {
+    setQuery(s.query)
+    setFolderId(s.folderId)
+    setOnlyStarred(s.starred)
+    setActiveSearch(s.id)
+    setMulti([])
+  }
+
+  const deleteSearch = (id: string) => {
+    const next = saved.filter((s) => s.id !== id)
+    setSaved(next)
+    if (activeSearch === id) setActiveSearch(null)
+    window.api.setConfig({ savedSearches: next })
+  }
+
+  const savedCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const s of saved) {
+      const q = s.query.trim().toLowerCase()
+      const ids = s.folderId ? new Set(tree.subtree.get(s.folderId) ?? [s.folderId]) : null
+      m.set(
+        s.id,
+        docs.filter((d) => {
+          if (s.starred && !d.starred) return false
+          if (ids && !(d.folder_uuids ?? []).some((f) => ids.has(f))) return false
+          if (q && !hay(d).includes(q)) return false
+          return true
+        }).length
+      )
+    }
+    return m
+  }, [saved, docs, tree])
 
   /**
    * Selection follows the file manager the user already knows: shift-click
@@ -415,6 +502,13 @@ export default function App() {
           回收站
         </button>
         <button
+          onClick={saveSearch}
+          disabled={!query.trim() && !folderId && !onlyStarred}
+          title="把当前的文件夹 + 搜索词 + 星标筛选存成一个虚拟文件夹"
+        >
+          保存搜索
+        </button>
+        <button
           className={onlyStarred ? 'primary' : ''}
           onClick={() => setOnlyStarred((v) => !v)}
           title="只看星标"
@@ -467,6 +561,14 @@ export default function App() {
       {err && <div className="err">同步失败：{err}　（可能需要导入 token.json）</div>}
       {importMsg && <div className="pdf-msg">{importMsg}</div>}
       {dropping && <div className="drop-veil">松手即导入 PDF</div>}
+      {ask && (
+        <AskDialog
+          title={ask.title}
+          initial={ask.initial}
+          onOk={ask.onOk}
+          onCancel={() => setAsk(null)}
+        />
+      )}
 
       <div className="body">
         <div className="pane pane-left">
@@ -475,12 +577,18 @@ export default function App() {
             <span className="grow" />
             <button
               style={{ padding: '2px 6px', fontSize: '0.733rem' }}
-              onClick={async () => {
-                const n = prompt('新文件夹名称')
-                if (!n) return
-                const f = await window.api.createFolder(n)
-                setFolders((fs) => [...fs, f])
-              }}
+              onClick={() =>
+                setAsk({
+                  title: '新文件夹名称',
+                  initial: '',
+                  onOk: async (n) => {
+                    setAsk(null)
+                    if (!n) return
+                    const f = await window.api.createFolder(n)
+                    setFolders((fs) => [...fs, f])
+                  }
+                })
+              }
             >
               +
             </button>
@@ -489,8 +597,17 @@ export default function App() {
             folders={folders}
             counts={folderCount}
             total={docs.length}
+            saved={saved}
+            savedCounts={savedCounts}
+            activeSearch={activeSearch}
+            onSelectSearch={applySearch}
+            onDeleteSearch={deleteSearch}
             selected={folderId}
-            onSelect={setFolderId}
+            // picking a folder or "all" leaves the saved search
+            onSelect={(id) => {
+              setFolderId(id)
+              setActiveSearch(null)
+            }}
             onDrop={async (fid, did) => {
               await window.api.addToFolder(fid, did)
               setLib((l) =>

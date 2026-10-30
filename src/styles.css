@@ -303,6 +303,51 @@ td .no-pdf {
   background: var(--bg-3);
 }
 
+.modal-veil {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+  min-width: 320px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+
+.modal-head {
+  font-size: 0.867rem;
+  margin-bottom: 8px;
+  color: var(--fg);
+}
+
+.modal input {
+  width: 100%;
+}
+
+.modal-acts {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.group-head {
+  padding: 5px 8px;
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  user-select: none;
+}
+
 .ann-dot {
   display: inline-block;
   width: 8px;

@@ -121,12 +121,23 @@ export interface SyncStatus {
   message?: string
 }
 
+/** A named filter, Zotero's "saved search".  Mendeley has no equivalent on
+ *  the server, so these live in the local config. */
+export interface SavedSearch {
+  id: string
+  name: string
+  query: string
+  folderId: string | null
+  starred: boolean
+}
+
 /** Local preferences.  Shared so the renderer never has to guess the shape. */
 export interface AppConfig {
   pdfDir: string
   lastSync?: string
   /** Base UI font size in CSS px; the OS scale factor is applied on top. */
   fontSize?: number
+  savedSearches?: SavedSearch[]
 }
 
 /** Progress of an auto-update, pushed from main to the renderer. */

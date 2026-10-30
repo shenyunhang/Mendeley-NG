@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { Folder } from '../../shared/types'
+import type { Folder, SavedSearch } from '../../shared/types'
 import { buildTree, isSelfOrDescendant, type Tree } from '../lib/tree'
 
 interface Props {
@@ -7,6 +7,12 @@ interface Props {
   counts: Map<string, number>
   total: number
   selected: string | null
+  /** named filters, stored locally; Mendeley has no server-side equivalent */
+  saved?: SavedSearch[]
+  savedCounts?: Map<string, number>
+  activeSearch?: string | null
+  onSelectSearch?: (s: SavedSearch) => void
+  onDeleteSearch?: (id: string) => void
   onSelect: (id: string | null) => void
   /** a document dropped onto a folder */
   onDrop?: (folderId: string, docId: string) => void
@@ -21,6 +27,11 @@ export default function FolderTree({
   counts,
   total,
   selected,
+  saved,
+  savedCounts,
+  activeSearch,
+  onSelectSearch,
+  onDeleteSearch,
   onSelect,
   onDrop,
   onRename,
@@ -177,6 +188,35 @@ export default function FolderTree({
             </div>
           )
         })}
+
+        {saved?.length ? (
+          <>
+            <div className="group-head">保存的搜索</div>
+            {saved.map((s) => (
+              <div
+                key={s.id}
+                className={'folder-row' + (activeSearch === s.id ? ' sel' : '')}
+                title={[s.query, s.starred ? '只看星标' : ''].filter(Boolean).join(' · ')}
+                onClick={() => onSelectSearch?.(s)}
+              >
+                <span className="name">🔍 {s.name}</span>
+                <span className="n">{savedCounts?.get(s.id) ?? 0}</span>
+                <span className="acts">
+                  <button
+                    className="mini"
+                    title="删除这个保存的搜索"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onDeleteSearch?.(s.id)
+                    }}
+                  >
+                    ✕
+                  </button>
+                </span>
+              </div>
+            ))}
+          </>
+        ) : null}
 
         {!rows.length && <div className="empty">没有匹配的文件夹</div>}
 

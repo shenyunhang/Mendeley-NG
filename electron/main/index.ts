@@ -204,7 +204,9 @@ async function runSmoke() {
   await w.loadFile(path.join(__dirname, '../renderer/index.html'))
   await new Promise((r) => setTimeout(r, 2500))
   const info = await w.webContents.executeJavaScript(
-    'JSON.stringify({dpr: devicePixelRatio, rows: document.querySelectorAll("table,.row,[data-row]").length, body: document.body.innerText.slice(0,300)})'
+    // typeof, not a call: a real prompt would block the run
+    'JSON.stringify({dpr: devicePixelRatio, rows: document.querySelectorAll("table,.row,[data-row]").length,'
+    + 'prompt: typeof window.prompt, confirm: typeof window.confirm, body: document.body.innerText.slice(0,300)})'
   )
   log('renderer', info)
   if (errs.length) log('renderer errors', errs.slice(0, 10).join(' | '))
@@ -230,6 +232,42 @@ async function runSmoke() {
   await w.webContents.executeJavaScript(
     '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
     + '.find(x=>x.textContent.trim()==="★");b.click();return 1})()'
+  )
+
+  // "save search" used to call window.prompt, which throws in Electron, so
+  // the run opens the dialog and checks it is the in-app one.  It cancels
+  // rather than saving, to keep the config untouched.
+  await w.webContents.executeJavaScript(
+    '(()=>{const i=document.querySelector(".toolbar input[placeholder^=\'搜索\']");'
+    + 'if(!i)return "no search box";'
+    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+    + 'set.call(i,"resnet");'
+    + 'i.dispatchEvent(new Event("input",{bubbles:true}));return "ok"})()'
+  )
+  await new Promise((r) => setTimeout(r, 500))
+  log(
+    'click 保存搜索',
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+      + '.find(x=>x.textContent.trim()==="保存搜索");if(!b)return "missing";'
+      + 'if(b.disabled)return "disabled";b.click();return "ok"})()'
+    )
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  log(
+    'ask dialog',
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({modal:!!document.querySelector(".modal"),'
+      + 'head:(document.querySelector(".modal-head")||{}).textContent||null,'
+      + 'value:(document.querySelector(".modal input")||{}).value||null})'
+    )
+  )
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".modal-acts button")]'
+    + '.find(x=>x.textContent.trim()==="取消");if(b)b.click();'
+    + 'const i=document.querySelector(".toolbar input[placeholder^=\'搜索\']");'
+    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+    + 'set.call(i,"");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()'
   )
 
   // shift-click selection, checked without any of the batch actions that
