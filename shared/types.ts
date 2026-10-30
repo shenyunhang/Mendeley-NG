@@ -153,7 +153,13 @@ export interface AppConfig {
   views?: SavedView[]
   /** Shape of the citation the copy button puts on the clipboard. */
   citeStyle?: string
+  /** How many leading pages of each PDF the full-text index reads.  Raising it
+   *  costs index size; lowering it costs recall.  Changing it drops the index,
+   *  because one built for a different budget describes a different corpus. */
+  ftPages?: number
 }
+
+export const DEFAULT_FT_PAGES = 3
 
 /** How local PDFs are named unless the user says otherwise.  Shared so the
  *  dialog can offer it as the starting point and main can fall back to it. */

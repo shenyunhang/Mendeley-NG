@@ -16,7 +16,14 @@ import {
 } from './store'
 import { attachPdfs, parseName } from './pdfindex'
 import { lookup, resolveIdentifier } from './lookup'
-import { initFullText, ftBuild, ftClear, ftSearch, ftStatus } from './fulltext'
+import {
+  initFullText,
+  ftBuild,
+  ftClear,
+  ftSearch,
+  ftStatus,
+  setFullTextPages
+} from './fulltext'
 import type { FtStatus } from '../../shared/types'
 import { initUpdater, type UpdateState } from './updater'
 import type {
@@ -1114,6 +1121,65 @@ async function runSmoke() {
   )
   await new Promise((r) => setTimeout(r, 300))
 
+  // Settings.  Everything the app remembers used to live in four corners of
+  // the toolbar; this checks that the panel gathers them and that changing the
+  // full-text page budget reaches the config, which is where it has to land for
+  // the index to be rebuilt against it.  The value is put back afterwards.
+  const cfgBefore = await w.webContents.executeJavaScript(
+    '(async()=>{const c=await window.api.getConfig();'
+    + 'return JSON.stringify({ftPages:c.ftPages??null,theme:c.theme??null,fontSize:c.fontSize??null})})()'
+  )
+  log('config before settings', cfgBefore)
+  log(
+    'click 设置',
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+      + '.find(x=>x.textContent.trim()==="设置");if(!b)return "missing";b.click();return "ok"})()'
+    )
+  )
+  await new Promise((r) => setTimeout(r, 500))
+  const setInfo = await w.webContents.executeJavaScript(
+    '(()=>{const m=document.querySelector(".settings");if(!m)return JSON.stringify({open:0});'
+    + 'const inp=[...m.querySelectorAll("input")].find(i=>i.type!=="checkbox");'
+    + 'return JSON.stringify({open:1,secs:[...m.querySelectorAll(".set-sec")].map(s=>s.textContent),'
+    + 'pages:inp?inp.value:null,dir:(m.querySelector(".set-path")||{}).textContent||null,'
+    + 'version:m.textContent.includes("Mendeley NG")})})()'
+  )
+  log('settings', setInfo)
+  const si = JSON.parse(setInfo)
+  expect('the settings panel opens', si.open === 1, si)
+  expect(
+    'it gathers every section in one place',
+    si.secs.includes('外观') && si.secs.includes('文件') && si.secs.includes('全文检索'),
+    si
+  )
+  expect('it shows the version', si.version === true, si)
+  await w.webContents.executeJavaScript(
+    '(()=>{const m=document.querySelector(".settings");'
+    + 'const inp=[...m.querySelectorAll("input")].find(i=>i.type!=="checkbox");if(!inp)return 0;'
+    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+    + 'set.call(inp,"5");inp.dispatchEvent(new Event("input",{bubbles:true}));'
+    // Enter rather than a blur event: React maps onBlur to focusout, and a
+    // synthetic blur would be swallowed
+    + 'inp.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 700))
+  const cfgAfter = await w.webContents.executeJavaScript(
+    '(async()=>{const c=await window.api.getConfig();return JSON.stringify({ftPages:c.ftPages??null})})()'
+  )
+  log('config after changing the page budget', cfgAfter)
+  expect('the page budget reaches the config', /"ftPages":5/.test(cfgAfter), cfgAfter)
+  // put it back the way it was, so the next run starts from the same place
+  await w.webContents.executeJavaScript(
+    `window.api.setConfig({ftPages:${JSON.parse(cfgBefore).ftPages ?? 3}})`
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".settings button")]'
+    + '.find(x=>x.textContent.trim()==="完成");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+
   if (annBackup) fs.writeFileSync(annPath, annBackup)
   const afterCount = await w.webContents.executeJavaScript(
     '(async()=>(await window.api.loadAnnotations()).length)()'
@@ -1177,10 +1243,16 @@ ipcMain.handle('library:sync', async (_e, full: boolean) => {
 
 ipcMain.handle('library:hasToken', () => !!findToken())
 
+ipcMain.handle('app:version', () => app.getVersion())
+
 ipcMain.handle('config:get', () => loadConfig())
 ipcMain.handle('config:set', (_e, c: Partial<AppConfig>) => {
   const cur = loadConfig()
   saveConfig({ ...cur, ...c })
+  // The full-text page budget lives in the index, not just in the config: it
+  // has to take effect the moment it is written, or the index on disk keeps
+  // describing a corpus nobody is asking about any more.
+  if (typeof c.ftPages === 'number') setFullTextPages(c.ftPages)
   return loadConfig()
 })
 
@@ -1607,6 +1679,13 @@ ipcMain.handle('pdf:read', async (_e, p: string) => {
 // MENDELEY_FT_LIMIT caps how many documents one run will read; it exists so
 // the smoke run can exercise indexing without reading every PDF.
 initFullText(process.env.MENDELEY_FT_DIR || dataDir())
+// The page budget has to be in force before anything asks for a status,
+// because a status read with the wrong budget reports an index that was built
+// for a different question.
+{
+  const p = Number(loadConfig().ftPages ?? 0)
+  if (p > 0) setFullTextPages(p)
+}
 const ftDocs = () => {
   const all = loadLibrary()?.docs ?? []
   const n = Number(process.env.MENDELEY_FT_LIMIT || 0)

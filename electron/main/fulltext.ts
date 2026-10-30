@@ -63,7 +63,25 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerSrc()
  * corpus would be larger than the text it describes.
  */
 
-export const FULLTEXT_PAGES = 3
+/**
+ * How many leading pages of each PDF to index.  It used to be a constant,
+ * which quietly decided for the user how big the index gets and how much of
+ * each paper is searchable.  It is a setting now, and changing it drops the
+ * index, because one built with a different budget does not describe the
+ * same thing as the one about to be searched.
+ */
+let pages = 3
+
+export const fullTextPages = () => pages
+
+export function setFullTextPages(n: number): boolean {
+  const next = Math.max(1, Math.min(50, Math.floor(Number(n)) || 3))
+  if (next === pages) return false
+  pages = next
+  meta = null
+  blob = null
+  return true
+}
 
 /** How much context to show either side of a hit. */
 const SNIPPET_BEFORE = 60
@@ -108,14 +126,14 @@ function loadMeta(): Meta {
     const m = JSON.parse(fs.readFileSync(metaFile(), 'utf8')) as Meta
     // an index built with a different page budget does not describe the same
     // thing as the one the user is about to search, so it is discarded
-    if (m?.version === 1 && m.pages === FULLTEXT_PAGES) {
+    if (m?.version === 1 && m.pages === pages) {
       meta = m
       return meta
     }
   } catch {
     /* no index yet */
   }
-  meta = { version: 1, pages: FULLTEXT_PAGES, entries: {} }
+  meta = { version: 1, pages: pages, entries: {} }
   return meta
 }
 
@@ -163,7 +181,7 @@ export function ftStatus(docs: Doc[]): FtStatus {
     total: withPdf.length,
     building,
     done: progress.done,
-    pages: FULLTEXT_PAGES,
+    pages: pages,
     bytes
   }
 }
@@ -215,7 +233,7 @@ export async function ftBuild(
   building = true
   const m = loadMeta()
   if (rebuild) {
-    meta = { version: 1, pages: FULLTEXT_PAGES, entries: {} }
+    meta = { version: 1, pages: pages, entries: {} }
   }
   const fresh = meta!
   const queue = docs.filter((d) => d.localPdf)
@@ -242,7 +260,7 @@ export async function ftBuild(
         progress.done++
         continue
       }
-      const got = await extract(file, FULLTEXT_PAGES)
+      const got = await extract(file, pages)
       if (!got || !got.text.trim()) {
         progress.done++
         continue
@@ -278,7 +296,7 @@ export async function ftBuild(
 }
 
 export function ftClear() {
-  meta = { version: 1, pages: FULLTEXT_PAGES, entries: {} }
+  meta = { version: 1, pages: pages, entries: {} }
   blob = null
   try {
     fs.writeFileSync(dataFile(), '')

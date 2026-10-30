@@ -17,6 +17,7 @@ export interface Api {
   sync: (full?: boolean) => Promise<{ docs: Doc[]; folders: Folder[] } | { error: string }>
   hasToken: () => Promise<boolean>
   onSyncStatus: (cb: (s: SyncStatus) => void) => () => void
+  appVersion: () => Promise<string>
   getConfig: () => Promise<AppConfig>
   setConfig: (c: Partial<AppConfig>) => Promise<AppConfig>
   copyText: (t: string) => Promise<boolean>

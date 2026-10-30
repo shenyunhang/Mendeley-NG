@@ -156,6 +156,50 @@ textarea:focus {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
+.settings {
+  width: 520px;
+  max-height: 84vh;
+  overflow: auto;
+}
+.set-sec {
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 3px;
+  margin: 12px 0 8px;
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 0.8rem;
+}
+.set-key {
+  flex: 0 0 92px;
+  color: var(--fg-dim);
+}
+.set-val {
+  min-width: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* the paths are long and the dialog is fixed-width, so they are clipped to the
+   end, which is the part that distinguishes two directories */
+.set-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.set-note {
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+  margin: 2px 0 2px 100px;
+}
 .batch-edit {
   min-width: 380px;
 }

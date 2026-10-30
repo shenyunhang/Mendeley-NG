@@ -26,6 +26,7 @@ const api = {
     return () => ipcRenderer.removeListener('sync:status', h)
   },
 
+  appVersion: () => ipcRenderer.invoke('app:version') as Promise<string>,
   getConfig: () => ipcRenderer.invoke('config:get') as Promise<AppConfig>,
   setConfig: (c: Partial<AppConfig>) => ipcRenderer.invoke('config:set', c) as Promise<AppConfig>,
   copyText: (t: string) => ipcRenderer.invoke('clipboard:write', t) as Promise<boolean>,

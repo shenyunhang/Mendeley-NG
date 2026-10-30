@@ -11,7 +11,7 @@ import type {
   SyncStatus,
   UpdateState
 } from '../shared/types'
-import { DEFAULT_PDF_TEMPLATE } from '../shared/types'
+import { DEFAULT_FT_PAGES, DEFAULT_PDF_TEMPLATE } from '../shared/types'
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
 import DupesView from './components/DupesView'
@@ -34,6 +34,7 @@ import PdfViewer from './components/PdfViewer'
 import RowMenu, { type RowMenuItem } from './components/RowMenu'
 import NotesView from './components/NotesView'
 import BatchEdit, { type BatchOp } from './components/BatchEdit'
+import Settings from './components/Settings'
 import { extractIds } from './lib/pdfmeta'
 import { toBibtex, toEndnoteXml, toRis } from './lib/export'
 import { buildTree } from './lib/tree'
@@ -129,6 +130,9 @@ export default function App() {
    *  the reader, and a copy that goes stale would silently hide new ones. */
   const [allAnns, setAllAnns] = useState<Annotation[] | null>(null)
   const [batchEdit, setBatchEdit] = useState(false)
+  const [settings, setSettings] = useState(false)
+  const [version, setVersion] = useState('')
+  const [ftPages, setFtPages] = useState(DEFAULT_FT_PAGES)
   const [undo, setUndo] = useState<UndoEntry[]>([])
   const searchRef = useRef<HTMLInputElement>(null)
   // the keydown listener is installed once, so it has to reach the undo stack
@@ -150,6 +154,7 @@ export default function App() {
         setFolders(r.folders ?? [])
       }
     })
+    window.api.appVersion().then(setVersion).catch(() => {})
     window.api.getConfig().then((c) => {
       setPdfDir(c.pdfDir)
       setSaved(c.savedSearches ?? [])
@@ -157,6 +162,7 @@ export default function App() {
       setCols(normaliseCols(c.cols))
       if (c.pdfNameTemplate) setNameTemplate(c.pdfNameTemplate)
       if (isCiteStyle(c.citeStyle)) setCiteStyle(c.citeStyle)
+      if (typeof c.ftPages === 'number' && c.ftPages > 0) setFtPages(c.ftPages)
       setTheme(c.theme === 'light' ? 'light' : 'dark')
       if (c.fontSize) {
         fontRef.current = c.fontSize
@@ -604,6 +610,25 @@ export default function App() {
    * downloads until the user says to rename what is already on disk, and
    * renaming is shown as a preview first because it moves real files.
    */
+  /** Pick where PDFs live.  Changing it resyncs, because the whole point of
+   *  the directory is which of the documents have a file on disk. */
+  const pickDir = async () => {
+    const p = await window.api.pickPdfDir()
+    if (!p) return
+    setPdfDir(p)
+    await doSync()
+  }
+
+  /** The full-text page budget.  Written straight away: dropping the index is
+   *  the point, and a setting that only takes effect after a restart reads as
+   *  a setting that did nothing. */
+  const changeFtPages = async (n: number) => {
+    const next = Math.max(1, Math.min(50, Math.floor(n) || DEFAULT_FT_PAGES))
+    setFtPages(next)
+    await window.api.setConfig({ ftPages: next })
+    setFtStat(await window.api.ftStatus())
+  }
+
   const askNameTemplate = () => {
     setAsk({
       title: 'PDF 文件名模板（可用 {title} {year} {authors} {journal} {key} {type} {doi}）',
@@ -1060,6 +1085,9 @@ export default function App() {
         >
           全部标注
         </button>
+        <button onClick={() => setSettings(true)} title="主题、字号、PDF 目录、命名模板、全文索引">
+          设置
+        </button>
         <button
           onClick={async () => {
             const list = await window.api.listTrash()
@@ -1428,13 +1456,7 @@ export default function App() {
             </span>
             <button
               style={{ padding: '2px 6px', fontSize: '0.733rem' }}
-              onClick={async () => {
-                const p = await window.api.pickPdfDir()
-                if (p) {
-                  setPdfDir(p)
-                  await doSync()
-                }
-              }}
+              onClick={() => void pickDir()}
             >
               改目录
             </button>
@@ -1581,6 +1603,35 @@ export default function App() {
           )}
         </div>
       </div>
+      {settings && (
+        <Settings
+          theme={theme}
+          fontSize={fontSize}
+          pdfDir={pdfDir}
+          nameTemplate={nameTemplate}
+          citeStyle={citeStyle}
+          ft={ftStat}
+          ftPages={ftPages}
+          version={version}
+          onClose={() => setSettings(false)}
+          onTheme={(t) => {
+            setTheme(t)
+            void window.api.setConfig({ theme: t })
+          }}
+          onFont={(n) => bumpFont(n - fontSize)}
+          onPickPdfDir={() => void pickDir()}
+          onNameTemplate={() => {
+            setSettings(false)
+            askNameTemplate()
+          }}
+          onCiteStyle={(s) => {
+            if (!isCiteStyle(s)) return
+            setCiteStyle(s)
+            void window.api.setConfig({ citeStyle: s })
+          }}
+          onFtPages={(n) => void changeFtPages(n)}
+        />
+      )}
       {batchEdit && (
         <BatchEdit
           count={multi.length}
