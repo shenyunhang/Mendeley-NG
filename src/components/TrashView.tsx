@@ -5,6 +5,7 @@ interface Props {
   docs: Doc[]
   onClose: () => void
   onRestore: (id: string) => void
+  onPurge?: (id: string) => void
 }
 
 /**
@@ -12,7 +13,7 @@ interface Props {
  * reinstate its folder memberships — Mendeley drops those on trash, and saying
  * so beats letting the user wonder where their folders went.
  */
-export default function TrashView({ docs, onClose, onRestore }: Props) {
+export default function TrashView({ docs, onClose, onRestore, onPurge }: Props) {
   const [q, setQ] = useState('')
 
   const rows = useMemo(() => {
@@ -60,6 +61,19 @@ export default function TrashView({ docs, onClose, onRestore }: Props) {
             >
               恢复
             </button>
+            {onPurge && (
+              <button
+                className="danger"
+                style={{ padding: '2px 8px', fontSize: '0.733rem' }}
+                title="不可恢复，云端记录也会一并删除"
+                onClick={() => {
+                  if (confirm(`彻底删除「${d.title || '无标题'}」？此操作不可恢复。`))
+                    onPurge(d.id)
+                }}
+              >
+                彻底删除
+              </button>
+            )}
           </div>
         ))}
         {!rows.length && <div className="empty">回收站是空的</div>}

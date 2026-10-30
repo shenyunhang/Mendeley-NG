@@ -22,6 +22,7 @@ export interface Api {
   trashDoc: (id: string) => Promise<{ ok: boolean }>
   listTrash: () => Promise<Doc[]>
   restoreDoc: (id: string) => Promise<Doc>
+  purgeDoc: (id: string) => Promise<{ ok: boolean }>
   addToFolder: (folderId: string, docId: string) => Promise<{ ok: boolean }>
   removeFromFolder: (folderId: string, docId: string) => Promise<{ ok: boolean }>
   createFolder: (name: string) => Promise<Folder>
@@ -40,6 +41,11 @@ export interface Api {
   deleteRemoteAnnotation: (id: string) => Promise<{ ok: boolean }>
   fileHash: (docId: string) => Promise<string | null>
   saveAnnotations: (list: Annotation[]) => Promise<{ ok: boolean }>
+  importPdf: (
+    name: string,
+    bytes: ArrayBuffer,
+    ids: { doi?: string; arxiv?: string }
+  ) => Promise<Doc>
   downloadPdf: (docId: string) => Promise<{
     ok: boolean
     path?: string

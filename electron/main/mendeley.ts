@@ -225,6 +225,38 @@ export class Mendeley {
     return Buffer.from(await res.arrayBuffer())
   }
 
+  /**
+   * Create a document straight from a file.  This is not JSON: the PDF goes
+   * in as the raw body with two headers, and the server creates the record
+   * *and* attaches the file in one request.  It only ever takes the title
+   * from the file name, so anything else has to be patched afterwards.
+   */
+  async createDocumentFromFile(fileName: string, data: Buffer): Promise<Doc> {
+    if ((this.tok._expires_at ?? 0) < Date.now() / 1000) await this.refresh()
+    const headers: Record<string, string> = {
+      Authorization: 'Bearer ' + this.tok.access_token,
+      'User-Agent': UA,
+      Accept: '*/*',
+      'Content-Type': 'application/pdf',
+      // the server parses the file name out of this header
+      'Content-Disposition': `attachment; filename="${fileName.replace(/["\r\n]/g, '')}"`
+    }
+    let res = await fetch(`${BASE}/documents`, {
+      method: 'POST',
+      headers,
+      body: data
+    })
+    if (res.status === 401) {
+      await this.refresh()
+      headers.Authorization = 'Bearer ' + this.tok.access_token
+      res = await fetch(`${BASE}/documents`, { method: 'POST', headers, body: data })
+    }
+    if (!res.ok) {
+      throw new Error(`create from file -> ${res.status} ${(await res.text()).slice(0, 200)}`)
+    }
+    return (await res.json()) as Doc
+  }
+
   async patchDocument(id: string, body: Record<string, unknown>): Promise<Doc> {
     return this.request<Doc>('PATCH', '/documents/' + id, {
       body,
@@ -316,6 +348,12 @@ export class Mendeley {
   }
 
   /** Restore from trash.  Undocumented but stable, and the web client uses it. */
+  /** Permanent delete.  DELETE /documents/{id} 404s for a trashed document;
+   *  /trash/{id} is the only thing that actually removes it. */
+  async purgeDocument(id: string): Promise<void> {
+    await this.request('DELETE', '/trash/' + id)
+  }
+
   async restoreDocument(id: string): Promise<Doc> {
     return this.request<Doc>('POST', `/trash/${id}/restore`)
   }

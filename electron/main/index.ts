@@ -11,7 +11,7 @@ import {
   saveConfig,
   saveLibrary
 } from './store'
-import { attachPdfs } from './pdfindex'
+import { attachPdfs, parseName } from './pdfindex'
 import { initUpdater, type UpdateState } from './updater'
 import type {
   Annotation,
@@ -302,6 +302,12 @@ ipcMain.handle('trash:restore', async (_e, id: string) => {
   return c.restoreDocument(id)
 })
 
+ipcMain.handle('trash:purge', async (_e, id: string) => {
+  const c = ensureClient()
+  await c.purgeDocument(id)
+  return { ok: true }
+})
+
 ipcMain.handle(
   'folder:add',
   async (_e, folderId: string, docId: string) => {
@@ -431,6 +437,62 @@ function pdfNameFor(doc: Doc | undefined, fallback?: string): string {
   const base = safe(parts || safe(fallback || 'download') || 'download')
   return (base.slice(0, 150) || 'download') + '.pdf'
 }
+
+ipcMain.handle(
+  'doc:importPdf',
+  async (_e, name: string, bytes: ArrayBuffer, ids: { doi?: string; arxiv?: string }) => {
+    const c = ensureClient()
+    const buf = Buffer.from(bytes)
+    const created = await c.createDocumentFromFile(name, buf)
+    // The server reads metadata out of the PDF itself — title, authors, year
+    // and identifiers all come back filled in for a real paper, and that is
+    // far better than anything the file name can tell us.  Only fall back to
+    // the "author - year - title.pdf" shape when extraction found nothing,
+    // otherwise the patch would overwrite a correct title with a worse one.
+    const base = name.replace(/\.pdf$/i, '')
+    const p = parseName(name)
+    const patch: Record<string, unknown> = {}
+    if (!created.title || created.title === base) {
+      if (p.title && p.title !== base) patch.title = p.title
+      if (p.year) patch.year = p.year
+    }
+    // doi/arxiv are ignored at the top level; they live under identifiers
+    const ident: Record<string, string> = { ...(created.identifiers ?? {}) }
+    if (ids?.doi && !ident.doi) ident.doi = ids.doi
+    if (ids?.arxiv && !ident.arxiv) ident.arxiv = ids.arxiv
+    if (
+      ident.doi !== created.identifiers?.doi ||
+      ident.arxiv !== created.identifiers?.arxiv
+    ) {
+      patch.identifiers = ident
+    }
+    let doc = created
+    if (Object.keys(patch).length) {
+      try {
+        doc = await c.patchDocument(created.id, patch)
+      } catch {
+        /* a bad guess is not worth failing the import over */
+      }
+    }
+    // keep a local copy next to the rest of the library so it opens without
+    // another round trip to the cloud
+    const cfg = loadConfig()
+    const dir = cfg.pdfDir || DEFAULT_PDF_DIR
+    fs.mkdirSync(dir, { recursive: true })
+    const dest = path.join(dir, pdfNameFor(doc, name))
+    if (buf.length) fs.writeFileSync(dest, buf)
+    doc.localPdf = dest
+    doc.file_attached = true
+    const lib = loadLibrary()
+    if (lib) {
+      saveLibrary(
+        lib.docs.some((d) => d.id === doc.id) ? lib.docs : [...lib.docs, doc],
+        lib.folders
+      )
+    }
+    return doc
+  }
+)
 
 ipcMain.handle('pdf:download', async (_e, docId: string) => {
   try {

@@ -15,6 +15,15 @@ export interface Doc {
   source?: string
   doi?: string
   arxiv?: string
+  /** Where Mendeley actually keeps doi / arxiv / pmid; PATCHing them at the
+   *  top level is accepted with a 200 and then silently dropped. */
+  identifiers?: {
+    doi?: string
+    arxiv?: string
+    pmid?: string
+    isbn?: string
+    issn?: string
+  }
   citation_key?: string
   file_attached?: boolean
   folder_uuids?: string[]

@@ -33,6 +33,7 @@ const api = {
   trashDoc: (id: string) => ipcRenderer.invoke('doc:trash', id) as Promise<{ ok: boolean }>,
   listTrash: () => ipcRenderer.invoke('trash:list') as Promise<Doc[]>,
   restoreDoc: (id: string) => ipcRenderer.invoke('trash:restore', id) as Promise<Doc>,
+  purgeDoc: (id: string) => ipcRenderer.invoke('trash:purge', id) as Promise<{ ok: boolean }>,
   addToFolder: (folderId: string, docId: string) =>
     ipcRenderer.invoke('folder:add', folderId, docId) as Promise<{ ok: boolean }>,
   removeFromFolder: (folderId: string, docId: string) =>
@@ -57,6 +58,11 @@ const api = {
   fileHash: (docId: string) =>
     ipcRenderer.invoke('annotations:fileHash', docId) as Promise<string | null>,
   saveAnnotations: (list: Annotation[]) => ipcRenderer.invoke('annotations:save', list),
+  importPdf: (
+    name: string,
+    bytes: ArrayBuffer,
+    ids: { doi?: string; arxiv?: string }
+  ) => ipcRenderer.invoke('doc:importPdf', name, bytes, ids) as Promise<Doc>,
   downloadPdf: (docId: string) =>
     ipcRenderer.invoke('pdf:download', docId) as Promise<{
       ok: boolean

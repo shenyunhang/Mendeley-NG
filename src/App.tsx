@@ -5,6 +5,7 @@ import TrashView from './components/TrashView'
 import DocTable from './components/DocTable'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
+import { extractIds } from './lib/pdfmeta'
 import { toBibtex, toRis } from './lib/export'
 import { buildTree } from './lib/tree'
 
@@ -193,8 +194,44 @@ export default function App() {
     download(toRis(list), 'library.ris')
   }
 
+  const [dropping, setDropping] = useState(false)
+  const [importMsg, setImportMsg] = useState<string | null>(null)
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setDropping(false)
+    const files = Array.from(e.dataTransfer.files).filter((f) =>
+      f.name.toLowerCase().endsWith('.pdf')
+    )
+    if (!files.length) return
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i]
+      setImportMsg(`导入 ${i + 1}/${files.length}：${f.name}`)
+      try {
+        const ids = await extractIds(await f.arrayBuffer())
+        const doc = await window.api.importPdf(f.name, await f.arrayBuffer(), ids)
+        setLib((l) => (l ? { ...l, docs: [...l.docs, doc] } : l))
+      } catch (err) {
+        setErr(String(err))
+      }
+    }
+    setImportMsg(files.length > 1 ? `已导入 ${files.length} 篇` : '导入完成')
+    setTimeout(() => setImportMsg(null), 2500)
+  }
+
   return (
-    <div className="app">
+    <div
+      className={'app' + (dropping ? ' dropping' : '')}
+      onDragOver={(e) => {
+        e.preventDefault()
+        setDropping(true)
+      }}
+      onDragLeave={(e) => {
+        // ignore the bubbling leave events fired when crossing child nodes
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false)
+      }}
+      onDrop={onDrop}
+    >
       <div className="toolbar">
         <button className="primary" onClick={doSync} disabled={busy}>
           {busy ? '同步中…' : '同步云端'}
@@ -282,6 +319,8 @@ export default function App() {
       </div>
 
       {err && <div className="err">同步失败：{err}　（可能需要导入 token.json）</div>}
+      {importMsg && <div className="pdf-msg">{importMsg}</div>}
+      {dropping && <div className="drop-veil">松手即导入 PDF</div>}
 
       <div className="body">
         <div className="pane pane-left">
@@ -353,6 +392,10 @@ export default function App() {
             onClose={() => setTrash(null)}
             onRestore={async (id) => {
               await window.api.restoreDoc(id)
+              setTrash((t) => (t ? t.filter((d) => d.id !== id) : t))
+            }}
+            onPurge={async (id) => {
+              await window.api.purgeDoc(id)
               setTrash((t) => (t ? t.filter((d) => d.id !== id) : t))
             }}
           />
