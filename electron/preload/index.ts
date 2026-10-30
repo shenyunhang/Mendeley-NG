@@ -57,6 +57,13 @@ const api = {
   fileHash: (docId: string) =>
     ipcRenderer.invoke('annotations:fileHash', docId) as Promise<string | null>,
   saveAnnotations: (list: Annotation[]) => ipcRenderer.invoke('annotations:save', list),
+  downloadPdf: (docId: string) =>
+    ipcRenderer.invoke('pdf:download', docId) as Promise<{
+      ok: boolean
+      path?: string
+      size?: number
+      error?: string
+    }>,
 
   checkUpdate: () =>
     ipcRenderer.invoke('updater:check') as Promise<{

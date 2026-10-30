@@ -455,7 +455,14 @@ export default function App() {
               }}
             />
           ) : (
-            <PdfViewer doc={selected} />
+            <PdfViewer
+              doc={selected}
+              onLocalPdf={(id, p) =>
+                setLib((l) =>
+                  l ? { ...l, docs: l.docs.map((x) => (x.id === id ? { ...x, localPdf: p } : x)) } : l
+                )
+              }
+            />
           )}
         </div>
       </div>

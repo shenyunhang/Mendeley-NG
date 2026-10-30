@@ -40,6 +40,12 @@ export interface Api {
   deleteRemoteAnnotation: (id: string) => Promise<{ ok: boolean }>
   fileHash: (docId: string) => Promise<string | null>
   saveAnnotations: (list: Annotation[]) => Promise<{ ok: boolean }>
+  downloadPdf: (docId: string) => Promise<{
+    ok: boolean
+    path?: string
+    size?: number
+    error?: string
+  }>
   checkUpdate: () => Promise<{
     version?: string | null
     available?: boolean

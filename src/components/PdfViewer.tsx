@@ -61,7 +61,13 @@ const rectToPos = (r: Rect, page: number, s: Size): PdfPos => ({
   h: r.h * s.h
 })
 
-export default function PdfViewer({ doc }: { doc: Doc }) {
+export default function PdfViewer({
+  doc,
+  onLocalPdf
+}: {
+  doc: Doc
+  onLocalPdf?: (docId: string, p: string) => void
+}) {
   const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null)
   const [numPages, setNumPages] = useState(0)
   const [page, setPage] = useState(1)
@@ -333,8 +339,32 @@ export default function PdfViewer({ doc }: { doc: Doc }) {
     a.pos ? a.pos.some((p) => p.page === page) : a.page === page
   )
 
+  const download = async () => {
+    if (busy) return
+    setBusy(true)
+    setMsg('正在从云端下载…')
+    const r = await window.api.downloadPdf(doc.id)
+    setBusy(false)
+    if (r.ok && r.path) {
+      setMsg(`已保存到 ${r.path}`)
+      onLocalPdf?.(doc.id, r.path)
+    } else {
+      setMsg('下载失败：' + (r.error ?? '未知错误'))
+    }
+  }
+
   if (!doc.localPdf) {
-    return <div className="empty">这篇没有本地 PDF（云端标记：{doc.file_attached ? '有文件' : '无文件'}）</div>
+    return (
+      <div className="empty">
+        <div>这篇没有本地 PDF（云端标记：{doc.file_attached ? '有文件' : '无文件'}）</div>
+        {doc.file_attached && (
+          <button style={{ marginTop: 10 }} onClick={download} disabled={busy}>
+            {busy ? '下载中…' : '从云端下载 PDF'}
+          </button>
+        )}
+        {msg && <div className="pdf-msg">{msg}</div>}
+      </div>
+    )
   }
   if (err) return <div className="err">PDF 打开失败：{err}</div>
 

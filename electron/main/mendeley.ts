@@ -17,6 +17,16 @@ const CT_DOC = 'application/vnd.mendeley-document.1+json'
 const CT_FOLDER = 'application/vnd.mendeley-folder.1+json'
 const CT_ANNOTATION = 'application/vnd.mendeley-annotation.1+json'
 
+/** What GET /files tells us about an attachment. */
+export interface FileMeta {
+  id: string
+  document_id?: string
+  file_name?: string
+  mime_type?: string
+  size?: number
+  filehash?: string
+}
+
 interface Token {
   access_token: string
   refresh_token?: string
@@ -174,6 +184,45 @@ export class Mendeley {
       if (!params.marker) break
     }
     return ids
+  }
+
+  /** Metadata of the file attached to a document, or null when there is none. */
+  async fileMeta(documentId: string): Promise<FileMeta | null> {
+    const r = await this.request<FileMeta[]>('GET', '/files', {
+      params: { document_id: documentId, limit: '1' }
+    })
+    return r?.[0] ?? null
+  }
+
+  /**
+   * GET /files/{id} answers 303 to a presigned S3 URL rather than returning
+   * the bytes, so it cannot go through `request`, which would try to parse
+   * the PDF as JSON.
+   */
+  async downloadFile(fileId: string): Promise<Buffer> {
+    if ((this.tok._expires_at ?? 0) < Date.now() / 1000) await this.refresh()
+    const headers: Record<string, string> = {
+      Authorization: 'Bearer ' + this.tok.access_token,
+      'User-Agent': UA,
+      Accept: '*/*'
+    }
+    let res = await fetch(`${BASE}/files/${fileId}`, {
+      headers,
+      redirect: 'manual'
+    })
+    if (res.status === 401) {
+      await this.refresh()
+      headers.Authorization = 'Bearer ' + this.tok.access_token
+      res = await fetch(`${BASE}/files/${fileId}`, { headers, redirect: 'manual' })
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location')
+      if (!loc) throw new Error(`download ${fileId}: ${res.status} without location`)
+      // the signed URL is self-contained, so no auth header goes with it
+      res = await fetch(loc, { headers: { 'User-Agent': UA } })
+    }
+    if (!res.ok) throw new Error(`download ${fileId} -> ${res.status}`)
+    return Buffer.from(await res.arrayBuffer())
   }
 
   async patchDocument(id: string, body: Record<string, unknown>): Promise<Doc> {

@@ -409,6 +409,55 @@ ipcMain.handle('annotations:save', (_e, list: Annotation[]) => {
   return { ok: true }
 })
 
+/** Name a downloaded PDF the way Mendeley Desktop would, so that the title
+ *  matcher in pdfindex.ts picks it up again on the next scan instead of
+ *  leaving it as an orphan file. */
+function pdfNameFor(doc: Doc | undefined, fallback?: string): string {
+  const safe = (s: string) =>
+    (s || '')
+      .replace(/[\\/:*?"<>|\r\n\t]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  const author = (() => {
+    const a = doc?.authors?.[0]
+    if (!a) return ''
+    const first = a.last_name || a.first_name || ''
+    if (!first) return ''
+    return doc!.authors!.length > 1 ? `${first} et al.` : first
+  })()
+  const parts = [author, doc?.year ? String(doc.year) : '', safe(doc?.title ?? '')]
+    .filter(Boolean)
+    .join(' - ')
+  const base = safe(parts || safe(fallback || 'download') || 'download')
+  return (base.slice(0, 150) || 'download') + '.pdf'
+}
+
+ipcMain.handle('pdf:download', async (_e, docId: string) => {
+  try {
+    const c = ensureClient()
+    const meta = await c.fileMeta(docId)
+    if (!meta) return { ok: false, error: '云端没有这篇的附件' }
+    const buf = await c.downloadFile(meta.id)
+    const cfg = loadConfig()
+    const dir = cfg.pdfDir || DEFAULT_PDF_DIR
+    fs.mkdirSync(dir, { recursive: true })
+    const lib = loadLibrary()
+    const doc = lib?.docs.find((d) => d.id === docId)
+    let dest = path.join(dir, pdfNameFor(doc, meta.file_name))
+    for (let n = 2; fs.existsSync(dest) && n < 50; n++) {
+      dest = path.join(dir, pdfNameFor(doc, meta.file_name).replace(/\.pdf$/, ` (${n}).pdf`))
+    }
+    fs.writeFileSync(dest, buf)
+    if (lib && doc) {
+      doc.localPdf = dest
+      saveLibrary(lib.docs, lib.folders)
+    }
+    return { ok: true, path: dest, size: buf.length }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+})
+
 ipcMain.handle('pdf:read', async (_e, p: string) => {
   try {
     const buf = fs.readFileSync(p)
