@@ -26,6 +26,17 @@ import { findDuplicates, type DupeGroup } from './lib/dupes'
 import { parseAny, type Entry } from './lib/import'
 
 
+/**
+ * One step of undo.  `run` is a closure rather than a description of the
+ * change, because the operations being undone are all cloud calls whose
+ * inverse is another cloud call; there is no shared state to diff against.
+ */
+interface UndoEntry {
+  id: string
+  label: string
+  run: () => Promise<void>
+}
+
 /** Toolbar wording for each updater phase; null means "say nothing". */
 const UPD_TEXT: Record<UpdateState['phase'], ((s: UpdateState) => string) | null> = {
   idle: null,
@@ -87,7 +98,11 @@ export default function App() {
   const [cols, setCols] = useState<ColKey[]>(() => normaliseCols(undefined))
   const [views, setViews] = useState<SavedView[]>([])
   const [showCols, setShowCols] = useState(false)
+  const [undo, setUndo] = useState<UndoEntry[]>([])
   const searchRef = useRef<HTMLInputElement>(null)
+  // the keydown listener is installed once, so it has to reach the undo stack
+  // through a ref rather than closing over a stale one
+  const undoRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     window.api.loadLibrary().then((r) => {
@@ -158,6 +173,10 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key === '-') {
         e.preventDefault()
         bumpFont(-1)
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undoRef.current()
       }
     }
     window.addEventListener('keydown', h)
@@ -375,6 +394,66 @@ export default function App() {
 
   const [batchMsg, setBatchMsg] = useState<string | null>(null)
 
+  /** Most recent last, capped: an undo stack that grows without bound is a
+   *  memory leak dressed up as a feature. */
+  const pushUndo = (label: string, run: () => Promise<void>) => {
+    setUndo((s) =>
+      [...s, { id: 'u' + Date.now().toString(36), label, run }].slice(-20)
+    )
+  }
+
+  const doUndo = async () => {
+    const top = undo[undo.length - 1]
+    if (!top) return
+    // pop first, so a failure cannot leave the same step to be retried
+    // forever against a cloud that has already moved on
+    setUndo((s) => s.slice(0, -1))
+    try {
+      await top.run()
+    } catch (e) {
+      setErr('撤销失败：' + String(e))
+    }
+  }
+  undoRef.current = () => {
+    void doUndo()
+  }
+
+  /** Bring a trashed document back, locally as well as in the cloud. */
+  const readmit = async (d: Doc) => {
+    let back: Doc = d
+    try {
+      back = (await window.api.restoreDoc(d.id)) ?? d
+    } catch {
+      /* the cloud call failed; the copy we already have is still the truth */
+    }
+    setLib((l) =>
+      l
+        ? {
+            ...l,
+            docs: l.docs.some((x) => x.id === d.id)
+              ? l.docs
+              : [...l.docs, { ...d, ...back }]
+          }
+        : l
+    )
+  }
+
+  /** Put a record's fields back, one call each: a field the API refuses to
+   *  clear must not stop the others from being restored. */
+  const revertFields = async (id: string, prev: Record<string, unknown>) => {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) continue
+      try {
+        await window.api.patchDoc(id, { [k]: v })
+      } catch {
+        /* leave this one as the merge made it */
+      }
+    }
+    setLib((l) =>
+      l ? { ...l, docs: l.docs.map((d) => (d.id === id ? { ...d, ...prev } : d)) } : l
+    )
+  }
+
   const batchFolder = async (folderId: string) => {
     const list = multi.length > 1 ? docs.filter((d) => multi.includes(d.id)) : []
     if (!list.length) return
@@ -401,6 +480,24 @@ export default function App() {
         : l
     )
     setBatchMsg(`已把 ${n} 条加入文件夹`)
+    const added = list.filter((d) => !(d.folder_uuids ?? []).includes(folderId)).map((d) => d.id)
+    if (n) {
+      pushUndo(`把 ${n} 条加入文件夹`, async () => {
+        for (const id of added) await window.api.removeFromFolder(folderId, id).catch(() => {})
+        setLib((l) =>
+          l
+            ? {
+                ...l,
+                docs: l.docs.map((d) =>
+                  added.includes(d.id)
+                    ? { ...d, folder_uuids: (d.folder_uuids ?? []).filter((f) => f !== folderId) }
+                    : d
+                )
+              }
+            : l
+        )
+      })
+    }
     setTimeout(() => setBatchMsg(null), 2500)
   }
 
@@ -422,6 +519,14 @@ export default function App() {
     setMulti([])
     setSelId(null)
     setBatchMsg(`已移入回收站 ${n} 条`)
+    if (n) {
+      pushUndo(
+        `删除 ${n} 条`,
+        async () => {
+          for (const d of list) await readmit(d)
+        }
+      )
+    }
     setTimeout(() => setBatchMsg(null), 2500)
   }
 
@@ -559,6 +664,17 @@ export default function App() {
           title="把当前的文件夹 + 搜索词 + 星标筛选存成一个虚拟文件夹"
         >
           保存搜索
+        </button>
+        <button
+          onClick={doUndo}
+          disabled={!undo.length}
+          title={
+            undo.length
+              ? `撤销：${undo[undo.length - 1].label}  (Ctrl+Z)`
+              : '没有可撤销的操作'
+          }
+        >
+          撤销{undo.length ? `（${undo[undo.length - 1].label}）` : ''}
         </button>
         <button
           className={onlyStarred ? 'primary' : ''}
@@ -798,6 +914,10 @@ export default function App() {
               const updated = Object.keys(patch).length
                 ? await window.api.patchDoc(keeper.id, patch)
                 : keeper
+              // remember what the keeper looked like, so undoing the merge can
+              // put it back rather than only resurrecting the losers
+              const prev: Record<string, unknown> = {}
+              for (const f of Object.keys(patch)) prev[f] = field(keeper, f)
               for (const o of others) await window.api.trashDoc(o.id)
               const gone = new Set(others.map((o) => o.id))
               setLib((l) =>
@@ -810,7 +930,12 @@ export default function App() {
                     }
                   : l
               )
-              setDupes((prev) => (prev ? prev.filter((x) => x.key !== g.key) : prev))
+              setDupes((p) => (p ? p.filter((x) => x.key !== g.key) : p))
+              pushUndo(`合并 ${others.length} 条`, async () => {
+                await revertFields(keeper.id, prev)
+                for (const o of others) await readmit(o)
+                setDupes((p) => (p ? [...p, g] : p))
+              })
             }}
           />
         ) : trash ? (

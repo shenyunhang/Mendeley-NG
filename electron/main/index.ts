@@ -302,6 +302,24 @@ async function runSmoke() {
     '(()=>{const c=[...document.querySelectorAll(".batch-bar button")]'
     + '.find(b=>b.textContent.trim()==="取消选择");if(c)c.click();return 1})()'
   )
+  // Every undo step is the inverse of a call that wrote to the cloud, so the
+  // run cannot exercise one without moving the user's library.  It can still
+  // check the button is there and idle.
+  const undoBtn = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+      + '.find(x=>x.textContent.trim().startsWith("撤销"));'
+      + 'if(!b)return JSON.stringify({found:false});'
+      + 'return JSON.stringify({found:true,disabled:b.disabled,title:b.title})})()'
+    )
+  )
+  log('undo button', undoBtn)
+  expect(
+    'undo is offered and idle',
+    undoBtn.found === true && undoBtn.disabled === true,
+    undoBtn
+  )
+
   // Column customisation and saved views.  Both live in the config, so the
   // run puts the layout and the view list back afterwards; a smoke run has no
   // business leaving the user's table rearranged.
