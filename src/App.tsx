@@ -33,6 +33,7 @@ import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
 import RowMenu, { type RowMenuItem } from './components/RowMenu'
 import NotesView from './components/NotesView'
+import BatchEdit, { type BatchOp } from './components/BatchEdit'
 import { extractIds } from './lib/pdfmeta'
 import { toBibtex, toEndnoteXml, toRis } from './lib/export'
 import { buildTree } from './lib/tree'
@@ -127,6 +128,7 @@ export default function App() {
    *  the list is opened rather than kept in step: annotations are written by
    *  the reader, and a copy that goes stale would silently hide new ones. */
   const [allAnns, setAllAnns] = useState<Annotation[] | null>(null)
+  const [batchEdit, setBatchEdit] = useState(false)
   const [undo, setUndo] = useState<UndoEntry[]>([])
   const searchRef = useRef<HTMLInputElement>(null)
   // the keydown listener is installed once, so it has to reach the undo stack
@@ -740,6 +742,62 @@ export default function App() {
     // failure there leaves a stray cloud highlight rather than a lost local one
     if (gone?.remoteId) {
       await window.api.deleteRemoteAnnotation(gone.remoteId).catch(() => {})
+    }
+  }
+
+  /**
+   * One field, many documents.  Every field except `tags` is a plain
+   * overwrite; `tags` has to be merged with what the document already has,
+   * because a PATCH replaces the whole array rather than appending to it.
+   *
+   * A failure skips and counts rather than aborting, the same as the folder
+   * batch: fifty documents against a rate-limited API will lose one sooner or
+   * later, and losing one should not mean the other forty-nine silently did
+   * not happen.
+   */
+  const applyBatchEdit = async (op: BatchOp, value: string) => {
+    const list = docs.filter((d) => multi.includes(d.id))
+    if (!list.length) return
+    const patchFor = (d: Doc): Record<string, unknown> => {
+      switch (op) {
+        case 'tag-add':
+          return { tags: [...new Set([...(d.tags ?? []), value])] }
+        case 'tag-del':
+          return { tags: (d.tags ?? []).filter((t) => t !== value) }
+        case 'type':
+          return { type: value }
+        case 'starred':
+          return { starred: value === 'true' }
+        case 'read':
+          return { read: value === 'true' }
+      }
+    }
+    const field = op === 'tag-add' || op === 'tag-del' ? 'tags' : op
+    const prev = list.map((d) => (d as unknown as Record<string, unknown>)[field])
+    let n = 0
+    for (let i = 0; i < list.length; i++) {
+      setBatchMsg(`批量修改 ${i + 1}/${list.length}…`)
+      try {
+        await setFlags(list[i]!, patchFor(list[i]!))
+        n++
+      } catch {
+        /* skip and keep going; the counter below reports the truth */
+      }
+    }
+    setBatchMsg(`已修改 ${n} / ${list.length} 条`)
+    setTimeout(() => setBatchMsg(null), 2500)
+    if (n) {
+      pushUndo(`批量修改 ${n} 条的${field === 'tags' ? '标签' : '字段'}`, async () => {
+        await Promise.all(
+          list.map((d, i) =>
+            window.api
+              .patchDoc(d.id, { [field]: prev[i] ?? null })
+              .catch(() => null)
+          )
+        )
+        const r = await window.api.loadLibrary().catch(() => null)
+        if (r && !('error' in r) && r.docs) setLib(r)
+      })
     }
   }
 
@@ -1400,6 +1458,12 @@ export default function App() {
               <button onClick={() => copyCitation(docs.filter((d) => multi.includes(d.id)))}>
                 复制引文
               </button>
+              <button
+                onClick={() => setBatchEdit(true)}
+                title="给选中的每一条统一加标签、改类型、设星标或已读"
+              >
+                改字段…
+              </button>
               <span style={{ flex: 1 }} />
               <button onClick={() => setMulti([])}>取消选择</button>
             </div>
@@ -1501,6 +1565,13 @@ export default function App() {
           )}
         </div>
       </div>
+      {batchEdit && (
+        <BatchEdit
+          count={multi.length}
+          onClose={() => setBatchEdit(false)}
+          onApply={applyBatchEdit}
+        />
+      )}
       {menu && (
         <RowMenu
           x={menu.x}

@@ -156,6 +156,29 @@ textarea:focus {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
+.batch-edit {
+  min-width: 380px;
+}
+.be-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.be-key {
+  flex: 0 0 40px;
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.be-row select,
+.be-row input {
+  flex: 1;
+}
+.be-hint {
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+  margin-bottom: 10px;
+}
 .row-menu {
   position: fixed;
   z-index: 60;

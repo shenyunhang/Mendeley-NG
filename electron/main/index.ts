@@ -1002,6 +1002,68 @@ async function runSmoke() {
   )
   await new Promise((r) => setTimeout(r, 400))
 
+  // Batch metadata editing.  The dialog is checked without applying it:
+  // PATCHing real documents is not something a smoke run should do, so what
+  // is proved here is that the dialog opens for the selection, offers the
+  // fields, and will not run until a value has been given.
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")];'
+    + 'if(r.length<2)return 0;r[0].click();'
+    + 'r[1].dispatchEvent(new MouseEvent("click",{bubbles:true,ctrlKey:true}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 500))
+  const multiInfo = await w.webContents.executeJavaScript(
+    'JSON.stringify({bar:document.querySelectorAll(".batch-bar").length,'
+    + 'text:(document.querySelector(".batch-bar span")||{}).textContent||null})'
+  )
+  log('multi select', multiInfo)
+  expect('ctrl-click builds a multi-selection', /已选 2 条/.test(multiInfo), multiInfo)
+  log(
+    'click 改字段',
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".batch-bar button")]'
+      + '.find(x=>x.textContent.includes("改字段"));if(!b)return "missing";b.click();return "ok"})()'
+    )
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  const beInfo = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(()=>{const m=document.querySelector(".batch-edit");if(!m)return JSON.stringify({open:0});'
+        + 'const b=[...m.querySelectorAll("button")].find(x=>x.textContent.includes("应用到"));'
+        + 'return JSON.stringify({open:1,ops:[...m.querySelectorAll("select")][0]'
+        + '?[...m.querySelectorAll("select")][0].options.length:0,'
+        + 'apply:b?b.textContent.trim():null,disabled:b?b.disabled:null})})()'
+      )
+    )
+  const be0 = await beInfo()
+  log('batch edit', be0)
+  expect('the batch edit dialog opens', be0.open === 1, be0)
+  expect('it offers every field', be0.ops >= 5, be0)
+  expect('it names the batch size', /应用到 2 条/.test(String(be0.apply)), be0)
+  expect('it will not run without a value', be0.disabled === true, be0)
+  await w.webContents.executeJavaScript(
+    '(()=>{const i=document.querySelector(".batch-edit input");if(!i)return 0;'
+    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+    + 'set.call(i,"smoke-tag");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  const be1 = await beInfo()
+  log('batch edit with a value', be1)
+  expect('it runs once a value is given', be1.disabled === false, be1)
+  // cancel rather than apply, then drop the selection: nothing was written
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".batch-edit button")]'
+    + '.find(x=>x.textContent.trim()==="取消");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  expect('cancelling closes the dialog', (await beInfo()).open === 0, be1)
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".batch-bar button")]'
+    + '.find(x=>x.textContent.trim()==="取消选择");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+
   if (annBackup) fs.writeFileSync(annPath, annBackup)
   const afterCount = await w.webContents.executeJavaScript(
     '(async()=>(await window.api.loadAnnotations()).length)()'
