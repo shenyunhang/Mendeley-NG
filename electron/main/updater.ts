@@ -33,6 +33,14 @@ export interface UpdateState {
 
 let send: (s: UpdateState) => void = () => {}
 
+/**
+ * electron-updater only records the update internally when one is actually
+ * available, and `downloadUpdate()` throws "Please check update first" if that
+ * never happened.  Tracking the outcome here keeps the guard in the main
+ * process instead of trusting the renderer to call things in the right order.
+ */
+let updateAvailable = false
+
 function installHandlers() {
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
@@ -40,10 +48,14 @@ function installHandlers() {
   autoUpdater.on('checking-for-update', () => send({ phase: 'checking' }))
 
   autoUpdater.on('update-available', (info: UpdateInfo) => {
+    updateAvailable = true
     send({ phase: 'available', version: info.version, message: info.releaseNotes as string })
   })
 
-  autoUpdater.on('update-not-available', () => send({ phase: 'not-available' }))
+  autoUpdater.on('update-not-available', () => {
+    updateAvailable = false
+    send({ phase: 'not-available' })
+  })
 
   autoUpdater.on('download-progress', (p: ProgressInfo) => {
     send({ phase: 'downloading', percent: Math.round(p.percent) })
@@ -68,8 +80,12 @@ export function initUpdater(emit: (s: UpdateState) => void) {
       return { unsupported: true }
     }
     try {
+      updateAvailable = false
       const r = await autoUpdater.checkForUpdates()
-      return { version: r?.updateInfo?.version ?? null }
+      return {
+        version: r?.updateInfo?.version ?? null,
+        available: r?.isUpdateAvailable ?? false
+      }
     } catch (e) {
       send({ phase: 'error', message: String(e) })
       return { error: String(e) }
@@ -77,6 +93,12 @@ export function initUpdater(emit: (s: UpdateState) => void) {
   })
 
   ipcMain.handle('updater:download', async () => {
+    if (!updateAvailable) {
+      // no update means there is nothing to download; saying so beats letting
+      // electron-updater throw "Please check update first"
+      send({ phase: 'not-available' })
+      return { noUpdate: true }
+    }
     try {
       await autoUpdater.downloadUpdate()
       return { ok: true }

@@ -23,8 +23,13 @@ export interface Api {
   createFolder: (name: string) => Promise<Folder>
   loadAnnotations: () => Promise<Annotation[]>
   saveAnnotations: (list: Annotation[]) => Promise<{ ok: boolean }>
-  checkUpdate: () => Promise<{ version?: string | null; unsupported?: boolean; error?: string }>
-  downloadUpdate: () => Promise<{ ok?: boolean; error?: string }>
+  checkUpdate: () => Promise<{
+    version?: string | null
+    available?: boolean
+    unsupported?: boolean
+    error?: string
+  }>
+  downloadUpdate: () => Promise<{ ok?: boolean; noUpdate?: boolean; error?: string }>
   installUpdate: () => Promise<{ ok: boolean }>
   onUpdateState: (cb: (s: UpdateState) => void) => () => void
   pdfUrl: (absPath: string) => string

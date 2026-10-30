@@ -202,9 +202,11 @@ export default function App() {
         <button
           disabled={!!upd && ['checking', 'downloading', 'downloaded'].includes(upd.phase)}
           onClick={async () => {
-            // one click does the whole thing: check, download, install, relaunch
+            // one click does the whole thing: check, download, install, relaunch.
+            // download only makes sense when there is actually a newer version;
+            // calling it anyway is what produced "Please check update first"
             const r = await window.api.checkUpdate()
-            if (r?.unsupported || r?.error) return
+            if (r?.unsupported || r?.error || !r?.available) return
             await window.api.downloadUpdate()
           }}
           title="从 GitHub Releases 拉取最新版本并自动安装重启"
