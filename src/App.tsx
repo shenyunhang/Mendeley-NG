@@ -871,6 +871,22 @@ export default function App() {
           void setFlagsFor(list, { read: unread ? true : false }, unread ? '标为已读' : '标为未读')
       },
       { sep: true },
+      // only offered for a single row, and only when the file is actually on
+      // disk: revealing two files at once is not a thing, and an entry that
+      // does nothing on click is worse than no entry
+      {
+        label: '在文件夹中显示',
+        disabled: list.length !== 1 || !list[0]?.localPdf,
+        title: list[0]?.localPdf ?? '这篇没有本地 PDF',
+        run: () => void window.api.revealPdf(list[0]!.localPdf!)
+      },
+      {
+        label: '用系统程序打开',
+        disabled: list.length !== 1 || !list[0]?.localPdf,
+        title: list[0]?.localPdf ?? '这篇没有本地 PDF',
+        run: () => void window.api.openPdfExternally(list[0]!.localPdf!)
+      },
+      { sep: true },
       {
         label: `移入回收站${tail}`,
         danger: true,

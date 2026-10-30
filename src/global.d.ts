@@ -85,6 +85,8 @@ export interface Api {
   onUpdateState: (cb: (s: UpdateState) => void) => () => void
   pdfUrl: (absPath: string) => string
   openExternal: (url: string) => void
+  revealPdf: (p: string) => Promise<{ ok: boolean; error?: string }>
+  openPdfExternally: (p: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 declare global {

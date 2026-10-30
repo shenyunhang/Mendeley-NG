@@ -359,6 +359,21 @@ export default function DetailsPanel({
             <>
               <br />
               本地 PDF：{doc.localPdf}
+              <br />
+              <button
+                style={{ padding: '1px 5px', fontSize: 11, marginTop: 4 }}
+                onClick={() => void window.api.revealPdf(doc.localPdf!)}
+                title="在文件管理器里选中这个文件，方便改名或挪走"
+              >
+                在文件夹中显示
+              </button>{' '}
+              <button
+                style={{ padding: '1px 5px', fontSize: 11, marginTop: 4 }}
+                onClick={() => void window.api.openPdfExternally(doc.localPdf!)}
+                title="用系统默认的 PDF 程序打开，例如 Edge 或 Acrobat"
+              >
+                用系统程序打开
+              </button>
             </>
           ) : null}
           {doc.doi ? (

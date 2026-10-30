@@ -562,9 +562,55 @@ async function runSmoke() {
   expect('a right click opens the row menu', mi.open === 1, mi)
   expect('the row menu offers actions and separators', mi.items.length >= 4 && mi.seps >= 1, mi)
   expect('the row menu stays inside the window', mi.inWindow === true, mi)
+  expect(
+    'the row menu can hand the file to the OS',
+    mi.items.includes('在文件夹中显示') && mi.items.includes('用系统程序打开'),
+    mi
+  )
+  // the two shell actions are only offered where there is a file to hand over:
+  // an entry that does nothing on click is worse than no entry at all
+  await w.webContents.executeJavaScript(
+    '(()=>{document.body.dispatchEvent(new MouseEvent("mousedown",{bubbles:true}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")].filter(e=>e.querySelector(".pdf-dot.no-pdf"));'
+    + 'if(!r.length)return 0;const b=r[0].getBoundingClientRect();'
+    + 'r[0].dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,'
+    + 'clientX:Math.round(b.left+40),clientY:Math.round(b.top+8)}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  const noPdf = await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".row-menu-item")];'
+    + 'return JSON.stringify({n:b.length,reveal:(b.find(x=>x.textContent.trim()==="在文件夹中显示")||{}).disabled})})()'
+  )
+  log('row menu on a row without a pdf', noPdf)
+  expect('the shell actions are disabled when there is no file', /"reveal":true/.test(noPdf), noPdf)
+  // the handlers themselves are exercised with an empty path, which is the one
+  // call that cannot open anything on the user's desktop
+  const shellApi = await w.webContents.executeJavaScript(
+    '(async()=>JSON.stringify([await window.api.revealPdf(""),await window.api.openPdfExternally("")]))()'
+  )
+  log('shell api with no path', shellApi)
+  expect('the shell handlers answer', /"error":"no path"/.test(shellApi), shellApi)
+  // close this menu, then reopen it on a row that has a file, because the next
+  // check clicks an item in whatever menu happens to be open
+  await w.webContents.executeJavaScript(
+    '(()=>{document.body.dispatchEvent(new MouseEvent("mousedown",{bubbles:true}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")].filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+    + 'if(!r.length)return 0;const b=r[0].getBoundingClientRect();'
+    + 'r[0].dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,'
+    + 'clientX:Math.round(b.left+40),clientY:Math.round(b.top+8)}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
   // "复制标题" is the one item that is safe to actually run: it touches the
   // clipboard and nothing else, so a smoke run can prove the wiring without
-  // editing the library
+  // editing the library.  The clipboard is emptied first, so a value left over
+  // from earlier in the run cannot make the check pass on its own.
+  await w.webContents.executeJavaScript('window.api.copyText("")')
   await w.webContents.executeJavaScript(
     '(()=>{const b=[...document.querySelectorAll(".row-menu-item")]'
     + '.find(x=>x.textContent.trim()==="复制标题");if(!b)return 0;b.click();return 1})()'
@@ -572,7 +618,11 @@ async function runSmoke() {
   await new Promise((r) => setTimeout(r, 600))
   const titleCopied = await w.webContents.executeJavaScript('window.api.readClipboard()')
   log('copied title', JSON.stringify(titleCopied))
-  expect('a row menu item runs', String(titleCopied || '').length > 3, titleCopied)
+  expect(
+    'a row menu item runs',
+    String(titleCopied || '').length > 3 && titleCopied !== clipBefore,
+    { titleCopied, clipBefore }
+  )
   expect('the menu closes after an item is chosen', (JSON.parse(await menuInfo())).open === 0, mi)
   await w.webContents.executeJavaScript(
     `window.api.copyText(${JSON.stringify(String(clipBefore ?? ''))})`
@@ -1585,6 +1635,21 @@ initUpdater((s: UpdateState) => win?.webContents.send('updater:state', s))
 ipcMain.handle('shell:openExternal', (_e, url: string) => {
   shell.openExternal(url)
   return { ok: true }
+})
+
+// Sometimes the file itself is the thing to work on: rename it, move it, or
+// read it in an external reader.  Both go through shell rather than child
+// processes, so the file manager and the default PDF handler are the ones the
+// user already chose.
+ipcMain.handle('pdf:reveal', (_e, p: string) => {
+  if (!p) return { ok: false, error: 'no path' }
+  shell.showItemInFolder(p)
+  return { ok: true }
+})
+
+ipcMain.handle('pdf:openExternal', (_e, p: string) => {
+  if (!p) return { ok: false, error: 'no path' }
+  return shell.openPath(p)
 })
 
 export type { Doc, Folder }

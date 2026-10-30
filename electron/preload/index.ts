@@ -128,7 +128,11 @@ const api = {
   /** PDFs are served over the custom mendeley:// scheme registered in main */
   pdfUrl: (absPath: string) =>
     'mendeley://pdf/' + encodeURIComponent(absPath),
-  openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url)
+  openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  revealPdf: (p: string) =>
+    ipcRenderer.invoke('pdf:reveal', p) as Promise<{ ok: boolean; error?: string }>,
+  openPdfExternally: (p: string) =>
+    ipcRenderer.invoke('pdf:openExternal', p) as Promise<{ ok: boolean; error?: string }>
 }
 
 contextBridge.exposeInMainWorld('api', api)
