@@ -200,6 +200,13 @@ async function runSmoke() {
   const w = new BrowserWindow({ width: 1500, height: 950, show: false, backgroundColor: '#1e1e1e',
     webPreferences: { preload: path.join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: false } })
   const errs: string[] = []
+  // a smoke run that only prints is a smoke run nobody reads; anything that
+  // has a right answer goes through here so the exit code says so
+  const fails: string[] = []
+  const expect = (name: string, ok: boolean, detail: unknown) => {
+    log(ok ? 'PASS' : 'FAIL', name, detail)
+    if (!ok) fails.push(`${name}: ${String(detail)}`)
+  }
   w.webContents.on('console-message', (_e, _l, msg) => { if (/error|Error/.test(msg)) errs.push(msg) })
   w.webContents.on('did-fail-load', (_e, code, desc) => errs.push('did-fail-load ' + code + ' ' + desc))
   win = w
@@ -381,6 +388,38 @@ async function runSmoke() {
   )
   log('outline jump', 'from', jumped, '->', nowPage)
 
+  // page turns should hit the prefetch cache: go forward one, then back, and
+  // see whether the second visit was served from a warmed bitmap
+  // the outline left us on the last page, so going forward is a no-op: step
+  // back onto a warmed page, then forward again onto one
+  const src = () =>
+    w.webContents.executeJavaScript(
+      'JSON.stringify({src:document.documentElement.dataset.renderSrc,'
+      + 'last:document.documentElement.dataset.pfLast,'
+      + 'size:document.documentElement.dataset.pfSize,'
+      + 'keys:document.documentElement.dataset.pfKeys,'
+      + 'warm:document.documentElement.dataset.pfWarm,'
+      + 'page:document.querySelector(".pdf-bar input").value})'
+    )
+  const turn = async (label: string) => {
+    await w.webContents.executeJavaScript(
+      `(()=>{const b=[...document.querySelectorAll(".pdf-bar button")]`
+      + `.find(x=>x.textContent.trim()==="${label}");if(b&&!b.disabled)b.click();return 1})()`
+    )
+    // a warmed neighbour is rendered off the main path and never blocks the
+    // visible page, so allow real time for it before asking what was served
+    await new Promise((r) => setTimeout(r, 1500))
+    return src()
+  }
+  log('render src (current page)', await src())
+  const backOne = JSON.parse(await turn('←'))
+  const fwdAgain = JSON.parse(await turn('→'))
+  // a page turn onto a warmed neighbour must not re-render from scratch:
+  // either the bitmap is already in the cache, or the warm that was started
+  // for it is joined instead of duplicated
+  expect('prefetch serves a step back', backOne.src === 'cache', backOne)
+  expect('prefetch serves a step forward', fwdAgain.src === 'cache', fwdAgain)
+
   // The selection layer is what turns a rubber band into a real highlight, so
   // the run makes a synthetic selection and checks that it produces sane
   // rectangles.  The annotation file is restored afterwards; leaving a stray
@@ -472,6 +511,12 @@ async function runSmoke() {
     '(async()=>(await window.api.loadAnnotations()).length)()'
   )
   log('annotations file restored ->', afterCount, 'entries')
+  if (fails.length) {
+    log('FAILED CHECKS', fails.join(' | '))
+    app.exit(1)
+    return
+  }
+  log('all checks passed')
   app.exit(0)
 }
 

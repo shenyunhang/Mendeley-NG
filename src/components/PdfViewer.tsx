@@ -237,14 +237,170 @@ export default function PdfViewer({
     setScale(Math.max(0.2, Math.min(6, next)))
   }, [zoomMode, page, sizes, tick])
 
+  /**
+   * Neighbouring pages, rendered ahead of time into offscreen canvases so a
+   * page turn paints immediately instead of waiting for pdf.js.  Keyed by
+   * page and scale, so a zoom change simply misses and re-renders.  Capped,
+   * because a full-page bitmap at devicePixelRatio is not small.
+   */
+  const prefetch = useRef(new Map<string, HTMLCanvasElement>())
+  /** In-flight warms, kept as promises so a page turn can join one instead of
+   *  starting a second render of the same page.  A warm is queued behind the
+   *  visible page in the pdf.js worker, so it routinely outlives the click
+   *  that will ask for it; without this the turn just renders it again. */
+  const warming = useRef(new Map<string, Promise<HTMLCanvasElement>>())
+  const PREFETCH_MAX = 6
+
+  // A different document makes every cached bitmap wrong.  A different scale
+  // does not: the key carries the scale, so stale entries simply miss and get
+  // pushed out by the LRU below.  Clearing on every scale change used to throw
+  // away the neighbours a moment before the user turned to them.
+  useEffect(() => {
+    prefetch.current.clear()
+    warming.current.clear()
+  }, [doc.localPdf])
+
+  /** Drop the least recently used entries until the cache fits again. */
+  const evict = () => {
+    const m = prefetch.current
+    while (m.size > PREFETCH_MAX) {
+      const oldest = m.keys().next().value
+      if (oldest === undefined) return
+      m.delete(oldest)
+    }
+  }
+
+  /** Exposed on <html> so the smoke run can tell a hit from a miss. */
+  const stampCache = () => {
+    const d = document.documentElement.dataset
+    d.pfSize = String(prefetch.current.size)
+    d.pfKeys = [...prefetch.current.keys()].join(',')
+    d.pfWarm = [...warming.current.keys()].join(',')
+  }
+
+  const prefetchKey = (n: number, s: number, d: number) =>
+    `${n}:${s.toFixed(3)}:${d}`
+
+  const renderTo = useCallback(
+    async (canvas: HTMLCanvasElement, n: number, s: number) => {
+      const pg = await pdf!.getPage(n)
+      const viewport = pg.getViewport({ scale: s })
+      const dpr = window.devicePixelRatio || 1
+      canvas.width = Math.floor(viewport.width * dpr)
+      canvas.height = Math.floor(viewport.height * dpr)
+      const ctx = canvas.getContext('2d')!
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.clearRect(0, 0, viewport.width, viewport.height)
+      await pg.render({ canvasContext: ctx, viewport }).promise
+      return viewport
+    },
+    [pdf]
+  )
+
+  const warm = (n: number, s: number): Promise<void> => {
+    if (n < 1 || n > numPages || !pdf) return Promise.resolve()
+    const dpr = window.devicePixelRatio || 1
+    const k = prefetchKey(n, s, dpr)
+    const done = prefetch.current.get(k)
+    if (done) return Promise.resolve()
+    const flight = warming.current.get(k)
+    if (flight) return flight.then(() => undefined).catch(() => undefined)
+    const off = document.createElement('canvas')
+    const p = renderTo(off, n, s).then(() => {
+      warming.current.delete(k)
+      prefetch.current.set(k, off)
+      evict()
+      stampCache()
+      return off
+    })
+    warming.current.set(k, p)
+    stampCache()
+    // the rejection is deliberately left on the promise: whoever awaits it
+    // decides whether a failed warm matters, and an unhandled one would be
+    // indistinguishable from a real bug
+    p.catch(() => {
+      warming.current.delete(k)
+      stampCache()
+    })
+    return p.then(() => undefined)
+  }
+
+  /**
+   * Fill the cache around `p`.  The immediate pair comes first, then the next
+   * ring out, so a slow warm of page +1 cannot hold up the one for page +2.
+   * Never awaited by the caller: prefetching must not delay the page in front
+   * of the user, and a dropped bitmap only costs a normal render.
+   */
+  const warmAround = (p: number, s: number) => {
+    ;(async () => {
+      await Promise.all([warm(p + 1, s), warm(p - 1, s)])
+      await Promise.all([warm(p + 2, s), warm(p - 2, s)])
+    })().catch(() => {
+      /* a failed prefetch is invisible: the page just renders normally */
+    })
+  }
+
   const render = useCallback(async () => {
     const canvas = canvasRef.current
     if (!pdf || !canvas) return
+    const dpr = window.devicePixelRatio || 1
+    const key = prefetchKey(page, scale, dpr)
+    let cached = prefetch.current.get(key)
     const pg = await pdf.getPage(page)
     const viewport = pg.getViewport({ scale })
+    // a bitmap only helps if it is already the right size; anything else
+    // means the scale or the device pixel ratio moved on
+    const fits = (c: HTMLCanvasElement | undefined) =>
+      !!c &&
+      c.width === Math.floor(viewport.width * dpr) &&
+      c.height === Math.floor(viewport.height * dpr)
+
+    if (!cached) {
+      const flight = warming.current.get(key)
+      if (flight) {
+        // the neighbour render is already under way; waiting for it is the
+        // whole point of having started it, and re-rendering would double the
+        // work and leave the worker busy for twice as long
+        try {
+          cached = await flight
+        } catch {
+          cached = undefined
+        }
+        document.documentElement.dataset.pfLast = 'joined-warm'
+      } else {
+        document.documentElement.dataset.pfLast = 'absent'
+      }
+    }
+
+    if (fits(cached)) {
+      const bmp = cached!
+      canvas.width = bmp.width
+      canvas.height = bmp.height
+      canvas.style.width = `${viewport.width}px`
+      canvas.style.height = `${viewport.height}px`
+      const ctx = canvas.getContext('2d')!
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.clearRect(0, 0, bmp.width, bmp.height)
+      ctx.drawImage(bmp, 0, 0)
+      // re-insert so the LRU knows this one was just used
+      prefetch.current.delete(key)
+      prefetch.current.set(key, bmp)
+      await drawTextLayer(pg, viewport)
+      document.documentElement.dataset.renderSrc = 'cache'
+      stampCache()
+      // the turn came from the cache, so the neighbours of the new page are
+      // the ones worth warming now
+      warmAround(page, scale)
+      return
+    }
+    if (cached) {
+      prefetch.current.delete(key)
+      document.documentElement.dataset.pfLast = 'size-mismatch'
+    }
+    stampCache()
+
     // devicePixelRatio is what makes this crisp on a 4K panel; Mendeley
     // Desktop rendered at 1x and looked correspondingly soft
-    const dpr = window.devicePixelRatio || 1
     canvas.width = Math.floor(viewport.width * dpr)
     canvas.height = Math.floor(viewport.height * dpr)
     canvas.style.width = `${viewport.width}px`
@@ -268,8 +424,12 @@ export default function PdfViewer({
       throw e
     }
     if (id !== renderId.current) return
+    document.documentElement.dataset.renderSrc = 'pdf'
     await drawTextLayer(pg, viewport)
-  }, [pdf, page, scale])
+
+    // Warm the neighbours now that the page the user asked for is on screen.
+    warmAround(page, scale)
+  }, [pdf, page, scale, numPages, renderTo])
 
   /**
    * An invisible layer of one span per text run, laid out to match the glyphs.
