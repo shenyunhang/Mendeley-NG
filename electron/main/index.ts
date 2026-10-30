@@ -538,6 +538,46 @@ async function runSmoke() {
     `window.api.copyText(${JSON.stringify(String(clipBefore ?? ''))})`
   )
 
+  // The row menu.  Right clicking has to (a) open it where the pointer is,
+  // (b) act on the row under the pointer, and (c) close on the next click —
+  // a menu that survives its own action is the usual way these go wrong.
+  const menuInfo = async () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const m=document.querySelector(".row-menu");if(!m)return JSON.stringify({open:0});'
+      + 'const r=m.getBoundingClientRect();'
+      + 'return JSON.stringify({open:1,head:(document.querySelector(".row-menu-head")||{}).textContent||null,'
+      + 'items:[...document.querySelectorAll(".row-menu-item")].map(b=>b.textContent),'
+      + 'seps:document.querySelectorAll(".row-menu-sep").length,'
+      + 'inWindow:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})})()'
+    )
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")].filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+    + 'if(!r.length)return 0;const b=r[0].getBoundingClientRect();'
+    + 'r[0].dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,'
+    + 'clientX:Math.round(b.left+40),clientY:Math.round(b.top+8)}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 500))
+  const mi = JSON.parse(await menuInfo())
+  log('row menu', JSON.stringify(mi))
+  expect('a right click opens the row menu', mi.open === 1, mi)
+  expect('the row menu offers actions and separators', mi.items.length >= 4 && mi.seps >= 1, mi)
+  expect('the row menu stays inside the window', mi.inWindow === true, mi)
+  // "复制标题" is the one item that is safe to actually run: it touches the
+  // clipboard and nothing else, so a smoke run can prove the wiring without
+  // editing the library
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".row-menu-item")]'
+    + '.find(x=>x.textContent.trim()==="复制标题");if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 600))
+  const titleCopied = await w.webContents.executeJavaScript('window.api.readClipboard()')
+  log('copied title', JSON.stringify(titleCopied))
+  expect('a row menu item runs', String(titleCopied || '').length > 3, titleCopied)
+  expect('the menu closes after an item is chosen', (JSON.parse(await menuInfo())).open === 0, mi)
+  await w.webContents.executeJavaScript(
+    `window.api.copyText(${JSON.stringify(String(clipBefore ?? ''))})`
+  )
+
   // zoom is the one thing a screenshot cannot prove: check that "fit width"
   // really fills the pane and that "fit page" then fits the height too
   const measure = () =>

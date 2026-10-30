@@ -30,6 +30,7 @@ import {
 } from './lib/cite'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
+import RowMenu, { type RowMenuItem } from './components/RowMenu'
 import { extractIds } from './lib/pdfmeta'
 import { toBibtex, toEndnoteXml, toRis } from './lib/export'
 import { buildTree } from './lib/tree'
@@ -118,6 +119,8 @@ export default function App() {
   /** Page to open the reader at.  The nonce re-triggers a jump to the same
    *  page on the same document, which a bare number could not. */
   const [jump, setJump] = useState<{ page: number; nonce: number } | null>(null)
+  /** The open row menu, positioned where the right click landed. */
+  const [menu, setMenu] = useState<{ x: number; y: number; docId: string } | null>(null)
   const [undo, setUndo] = useState<UndoEntry[]>([])
   const searchRef = useRef<HTMLInputElement>(null)
   // the keydown listener is installed once, so it has to reach the undo stack
@@ -578,8 +581,55 @@ export default function App() {
     setTimeout(() => setBatchMsg(null), 2500)
   }
 
-  const batchTrash = async () => {
-    const list = multi.length > 1 ? docs.filter((d) => multi.includes(d.id)) : []
+  const batchTrash = () => trashDocs(docs.filter((d) => multi.includes(d.id)))
+
+  /** Starred / read / tags.  These are per-user flags rather than metadata,
+   *  so they are patched straight away instead of waiting for a save button. */
+  const setFlags = useCallback(async (d: Doc, patch: Partial<Doc>) => {
+    const updated = await window.api.patchDoc(d.id, patch as Record<string, unknown>)
+    const merged = { ...d, ...updated }
+    setLib((l) => (l ? { ...l, docs: l.docs.map((x) => (x.id === d.id ? merged : x)) } : l))
+  }, [])
+
+  /** The same patch over a list.  One undo entry for the whole batch: twenty
+   *  separate entries for one menu click is not undo, it is twenty chances to
+   *  give up before getting back where one started.  The previous values are
+   *  captured up front, so the undo needs no knowledge of the later state. */
+  const setFlagsFor = async (list: Doc[], patch: Partial<Doc>, label: string) => {
+    if (!list.length) return
+    const keys = Object.keys(patch) as (keyof Doc)[]
+    const prev = list.map((d) => {
+      const o: Record<string, unknown> = {}
+      for (const k of keys) o[k] = d[k]
+      return o
+    })
+    let n = 0
+    for (const d of list) {
+      try {
+        await setFlags(d, patch)
+        n++
+      } catch {
+        /* one failure should not abandon the rest of the batch */
+      }
+    }
+    setBatchMsg(`${label} ${n} 条`)
+    setTimeout(() => setBatchMsg(null), 2200)
+    if (n) {
+      pushUndo(`${label} ${n} 条`, async () => {
+        await Promise.all(
+          list.map((d, i) => window.api.patchDoc(d.id, prev[i]!).catch(() => null))
+        )
+        // re-read rather than merging: the PATCH response does not always echo
+        // every flag, and a row that still shows the old value looks like the
+        // undo failed when it did not
+        const r = await window.api.loadLibrary().catch(() => null)
+        if (r && !('error' in r) && r.docs) setLib(r)
+      })
+    }
+  }
+
+  /** Move `list` to the trash.  Shared by the batch bar and the row menu. */
+  const trashDocs = async (list: Doc[]) => {
     if (!list.length) return
     if (!confirm(`把选中的 ${list.length} 条移入回收站？可在回收站里恢复。`)) return
     const gone = new Set(list.map((d) => d.id))
@@ -597,23 +647,64 @@ export default function App() {
     setSelId(null)
     setBatchMsg(`已移入回收站 ${n} 条`)
     if (n) {
-      pushUndo(
-        `删除 ${n} 条`,
-        async () => {
-          for (const d of list) await readmit(d)
-        }
-      )
+      pushUndo(`删除 ${n} 条`, async () => {
+        for (const d of list) await readmit(d)
+      })
     }
     setTimeout(() => setBatchMsg(null), 2500)
   }
 
-  /** Starred / read / tags.  These are per-user flags rather than metadata,
-   *  so they are patched straight away instead of waiting for a save button. */
-  const setFlags = useCallback(async (d: Doc, patch: Partial<Doc>) => {
-    const updated = await window.api.patchDoc(d.id, patch as Record<string, unknown>)
-    const merged = { ...d, ...updated }
-    setLib((l) => (l ? { ...l, docs: l.docs.map((x) => (x.id === d.id ? merged : x)) } : l))
-  }, [])
+  /**
+   * What a row menu acts on.  Right clicking a row that is already part of the
+   * multi-selection means the selection; right clicking any other row means
+   * that row alone, or the menu would describe one document while the pane
+   * showed another.
+   */
+  const menuTargets = (id: string): Doc[] => {
+    if (multi.length > 1 && multi.includes(id)) {
+      return docs.filter((d) => multi.includes(d.id))
+    }
+    const d = docs.find((x) => x.id === id)
+    return d ? [d] : []
+  }
+
+  const rowMenuItems = (id: string): RowMenuItem[] => {
+    const list = menuTargets(id)
+    const many = list.length > 1
+    const tail = many ? `（${list.length} 条）` : ''
+    // a batch reads as "on" only when every row is already on, otherwise the
+    // menu would offer to unstar a set that is only partly starred
+    const starred = list.length > 0 && list.every((d) => !!d.starred)
+    const unread = list.some((d) => d.read === false)
+    return [
+      {
+        label: `复制引文${tail}`,
+        title: '按工具条上选的样式',
+        run: () => void copyCitation(list)
+      },
+      { label: '复制 BibTeX 条目', run: () => void copyCitation(list, 'bibtex') },
+      {
+        label: '复制标题',
+        run: () => void window.api.copyText(list.map((d) => d.title ?? '').join('\n'))
+      },
+      { sep: true },
+      {
+        label: starred ? `取消星标${tail}` : `加星标${tail}`,
+        run: () => void setFlagsFor(list, { starred: !starred }, starred ? '取消星标' : '加星标')
+      },
+      {
+        label: unread ? `标为已读${tail}` : `标为未读${tail}`,
+        run: () =>
+          void setFlagsFor(list, { read: unread ? true : false }, unread ? '标为已读' : '标为未读')
+      },
+      { sep: true },
+      {
+        label: `移入回收站${tail}`,
+        danger: true,
+        run: () => void trashDocs(list)
+      }
+    ]
+  }
 
   const exportBib = () => download(toBibtex(target), 'library.bib')
   const exportRis = () => download(toRis(target), 'library.ris')
@@ -1185,6 +1276,10 @@ export default function App() {
             }
             multi={multi}
             selectedId={selId}
+            onContextMenu={(d, e) => {
+              e.preventDefault()
+              setMenu({ x: e.clientX, y: e.clientY, docId: d.id })
+            }}
             onToggleStar={(d) => {
               setFlags(d, { starred: !d.starred }).catch((e) => setErr(String(e)))
             }}
@@ -1265,6 +1360,19 @@ export default function App() {
           )}
         </div>
       </div>
+      {menu && (
+        <RowMenu
+          x={menu.x}
+          y={menu.y}
+          head={
+            menuTargets(menu.docId).length > 1
+              ? `${menuTargets(menu.docId).length} 条选中`
+              : (docs.find((d) => d.id === menu.docId)?.title ?? '').slice(0, 40)
+          }
+          items={rowMenuItems(menu.docId)}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   )
 }

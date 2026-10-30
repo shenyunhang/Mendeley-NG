@@ -17,6 +17,9 @@ interface Props {
    *  shift-click range has to span. */
   onSelect: (d: Doc, index: number, mod: { shift: boolean; add: boolean }) => void
   onToggleStar: (d: Doc) => void
+  /** Right click.  The raw event is passed through so the caller can put the
+   *  menu where the pointer actually is. */
+  onContextMenu?: (d: Doc, e: React.MouseEvent) => void
   /** ids of every row in the current multi-selection */
   multi: string[]
   /** base UI font size; the row height follows it, so the virtualiser has to
@@ -33,6 +36,7 @@ export default function DocTable({
   selectedId,
   onSelect,
   onToggleStar,
+  onContextMenu,
   multi,
   fontSize,
   cols
@@ -129,6 +133,15 @@ export default function DocTable({
                   onClick={(e) =>
                     onSelect(d, vi.index, { shift: e.shiftKey, add: e.ctrlKey || e.metaKey })
                   }
+                  onContextMenu={(e) => {
+                    // a right click on an unselected row is a request to act on
+                    // that row, so it selects first: otherwise the menu would
+                    // describe one document while the pane showed another
+                    if (!multi.includes(d.id)) {
+                      onSelect(d, vi.index, { shift: false, add: false })
+                    }
+                    onContextMenu?.(d, e)
+                  }}
                   style={{
                     position: 'absolute',
                     top: 0,
