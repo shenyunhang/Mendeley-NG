@@ -273,8 +273,39 @@ td .no-pdf {
   font-size: 0.8rem;
   flex: 0 0 auto;
 }
+.pdf-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.pdf-outline {
+  flex: 0 0 190px;
+  min-width: 0;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-2);
+  padding: 4px 0;
+  font-size: 0.8rem;
+}
+
+.ol-row {
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+
+.ol-row:hover {
+  background: var(--bg-3);
+}
+
 .pdf-scroll {
   flex: 1;
+  min-width: 0;
   overflow: auto;
   background: #151515;
   padding: 12px;

@@ -38,6 +38,24 @@ const PALETTE = ['#ffe066', '#a9e34b', '#74c0fc', '#ffa8a8', '#d0bfff']
  */
 type ZoomMode = 'manual' | 'fit-width' | 'fit-page'
 
+/** Depth-first walk of the outline tree into a flat, indented list. */
+function flattenOutline(items: OutlineNode[], depth = 0): OutlineRow[] {
+  const out: OutlineRow[] = []
+  for (const n of items ?? []) {
+    out.push({ node: n, depth })
+    if (n.items?.length) out.push(...flattenOutline(n.items, depth + 1))
+  }
+  return out
+}
+
+/** One node of the PDF outline, as pdf.js hands it back. */
+type OutlineNode = Awaited<ReturnType<pdfjs.PDFDocumentProxy['getOutline']>>[number]
+
+interface OutlineRow {
+  node: OutlineNode
+  depth: number
+}
+
 /** Room for the scroll container's own padding, plus a vertical scroll bar.
  *  Both are reserved unconditionally: measuring `clientWidth` instead would
  *  make the fitted scale depend on whether a scroll bar happens to be showing,
@@ -99,6 +117,8 @@ export default function PdfViewer({
   const [scale, setScale] = useState(1.3)
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit-width')
   const [tick, setTick] = useState(0)
+  const [outline, setOutline] = useState<OutlineRow[] | null>(null)
+  const [showOutline, setShowOutline] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [anns, setAnns] = useState<Annotation[]>([])
   const [drag, setDrag] = useState<Rect | null>(null)
@@ -131,17 +151,26 @@ export default function PdfViewer({
     setPdf(null)
     setSizes({})
     setMsg(null)
+    setOutline(null)
     if (!doc.localPdf) return
     let dead = false
     pdfjs
       .getDocument({ url: window.api.pdfUrl(doc.localPdf) })
-      .promise.then((p) => {
+      .promise.then(async (p) => {
         if (dead) {
           p.destroy()
           return
         }
         setPdf(p)
         setNumPages(p.numPages)
+        // the outline is cheap and lets a long paper be navigated by section,
+        // which is the only way a 40-page PDF is usable at all
+        try {
+          const o = await p.getOutline()
+          if (!dead && o?.length) setOutline(flattenOutline(o))
+        } catch {
+          /* a PDF without a valid outline is not an error worth showing */
+        }
       })
       .catch((e) => !dead && setErr(String(e)))
     return () => {
@@ -508,6 +537,22 @@ export default function PdfViewer({
     setDrag(null)
   }
 
+  /** Jump to a section.  Destinations are resolved lazily: some papers have
+   *  hundreds of them and resolving a broken one throws. */
+  const goTo = async (node: OutlineNode) => {
+    if (!pdf) return
+    try {
+      const dest =
+        typeof node.dest === 'string' ? await pdf.getDestination(node.dest) : node.dest
+      const ref = Array.isArray(dest) ? dest[0] : null
+      if (!ref) return
+      const idx = await pdf.getPageIndex(ref)
+      if (Number.isFinite(idx)) setPage(idx + 1)
+    } catch {
+      /* outlines pointing at a missing destination are common enough */
+    }
+  }
+
   const selected = anns.find((a) => a.id === sel) || null
   const pageAnns = anns.filter((a) =>
     a.pos ? a.pos.some((p) => p.page === page) : a.page === page
@@ -599,6 +644,14 @@ export default function PdfViewer({
         >
           整页
         </button>
+        <button
+          className={showOutline ? 'primary' : ''}
+          disabled={!outline?.length}
+          title={outline?.length ? '显示 PDF 目录' : '这个 PDF 没有目录'}
+          onClick={() => setShowOutline((v) => !v)}
+        >
+          目录
+        </button>
         <span style={{ flex: 1 }} />
         <button onClick={syncCloud} disabled={busy}>
           云同步标注
@@ -643,55 +696,72 @@ export default function PdfViewer({
         </div>
       )}
 
-      <div className="pdf-scroll" ref={scrollRef}>
-        <div
-          ref={wrapRef}
-          style={{ position: 'relative', display: 'inline-block' }}
-          onMouseDown={onDown}
-          onMouseMove={onMove}
-          onMouseUp={onUp}
-        >
-          <canvas ref={canvasRef} style={{ display: 'block' }} />
-          {pageAnns.map((a) =>
-            rectsFor(a).map((r, i) => (
+      <div className="pdf-body">
+        {showOutline && outline?.length ? (
+          <div className="pdf-outline">
+            {outline.map((r, i) => (
               <div
-                key={a.id + i}
-                title={a.note || '高亮'}
-                onClick={() => {
-                  setSel(a.id)
-                  setNote(a.note || '')
-                }}
+                key={i}
+                className="ol-row"
+                style={{ paddingLeft: 6 + r.depth * 12 }}
+                title={r.node.title}
+                onClick={() => goTo(r.node)}
+              >
+                {r.node.title || '(无标题)'}
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className="pdf-scroll" ref={scrollRef}>
+          <div
+            ref={wrapRef}
+            style={{ position: 'relative', display: 'inline-block' }}
+            onMouseDown={onDown}
+            onMouseMove={onMove}
+            onMouseUp={onUp}
+          >
+            <canvas ref={canvasRef} style={{ display: 'block' }} />
+            {pageAnns.map((a) =>
+              rectsFor(a).map((r, i) => (
+                <div
+                  key={a.id + i}
+                  title={a.note || '高亮'}
+                  onClick={() => {
+                    setSel(a.id)
+                    setNote(a.note || '')
+                  }}
+                  style={{
+                    position: 'absolute',
+                    left: `${r.x * 100}%`,
+                    top: `${r.y * 100}%`,
+                    width: `${r.w * 100}%`,
+                    height: `${r.h * 100}%`,
+                    background: a.color,
+                    opacity: 0.32,
+                    cursor: 'pointer',
+                    mixBlendMode: 'multiply',
+                    boxShadow: sel === a.id ? '0 0 0 1px var(--accent)' : undefined
+                  }}
+                />
+              ))
+            )}
+            {drag && (
+              <div
                 style={{
                   position: 'absolute',
-                  left: `${r.x * 100}%`,
-                  top: `${r.y * 100}%`,
-                  width: `${r.w * 100}%`,
-                  height: `${r.h * 100}%`,
-                  background: a.color,
-                  opacity: 0.32,
-                  cursor: 'pointer',
-                  mixBlendMode: 'multiply',
-                  boxShadow: sel === a.id ? '0 0 0 1px var(--accent)' : undefined
+                  left: `${drag.x * 100}%`,
+                  top: `${drag.y * 100}%`,
+                  width: `${drag.w * 100}%`,
+                  height: `${drag.h * 100}%`,
+                  background: '#ffe066',
+                  opacity: 0.35,
+                  pointerEvents: 'none'
                 }}
               />
-            ))
-          )}
-          {drag && (
-            <div
-              style={{
-                position: 'absolute',
-                left: `${drag.x * 100}%`,
-                top: `${drag.y * 100}%`,
-                width: `${drag.w * 100}%`,
-                height: `${drag.h * 100}%`,
-                background: '#ffe066',
-                opacity: 0.35,
-                pointerEvents: 'none'
-              }}
-            />
-          )}
-          {/* invisible, selectable, and the reason highlights follow words */}
-          <div className="tx-layer" ref={layerRef} />
+            )}
+            {/* invisible, selectable, and the reason highlights follow words */}
+            <div className="tx-layer" ref={layerRef} />
+          </div>
         </div>
       </div>
     </div>

@@ -212,6 +212,29 @@ async function runSmoke() {
   await new Promise((r) => setTimeout(r, 1200))
   log('back to fit-width', await measure())
 
+  // the outline is the only way to navigate a long paper, so prove that it
+  // loads and that clicking a section actually moves the page
+  log('click 目录', await clickBar('目录'))
+  await new Promise((r) => setTimeout(r, 400))
+  const olInfo = await w.webContents.executeJavaScript(
+    'JSON.stringify({rows:[...document.querySelectorAll(".ol-row")].length,'
+    + 'first:(document.querySelector(".ol-row")||{}).textContent||null})'
+  )
+  log('outline', olInfo)
+  const jumped = await w.webContents.executeJavaScript(
+    '(()=>{const rows=[...document.querySelectorAll(".ol-row")];'
+    + 'if(rows.length<2)return "too few rows";'
+    // several sections of a short paper land on page 1, so aim at the last
+    // one, which is the only entry guaranteed to be further in
+    + 'const i=document.querySelector(".pdf-bar input");const before=i.value;'
+    + 'rows[rows.length-1].click();return before})()'
+  )
+  await new Promise((r) => setTimeout(r, 1200))
+  const nowPage = await w.webContents.executeJavaScript(
+    'document.querySelector(".pdf-bar input").value'
+  )
+  log('outline jump', 'from', jumped, '->', nowPage)
+
   // The selection layer is what turns a rubber band into a real highlight, so
   // the run makes a synthetic selection and checks that it produces sane
   // rectangles.  The annotation file is restored afterwards; leaving a stray
