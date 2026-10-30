@@ -225,6 +225,13 @@ export class Mendeley {
     return Buffer.from(await res.arrayBuffer())
   }
 
+  async createDocument(body: Record<string, unknown>): Promise<Doc> {
+    return this.request<Doc>('POST', '/documents', {
+      body,
+      contentType: CT_DOC
+    })
+  }
+
   /**
    * Create a document straight from a file.  This is not JSON: the PDF goes
    * in as the raw body with two headers, and the server creates the record

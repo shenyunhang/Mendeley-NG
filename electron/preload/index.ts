@@ -59,6 +59,10 @@ const api = {
   fileHash: (docId: string) =>
     ipcRenderer.invoke('annotations:fileHash', docId) as Promise<string | null>,
   saveAnnotations: (list: Annotation[]) => ipcRenderer.invoke('annotations:save', list),
+  createDoc: (body: Record<string, unknown>) =>
+    ipcRenderer.invoke('doc:create', body) as Promise<Doc>,
+  openRefFiles: () =>
+    ipcRenderer.invoke('dialog:openFiles') as Promise<{ name: string; text: string }[]>,
   lookupMeta: (docId: string) =>
     ipcRenderer.invoke('meta:lookup', docId) as Promise<MetaCandidate[]>,
   importPdf: (

@@ -3,6 +3,7 @@ import type { Doc, Folder, Library, SyncStatus, UpdateState } from '../shared/ty
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
 import DupesView from './components/DupesView'
+import ImportView from './components/ImportView'
 import DocTable from './components/DocTable'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
@@ -10,6 +11,7 @@ import { extractIds } from './lib/pdfmeta'
 import { toBibtex, toRis } from './lib/export'
 import { buildTree } from './lib/tree'
 import { findDuplicates, type DupeGroup } from './lib/dupes'
+import { parseAny, type Entry } from './lib/import'
 
 type SortKey = 'title' | 'authors' | 'year' | 'source' | 'citation_key'
 
@@ -42,6 +44,7 @@ export default function App() {
   const [upd, setUpd] = useState<UpdateState | null>(null)
   const [trash, setTrash] = useState<Doc[] | null>(null)
   const [dupes, setDupes] = useState<DupeGroup[] | null>(null)
+  const [importing, setImporting] = useState<Entry[] | null>(null)
   const [pdfDir, setPdfDir] = useState('')
   const [fontSize, setFontSize] = useState(15)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -271,6 +274,17 @@ export default function App() {
           {upd?.phase === 'downloading' ? `下载中 ${upd.percent ?? 0}%` : '检查更新'}
         </button>
         <button
+          onClick={async () => {
+            const files = await window.api.openRefFiles()
+            const all: Entry[] = []
+            for (const f of files) all.push(...parseAny(f.name, f.text))
+            setImporting(all)
+          }}
+          title="导入 BibTeX / RIS / EndNote XML"
+        >
+          导入文献
+        </button>
+        <button
           onClick={() => setDupes(findDuplicates(docs))}
           disabled={!docs.length}
           title="按 DOI / arXiv id / 标题找重复条目"
@@ -396,7 +410,18 @@ export default function App() {
           />
         </div>
 
-        {dupes ? (
+        {importing ? (
+          <ImportView
+            entries={importing}
+            docs={docs}
+            onClose={() => setImporting(null)}
+            onImported={(created) => {
+              if (created.length) {
+                setLib((l) => (l ? { ...l, docs: [...l.docs, ...created] } : l))
+              }
+            }}
+          />
+        ) : dupes ? (
           <DupesView
             groups={dupes}
             onClose={() => setDupes(null)}

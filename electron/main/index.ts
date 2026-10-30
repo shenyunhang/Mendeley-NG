@@ -483,6 +483,31 @@ function pdfNameFor(doc: Doc | undefined, fallback?: string): string {
   return (base.slice(0, 150) || 'download') + '.pdf'
 }
 
+ipcMain.handle('doc:create', async (_e, body: Record<string, unknown>) => {
+  const c = ensureClient()
+  const doc = await c.createDocument(body)
+  const lib = loadLibrary()
+  if (lib) saveLibrary([...lib.docs, doc], lib.folders)
+  return doc
+})
+
+ipcMain.handle('dialog:openFiles', async () => {
+  const r = await dialog.showOpenDialog({
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      {
+        name: '参考文献',
+        extensions: ['bib', 'bibtex', 'ris', 'xml', 'enw', 'txt']
+      }
+    ]
+  })
+  if (r.canceled || !r.filePaths.length) return []
+  return r.filePaths.map((p) => ({
+    name: path.basename(p),
+    text: fs.readFileSync(p, 'utf-8')
+  }))
+})
+
 ipcMain.handle('meta:lookup', async (_e, docId: string) => {
   const lib = loadLibrary()
   const doc = lib?.docs.find((d) => d.id === docId)
