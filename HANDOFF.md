@@ -350,6 +350,21 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 - **33 是写云端**：`tags` 追加要读回原值再合并；`starred` / `read` 是文献自带字段，
   直接 PATCH。批量失败要跳过而不是中断（同 `batchFolder` 的做法）。
 
+这一轮新踩到的四个坑：
+
+- **Ctrl+F 要用 capture 抢**：`App` 在 `window` 上先注册了全库搜索的 Ctrl+F，
+  后注册的 bubble 监听一定排在它后面。阅读器用
+  `window.addEventListener('keydown', h, true)` 再 `stopPropagation()`
+  才能抢到；capture 阶段 stopPropagation 会连目标阶段一起掐掉。
+- **file:// 别用 `navigator.clipboard`**：渲染进程是 `loadFile` 出来的 file://
+  页面，异步剪贴板能不能用取决于权限策略，静默失败最难查。走 Electron 的
+  `clipboard` 模块，顺便让冒烟能 `readClipboard()` 回读验证。
+- **`onBlur` 在冒烟里要派发 `focusout`**：React 把 `onBlur` 映射成原生
+  `focusout`，派发 `new FocusEvent('blur')` 会被吞。省事的办法是走
+  `keydown Enter` 那条提交路径。
+- **虚拟列表要 `scrollToIndex(i, { align: 'auto' })`**：键盘把选区移到屏幕外的行时，
+  不滚过去看起来就像没反应；`auto` 保证已经可见的行不动，鼠标点击不会跳。
+
 ### 9.3 差距可以接受，先不做
 
 - **下划线 / 墨水 / 文本标注**：云端 `/annotations` 只认 `highlight` 与 `sticky_note`，
