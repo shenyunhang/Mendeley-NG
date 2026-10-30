@@ -929,9 +929,33 @@ td .no-pdf {
   text-align: center;
 }
 .err {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   color: var(--err);
   font-size: 0.8rem;
   padding: 6px 10px;
+}
+/* a reason a sync failed can be a sentence; it wraps rather than being
+   clipped, because the one thing worse than an error is a truncated one */
+.err-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.err-close {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  font-size: 0.933rem;
+  line-height: 1.1;
+  color: inherit;
+  background: none;
+  border: none;
+  opacity: 0.65;
+}
+.err-close:hover:not(:disabled) {
+  background: none;
+  opacity: 1;
 }
 .badge {
   font-size: 0.733rem;

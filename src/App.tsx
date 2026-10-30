@@ -339,7 +339,9 @@ export default function App() {
     setErr(null)
     const r = await window.api.sync(full)
     if (r && 'error' in r) {
-      setErr(r.error)
+      // the banner no longer says "sync failed" on every message, so the one
+      // that is about syncing has to say so itself
+      setErr('同步失败：' + r.error + '　（可能需要导入 token.json）')
     } else if (r) {
       setLib({ docs: r.docs, folders: r.folders, syncedAt: new Date().toISOString() })
       setFolders(r.folders)
@@ -771,7 +773,12 @@ export default function App() {
         await window.api.loadLibrary().then((res) => {
           if (res && !('error' in res) && res.docs) setLib(res)
         })
-        setErr(r.renamed ? `已重命名 ${r.renamed} 个文件${r.skipped ? `，跳过 ${r.skipped} 个` : ''}` : null)
+        // a count of renamed files is not an error, and the red banner was
+        // the only place it had to go, so it landed there reading as one
+        if (r.renamed) {
+          setBatchMsg(`已重命名 ${r.renamed} 个文件${r.skipped ? `，跳过 ${r.skipped} 个` : ''}`)
+          setTimeout(() => setBatchMsg(null), 3000)
+        }
       }
     })
   }
@@ -1085,7 +1092,7 @@ export default function App() {
         const doc = await window.api.importPdf(f.name, await f.arrayBuffer(), ids)
         setLib((l) => (l ? { ...l, docs: [...l.docs, doc] } : l))
       } catch (err) {
-        setErr(String(err))
+        setErr(`导入「${f.name}」失败：${String(err)}`)
       }
     }
     setImportMsg(files.length > 1 ? `已导入 ${files.length} 篇` : '导入完成')
@@ -1154,7 +1161,7 @@ export default function App() {
           onClick={async () => {
             const r = await window.api.importToken()
             if (r?.ok) await doSync()
-            else if (r) setErr(r.error ?? '导入失败')
+            else if (r) setErr('导入 token 失败：' + (r.error ?? '未选择文件'))
           }}
           title="选择 get-token 生成的 token.json"
         >
@@ -1336,7 +1343,21 @@ export default function App() {
         <span className="badge">{filtered.length} / {docs.length}</span>
       </div>
 
-      {err && <div className="err">同步失败：{err}　（可能需要导入 token.json）</div>}
+      {err && (
+        <div className="err">
+          <span className="err-text">{err}</span>
+          {/*
+            The one banner that stays.  The others clear themselves after a
+            couple of seconds, which is right for "copied" and wrong for a
+            reason a sync failed: that is worth reading more than once, and
+            it used to sit there until some later operation happened to
+            push it off.  So it gets a way out instead of a timeout.
+          */}
+          <button className="err-close" title="关掉这条提示" onClick={() => setErr(null)}>
+            ×
+          </button>
+        </div>
+      )}
       {importMsg && <div className="pdf-msg">{importMsg}</div>}
       {dropping && <div className="drop-veil">松手即导入 PDF</div>}
       {ask && (
@@ -1653,7 +1674,7 @@ export default function App() {
               setMenu({ x: e.clientX, y: e.clientY, docId: d.id })
             }}
             onToggleStar={(d) => {
-              setFlags(d, { starred: !d.starred }).catch((e) => setErr(String(e)))
+              setFlags(d, { starred: !d.starred }).catch((e) => setErr('改星标失败：' + String(e)))
             }}
             onSelect={onRowSelect}
           />
