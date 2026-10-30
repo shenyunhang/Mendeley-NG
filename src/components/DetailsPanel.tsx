@@ -7,6 +7,9 @@ interface Props {
   onSaved: (d: Doc) => void
   onToggleFolder: (folderId: string, has: boolean) => void
   onTrash?: () => void
+  /** Reported after a note is written, so whoever is searching inside notes
+   *  can keep its copy in step. */
+  onNoteSaved?: (docId: string, text: string) => void
 }
 
 const AUTHOR_SEP = '; '
@@ -41,7 +44,8 @@ export default function DetailsPanel({
   folders,
   onSaved,
   onToggleFolder,
-  onTrash
+  onTrash,
+  onNoteSaved
 }: Props) {
   const [form, setForm] = useState({
     title: '',
@@ -132,6 +136,9 @@ export default function DetailsPanel({
       if (text) all[doc.id] = text
       else delete all[doc.id]
       await window.api.saveNotes(all)
+      // the list keeps its own copy of the notes so it can search inside
+      // them; it has no way of knowing this happened otherwise
+      onNoteSaved?.(doc.id, text)
     } catch {
       setMsg('笔记保存失败')
     }

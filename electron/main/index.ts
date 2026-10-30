@@ -1023,6 +1023,24 @@ async function runSmoke() {
       + 'return JSON.stringify({keys:Object.keys(n).length,sample:Object.values(n)[0]||null})})()'
     )
   )
+  // The list search has to reach a note the moment it is written, or the
+  // thing the user typed about a paper is the one thing they cannot find
+  // the paper by.  The filter is cleared afterwards.
+  const noteSearch = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>{const i=document.querySelector(".toolbar input");'
+      + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+      + 'set.call(i,"smoke test note");i.dispatchEvent(new Event("input",{bubbles:true}));'
+      + 'await new Promise(r=>setTimeout(r,500));'
+      + 'const rows=document.querySelectorAll("div.row").length;'
+      + 'set.call(i,"");i.dispatchEvent(new Event("input",{bubbles:true}));'
+      + 'await new Promise(r=>setTimeout(r,300));'
+      + 'return JSON.stringify({rows})})()'
+    )
+  )
+  log('note is searchable', noteSearch)
+  expect('a note makes its document findable', noteSearch.rows > 0, noteSearch)
+
   await setNote('')
   await new Promise((r) => setTimeout(r, 400))
   log(

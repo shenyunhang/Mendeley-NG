@@ -88,15 +88,28 @@ const UPD_TEXT: Record<UpdateState['phase'], ((s: UpdateState) => string) | null
   unsupported: (s) => s.message ?? '当前环境不支持更新'
 }
 
-/** Everything the search box looks at, in one lower-cased string.  Shared
- *  with saved searches so a saved filter matches exactly what it saved. */
-function hay(d: Doc): string {
+/**
+ * Everything the search box looks at, in one lower-cased string.  Shared
+ * with saved searches so a saved filter matches exactly what it saved.
+ *
+ * It covers what a reader actually remembers about a paper: the abstract
+ * they read, the tag they gave it, the note they wrote.  Searching only
+ * title / authors / journal / key / doi meant a paper could not be found by
+ * anything the user themselves had entered, which is the source of "I know
+ * I wrote something about this".
+ */
+function hay(d: Doc, note?: string): string {
   return [
     d.title,
     d.source,
     d.citation_key,
     d.doi,
-    (d.authors ?? []).map((a) => `${a.first_name ?? ''} ${a.last_name ?? ''}`).join(' ')
+    d.abstract,
+    d.type,
+    (d.authors ?? []).map((a) => `${a.first_name ?? ''} ${a.last_name ?? ''}`).join(' '),
+    (d.keywords ?? []).join(' '),
+    (d.tags ?? []).join(' '),
+    note ?? ''
   ]
     .join(' ')
     .toLowerCase()
@@ -165,6 +178,9 @@ export default function App() {
   const [rightPct, setRightPct] = useState(DEFAULT_RIGHT_PCT)
   const bodyRef = useRef<HTMLDivElement>(null)
   const [undo, setUndo] = useState<UndoEntry[]>([])
+  /** Local notes, kept here only so the search box can look inside them.
+   *  They are written by the details panel, which reports back after saving. */
+  const [noteMap, setNoteMap] = useState<Record<string, string>>({})
   const searchRef = useRef<HTMLInputElement>(null)
   // the keydown listener is installed once, so it has to reach the undo stack
   // through a ref rather than closing over a stale one
@@ -202,6 +218,7 @@ export default function App() {
         setFontSize(c.fontSize)
       }
     })
+    window.api.loadNotes().then((n) => setNoteMap(n ?? {})).catch(() => {})
     const off = window.api.onSyncStatus(setStatus)
     const offUpd = window.api.onUpdateState(setUpd)
     const offFt = window.api.onFtProgress(setFtStat)
@@ -332,6 +349,18 @@ export default function App() {
 
   const docs = lib?.docs ?? []
 
+  /**
+   * One pre-built haystack per document.  Building them on every keystroke
+   * over 5600 documents, several of which have a full abstract, is what
+   * turns typing into a stutter; they only change when a document or a note
+   * does.
+   */
+  const haystack = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const d of docs) m.set(d.id, hay(d, noteMap[d.id]))
+    return m
+  }, [docs, noteMap])
+
   const tree = useMemo(() => buildTree(folders), [folders])
 
   /** rollup: a parent also counts and shows what is inside its children */
@@ -358,7 +387,7 @@ export default function App() {
       const ids = new Set(tree.subtree.get(folderId) ?? [folderId])
       out = out.filter((d) => (d.folder_uuids ?? []).some((f) => ids.has(f)))
     }
-    if (q) out = out.filter((d) => hay(d).includes(q))
+    if (q) out = out.filter((d) => (haystack.get(d.id) ?? '').includes(q))
     const { key, dir } = sort
     const val = (d: Doc): string | number => {
       if (key === 'authors') {
@@ -380,7 +409,7 @@ export default function App() {
       if (x === y) return (a.title ?? '').localeCompare(b.title ?? '')
       return (x < y ? -1 : 1) * dir
     })
-  }, [docs, folderId, query, sort, onlyStarred])
+  }, [docs, folderId, query, sort, onlyStarred, haystack])
 
   // Full-text search runs in the main process against the whole corpus, so it
   // is debounced: typing a word should not start one scan per keystroke.
@@ -497,13 +526,13 @@ export default function App() {
         docs.filter((d) => {
           if (s.starred && !d.starred) return false
           if (ids && !(d.folder_uuids ?? []).some((f) => ids.has(f))) return false
-          if (q && !hay(d).includes(q)) return false
+          if (q && !(haystack.get(d.id) ?? '').includes(q)) return false
           return true
         }).length
       )
     }
     return m
-  }, [saved, docs, tree])
+  }, [saved, docs, tree, haystack])
 
   /**
    * Selection follows the file manager the user already knows: shift-click
@@ -1240,8 +1269,9 @@ export default function App() {
           placeholder={
             ftMode
               ? '搜索 PDF 正文（只索引每篇前几页）  (Ctrl+F)'
-              : '搜索标题 / 作者 / 期刊 / citation key  (Ctrl+F)'
+              : '搜索标题 / 作者 / 期刊 / 摘要 / 标签 / 笔记  (Ctrl+F)'
           }
+          title="标题、作者、期刊、citation key、DOI、摘要、类型、关键词、标签，以及这篇上写的本地笔记"
           value={ftMode ? ftQuery : query}
           onChange={(e) => (ftMode ? setFtQuery(e.target.value) : setQuery(e.target.value))}
         />
@@ -1674,6 +1704,14 @@ export default function App() {
                 setLib((l) => (l ? { ...l, docs: l.docs.filter((x) => x.id !== selected.id) } : l))
                 setSelId(null)
               }}
+              onNoteSaved={(id, text) =>
+                setNoteMap((m) => {
+                  const next = { ...m }
+                  if (text) next[id] = text
+                  else delete next[id]
+                  return next
+                })
+              }
               onToggleFolder={async (fid, has) => {
                 if (has) await window.api.removeFromFolder(fid, selected.id)
                 else await window.api.addToFolder(fid, selected.id)
