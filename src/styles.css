@@ -298,18 +298,67 @@ textarea:focus {
   min-width: 0;
 }
 .pane-left {
-  flex: 0 0 240px;
-  border-right: 1px solid var(--border);
+  /* shrink is allowed, down to a floor: on a narrow window the tree giving up
+     width is much better than the whole row overflowing and growing a
+     horizontal scroll bar */
+  flex: 0 1 240px;
+  min-width: 140px;
   background: var(--bg-2);
 }
 .pane-mid {
   flex: 1 1 auto;
-  min-width: 420px;
+  min-width: 260px;
 }
 .pane-right {
   flex: 0 0 46%;
-  border-left: 1px solid var(--border);
   background: var(--bg-2);
+}
+
+/* The draggable edge between two panes.  The visible part is a hairline; the
+   part that answers the pointer is the hairline plus two pixels on either
+   side, because a one-pixel target is not a target.  It sits above both
+   panes, or the right-hand overhang would be painted over and lost. */
+.splitter {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 7px;
+  background: transparent;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+}
+.splitter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--border);
+}
+.splitter::after {
+  content: '';
+  position: absolute;
+  inset: 0 -2px;
+}
+.splitter:hover::before,
+.splitter.on::before,
+.splitter:focus-visible::before {
+  left: 1px;
+  width: 5px;
+  background: var(--accent);
+}
+.splitter:focus-visible {
+  outline: none;
+}
+/* while a drag is on, the cursor stays a resize cursor even when the pointer
+   outruns the bar and ends up over a pane, and nothing gets selected */
+body.resizing,
+body.resizing * {
+  cursor: col-resize !important;
+}
+body.resizing {
+  user-select: none;
 }
 .pane-head {
   padding: 6px 10px;

@@ -35,6 +35,7 @@ import RowMenu, { type RowMenuItem } from './components/RowMenu'
 import NotesView from './components/NotesView'
 import BatchEdit, { type BatchOp } from './components/BatchEdit'
 import Settings from './components/Settings'
+import Splitter from './components/Splitter'
 import { extractIds } from './lib/pdfmeta'
 import { toBibtex, toEndnoteXml, toRis } from './lib/export'
 import { buildTree } from './lib/tree'
@@ -52,6 +53,28 @@ interface UndoEntry {
   label: string
   run: () => Promise<void>
 }
+
+/**
+ * Pane widths, and the room every pane is guaranteed.
+ *
+ * The list keeps at least `MID_MIN`: a table squeezed to a couple of columns
+ * is worse than a reader that is a little narrower, and without a floor a
+ * drag to the far right would leave the middle pane with nothing.
+ */
+const DEFAULT_LEFT_W = 240
+const DEFAULT_RIGHT_PCT = 46
+const LEFT_MIN = 140
+const LEFT_MAX = 520
+const RIGHT_MIN = 22
+const RIGHT_MAX = 70
+const MID_MIN = 260
+
+const clampNum = (v: number, lo: number, hi: number) =>
+  Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : lo
+
+const clampLeft = (v: number) => Math.round(clampNum(v, LEFT_MIN, LEFT_MAX))
+const clampRight = (v: number) =>
+  Math.round(clampNum(v, RIGHT_MIN, RIGHT_MAX) * 10) / 10
 
 /** Toolbar wording for each updater phase; null means "say nothing". */
 const UPD_TEXT: Record<UpdateState['phase'], ((s: UpdateState) => string) | null> = {
@@ -133,6 +156,14 @@ export default function App() {
   const [settings, setSettings] = useState(false)
   const [version, setVersion] = useState('')
   const [ftPages, setFtPages] = useState(DEFAULT_FT_PAGES)
+  /**
+   * Pane widths.  The folder tree is a fixed width, because a tree does not
+   * get wider when the window does; the reader is a share of the window,
+   * because that is exactly what it should follow.  Both are remembered.
+   */
+  const [leftW, setLeftW] = useState(DEFAULT_LEFT_W)
+  const [rightPct, setRightPct] = useState(DEFAULT_RIGHT_PCT)
+  const bodyRef = useRef<HTMLDivElement>(null)
   const [undo, setUndo] = useState<UndoEntry[]>([])
   const searchRef = useRef<HTMLInputElement>(null)
   // the keydown listener is installed once, so it has to reach the undo stack
@@ -163,6 +194,8 @@ export default function App() {
       if (c.pdfNameTemplate) setNameTemplate(c.pdfNameTemplate)
       if (isCiteStyle(c.citeStyle)) setCiteStyle(c.citeStyle)
       if (typeof c.ftPages === 'number' && c.ftPages > 0) setFtPages(c.ftPages)
+      if (typeof c.paneLeft === 'number') setLeftW(clampLeft(c.paneLeft))
+      if (typeof c.paneRight === 'number') setRightPct(clampRight(c.paneRight))
       setTheme(c.theme === 'light' ? 'light' : 'dark')
       if (c.fontSize) {
         fontRef.current = c.fontSize
@@ -627,6 +660,64 @@ export default function App() {
     setFtPages(next)
     await window.api.setConfig({ ftPages: next })
     setFtStat(await window.api.ftStatus())
+  }
+
+  /**
+   * Dragging a pane edge.  Both are clamped against the same floor for the
+   * middle pane, so neither drag can squeeze the document list out of
+   * existence, and the clamp is recomputed from the live box because the
+   * window can be resized between two drags.
+   */
+  const dragLeft = (x: number) => {
+    const box = bodyRef.current?.getBoundingClientRect()
+    if (!box || box.width <= 0) return
+    const rightPx = (box.width * rightPct) / 100
+    const hi = Math.max(LEFT_MIN, Math.min(LEFT_MAX, box.width - rightPx - MID_MIN))
+    setLeftW(Math.round(clampNum(x - box.left, LEFT_MIN, hi)))
+  }
+
+  const dragRight = (x: number) => {
+    const box = bodyRef.current?.getBoundingClientRect()
+    if (!box || box.width <= 0) return
+    // the right pane is a share of the window, so the drag is converted to a
+    // percentage: the width the user chose then survives a resize
+    const hi = ((box.width - leftW - MID_MIN) / box.width) * 100
+    const pct = ((box.right - x) / box.width) * 100
+    setRightPct(Math.round(clampNum(pct, RIGHT_MIN, Math.min(RIGHT_MAX, hi)) * 10) / 10)
+  }
+
+  /**
+   * Remember the widths, but only once the drag has stopped.
+   *
+   * Saving from the drag's own "mouse up" instead of here is the obvious
+   * version and it is wrong: that handler closes over the state of the render
+   * it was created in, so releasing inside the same frame as the last move
+   * saves the width from before the move.  Waiting on the state settles the
+   * question, and the debounce means one write per drag rather than one per
+   * frame, which is a hundred writes to a file nobody asked to touch.
+   */
+  const panesTouched = useRef(false)
+  useEffect(() => {
+    // the first run is the mount, not a change
+    if (!panesTouched.current) {
+      panesTouched.current = true
+      return
+    }
+    const t = setTimeout(() => {
+      void window.api.setConfig({ paneLeft: leftW, paneRight: rightPct })
+    }, 400)
+    return () => clearTimeout(t)
+  }, [leftW, rightPct])
+
+  const setLeft = (w: number) => {
+    const next = clampLeft(w)
+    setLeftW(next)
+    void window.api.setConfig({ paneLeft: next })
+  }
+  const setRight = (p: number) => {
+    const next = clampRight(p)
+    setRightPct(next)
+    void window.api.setConfig({ paneRight: next })
   }
 
   const askNameTemplate = () => {
@@ -1227,8 +1318,8 @@ export default function App() {
         />
       )}
 
-      <div className="body">
-        <div className="pane pane-left">
+      <div className="body" ref={bodyRef}>
+        <div className="pane pane-left" style={{ flexBasis: leftW }}>
           <div className="pane-head">
             <span>文件夹</span>
             <span className="grow" />
@@ -1305,6 +1396,13 @@ export default function App() {
             }}
           />
         </div>
+
+        <Splitter
+          onMove={dragLeft}
+          onReset={() => setLeft(DEFAULT_LEFT_W)}
+          onNudge={(d) => setLeft(leftW + d)}
+          title="拖动改变文件夹栏宽度，双击复位"
+        />
 
         {adding ? (
           <AddByIdView
@@ -1531,7 +1629,14 @@ export default function App() {
         </div>
         )}
 
-        <div className="pane pane-right">
+        <Splitter
+          onMove={dragRight}
+          onReset={() => setRight(DEFAULT_RIGHT_PCT)}
+          onNudge={(d) => setRight(rightPct - d / 10)}
+          title="拖动改变阅读栏宽度，双击复位"
+        />
+
+        <div className="pane pane-right" style={{ flexBasis: `${rightPct}%` }}>
           <div className="pane-head">
             <button
               className={rightTab === 'details' ? 'primary' : ''}

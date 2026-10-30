@@ -1180,6 +1180,104 @@ async function runSmoke() {
   )
   await new Promise((r) => setTimeout(r, 300))
 
+  // Draggable pane edges.  The widths are remembered, so the run puts them
+  // back afterwards; everything else here is measured geometry.
+  const cfgPanes = await w.webContents.executeJavaScript(
+    '(async()=>{const c=await window.api.getConfig();'
+    + 'return JSON.stringify({l:c.paneLeft??null,r:c.paneRight??null})})()'
+  )
+  log('config panes before', cfgPanes)
+  const paneW = () =>
+    w.webContents.executeJavaScript(
+      'JSON.stringify({bars:document.querySelectorAll(".splitter").length,'
+      + 'win:Math.round(document.querySelector(".body").getBoundingClientRect().width),'
+      + 'left:Math.round(document.querySelector(".pane-left").getBoundingClientRect().width),'
+      + 'right:Math.round(document.querySelector(".pane-right").getBoundingClientRect().width)})'
+    )
+  const drag = async (which: number, dx: number) => {
+    await w.webContents.executeJavaScript(
+      `(()=>{const s=document.querySelectorAll(".splitter")[${which}];if(!s)return 0;`
+      + 'const b=s.getBoundingClientRect();'
+      + 's.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,button:0,'
+      + 'clientX:Math.round(b.left+3),clientY:Math.round(b.top+200)}));return 1})()'
+    )
+    // the drag is tracked on window from a listener that only exists once the
+    // mousedown has rendered, so a real gap is needed, as with a real drag
+    await new Promise((r) => setTimeout(r, 250))
+    await w.webContents.executeJavaScript(
+      `(()=>{const s=document.querySelectorAll(".splitter")[${which}];`
+      + `const x=Math.round(s.getBoundingClientRect().left+3+${dx});`
+      + 'window.dispatchEvent(new MouseEvent("mousemove",{bubbles:true,clientX:x,clientY:400}));'
+      + 'return 1})()'
+    )
+    await new Promise((r) => setTimeout(r, 150))
+    await w.webContents.executeJavaScript(
+      'window.dispatchEvent(new MouseEvent("mouseup",{bubbles:true}))'
+    )
+    // the write is debounced until the drag has settled, so give it room
+    await new Promise((r) => setTimeout(r, 700))
+  }
+  // Both edges are reset first.  Otherwise the run starts from whatever the
+  // last run left behind, and a reader pane already near its maximum has no
+  // room left to grow into, which makes the check below fail for no reason.
+  await w.webContents.executeJavaScript(
+    '(()=>{const s=document.querySelectorAll(".splitter");'
+    + 's.forEach(b=>b.dispatchEvent(new MouseEvent("dblclick",{bubbles:true})));return s.length})()'
+  )
+  await new Promise((r) => setTimeout(r, 900))
+  const p0 = JSON.parse(await paneW())
+  log('panes at the defaults', p0)
+  expect('both pane edges are draggable', p0.bars === 2, p0)
+  expect('the defaults are the ones the stylesheet says', p0.left === 240, p0)
+  await drag(0, 90)
+  const p1 = JSON.parse(await paneW())
+  log('panes after dragging the tree edge', p1)
+  expect('dragging widens the folder pane', p1.left >= p0.left + 60, { p0, p1 })
+  await drag(1, -100)
+  const p2 = JSON.parse(await paneW())
+  log('panes after dragging the reader edge', p2)
+  expect('dragging widens the reader pane', p2.right >= p1.right + 40, { p1, p2 })
+  expect(
+    'neither drag can squeeze the list away',
+    p2.win - p2.left - p2.right >= 250,
+    p2
+  )
+  const cfgPanes1 = await w.webContents.executeJavaScript(
+    '(async()=>{const c=await window.api.getConfig();'
+    + 'return JSON.stringify({l:c.paneLeft??null,r:c.paneRight??null})})()'
+  )
+  log('config panes after', cfgPanes1)
+  const cfg1 = JSON.parse(cfgPanes1)
+  expect(
+    'the widths are remembered',
+    typeof cfg1.l === 'number' &&
+      typeof cfg1.r === 'number' &&
+      // the reader is stored as a share of the window, so widening it has to
+      // move the number and not just the pixels
+      cfg1.r > 46,
+    cfgPanes1
+  )
+  // double click puts an edge back, then the original widths are written back
+  // so the next run starts where this one did
+  await w.webContents.executeJavaScript(
+    '(()=>{const s=document.querySelectorAll(".splitter")[0];'
+    + 'if(!s)return 0;s.dispatchEvent(new MouseEvent("dblclick",{bubbles:true}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  const p3 = JSON.parse(await paneW())
+  log('panes after a double click', p3)
+  expect('a double click resets the edge', p3.left === 240, p3)
+  // the debounced write fires 400ms after the last change, so it has to land
+  // before the restore below, or it would overwrite the restore and leave the
+  // next run starting from widths this run chose
+  await new Promise((r) => setTimeout(r, 700))
+  const back = JSON.parse(cfgPanes)
+  await w.webContents.executeJavaScript(
+    `(async()=>{await window.api.setConfig({paneLeft:${back.l ?? 'undefined'},`
+    + `paneRight:${back.r ?? 'undefined'}})})()`
+  )
+  await new Promise((r) => setTimeout(r, 300))
+
   if (annBackup) fs.writeFileSync(annPath, annBackup)
   const afterCount = await w.webContents.executeJavaScript(
     '(async()=>(await window.api.loadAnnotations()).length)()'

@@ -153,6 +153,11 @@ export interface AppConfig {
   views?: SavedView[]
   /** Shape of the citation the copy button puts on the clipboard. */
   citeStyle?: string
+  /** Width of the folder tree in CSS px, dragged by the left splitter. */
+  paneLeft?: number
+  /** Width of the reader as a percentage of the window, dragged by the right
+   *  one.  A share rather than a fixed width, so it follows the window. */
+  paneRight?: number
   /** How many leading pages of each PDF the full-text index reads.  Raising it
    *  costs index size; lowering it costs recall.  Changing it drops the index,
    *  because one built for a different budget describes a different corpus. */
