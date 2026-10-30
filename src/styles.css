@@ -328,6 +328,38 @@ td .no-pdf {
   font-size: 0.8rem;
   flex: 0 0 auto;
 }
+.pdf-find {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  font-size: 0.8rem;
+  flex: 0 0 auto;
+}
+.pdf-find input {
+  width: 230px;
+}
+.find-count {
+  min-width: 62px;
+  text-align: center;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+/* a hit is deliberately louder than a highlight: it is transient, and it has
+   to be findable on a page that already carries several of them */
+.find-hit {
+  background: #ff922b;
+  opacity: 0.4;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+.find-hit.cur {
+  background: #ff6b35;
+  opacity: 0.6;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
 .pdf-body {
   display: flex;
   flex: 1;

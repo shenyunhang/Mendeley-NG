@@ -27,6 +27,13 @@ interface TextRun {
   height: number
 }
 
+/** One occurrence of the find query: the page it is on and the boxes that
+ *  cover it, in that page's own 0..1 coordinates. */
+interface FindHit {
+  page: number
+  rects: Rect[]
+}
+
 /** Highlight colours, roughly the ones Mendeley Desktop offered. */
 const PALETTE = ['#ffe066', '#a9e34b', '#74c0fc', '#ffa8a8', '#d0bfff']
 
@@ -127,6 +134,11 @@ export default function PdfViewer({
   const [outline, setOutline] = useState<OutlineRow[] | null>(null)
   const [side, setSide] = useState<'none' | 'outline' | 'anns'>('none')
   const [continuous, setContinuous] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQ, setFindQ] = useState('')
+  const [findHits, setFindHits] = useState<FindHit[]>([])
+  const [findAt, setFindAt] = useState(0)
+  const [findBusy, setFindBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [anns, setAnns] = useState<Annotation[]>([])
   const [drag, setDrag] = useState<Rect | null>(null)
@@ -687,6 +699,253 @@ export default function PdfViewer({
     }
   }
 
+  /* ------------------------------------------------------------------ *
+   *  Finding text inside the open PDF.  pdfjs-dist ships no viewer layer,
+   *  so there is no PDFFindController to lean on: the text runs are pulled
+   *  per page, matched against the query by hand, and mapped back to the
+   *  same 0..1 rectangles the annotation overlay already draws.
+   * ------------------------------------------------------------------ */
+
+  /** Text runs of every page already pulled, so a second query never asks
+   *  pdf.js for the same page twice.  Thrown away on a document change. */
+  const textCache = useRef(new Map<number, TextRun[]>())
+  /** Bumped on every query; a scan that notices it moved stops early. */
+  const scanId = useRef(0)
+  const findInput = useRef<HTMLInputElement>(null)
+  const paneRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    textCache.current.clear()
+    scanId.current++
+    setFindQ('')
+    setFindHits([])
+    setFindAt(0)
+    setFindOpen(false)
+  }, [doc.localPdf])
+
+  const itemsOf = async (n: number): Promise<TextRun[]> => {
+    const hit = textCache.current.get(n)
+    if (hit) return hit
+    const pg = await pdf!.getPage(n)
+    const tc = await pg.getTextContent()
+    const items = (tc.items as unknown as TextRun[]).filter(
+      (i) => typeof i.str === 'string' && i.str.length > 0
+    )
+    textCache.current.set(n, items)
+    return items
+  }
+
+  /** Where one text run sits, in 0..1 with y from the top.  The viewport is
+   *  taken at scale 1 so the numbers are PDF points, which is the same space
+   *  `posToRect` converts annotation positions from. */
+  const runRect = (it: TextRun, vp: pdfjs.PageViewport, s: Size): Rect => {
+    const tx = pdfjs.Util.transform(vp.transform, it.transform)
+    const fh = Math.hypot(tx[2], tx[3]) || Math.abs(it.height) || 10
+    const w = Math.abs(it.width) || fh * 0.5
+    return { x: tx[4] / s.w, y: (tx[5] - fh) / s.h, w: w / s.w, h: fh / s.h }
+  }
+
+  /**
+   * Rects covering `haystack[a..b)`.  A match that straddles two runs yields
+   * one slice per run, and slices on the same line are stitched back into a
+   * single box, which is what makes a hit look like a word rather than like a
+   * row of separate letters.
+   */
+  const rectsForRange = (
+    a: number,
+    b: number,
+    map: { run: number; at: number }[],
+    items: TextRun[],
+    vp: pdfjs.PageViewport,
+    s: Size
+  ): Rect[] => {
+    const per = new Map<number, { lo: number; hi: number }>()
+    for (let i = a; i < b; i++) {
+      const m = map[i]
+      if (m.run < 0) continue
+      const cur = per.get(m.run)
+      if (cur) {
+        cur.lo = Math.min(cur.lo, m.at)
+        cur.hi = Math.max(cur.hi, m.at)
+      } else per.set(m.run, { lo: m.at, hi: m.at })
+    }
+    const raw: Rect[] = []
+    for (const [idx, r] of per) {
+      const it = items[idx]
+      const base = runRect(it, vp, s)
+      const len = Math.max(1, it.str.length)
+      raw.push({
+        x: base.x + base.w * (r.lo / len),
+        y: base.y,
+        w: base.w * ((r.hi - r.lo + 1) / len),
+        h: base.h
+      })
+    }
+    raw.sort((p, q) => p.y - q.y || p.x - q.x)
+    const out: Rect[] = []
+    for (const r of raw) {
+      const line = out.find(
+        (t) => Math.abs(t.y - r.y) < 0.006 && r.x <= t.x + t.w + 0.02
+      )
+      if (line) {
+        const right = Math.max(line.x + line.w, r.x + r.w)
+        line.x = Math.min(line.x, r.x)
+        line.w = right - line.x
+        line.h = Math.max(line.h, r.h)
+      } else out.push({ ...r })
+    }
+    return out
+  }
+
+  /** Every occurrence of `needle` on page `n`, in reading order. */
+  const findInPage = async (n: number, needle: string): Promise<FindHit[]> => {
+    if (!pdf) return []
+    const pg = await pdf.getPage(n)
+    const vp = pg.getViewport({ scale: 1 })
+    const s = { w: vp.width, h: vp.height }
+    if (!s.w || !s.h) return []
+    const items = await itemsOf(n)
+    if (!items.length) return []
+    // pdf.js breaks a line into a new run wherever the font, the size or the
+    // spacing changes, so "Back" and "propagation" are often two items with
+    // nothing between them.  A space is inserted at every such boundary and
+    // recorded as belonging to no run: a query typed with a space then still
+    // matches, while the inserted character never contributes a rectangle.
+    let hay = ''
+    const map: { run: number; at: number }[] = []
+    items.forEach((it, i) => {
+      if (i > 0 && !/\s$/.test(items[i - 1].str) && !/^\s/.test(it.str)) {
+        hay += ' '
+        map.push({ run: -1, at: 0 })
+      }
+      for (let k = 0; k < it.str.length; k++) {
+        hay += it.str[k]
+        map.push({ run: i, at: k })
+      }
+    })
+    const low = hay.toLowerCase()
+    const out: FindHit[] = []
+    let from = 0
+    for (;;) {
+      const at = low.indexOf(needle, from)
+      if (at < 0) break
+      const rects = rectsForRange(at, at + needle.length, map, items, vp, s)
+      if (rects.length) out.push({ page: n, rects })
+      from = at + Math.max(1, needle.length)
+    }
+    return out
+  }
+
+  /** Bring hit `i` on screen.  Takes the list explicitly so a scan can jump to
+   *  its first hit before that list has reached React state. */
+  const gotoHit = (i: number, list?: FindHit[]) => {
+    const l = list ?? findHits
+    if (!l.length) return
+    const at = ((i % l.length) + l.length) % l.length
+    setFindAt(at)
+    const h = l[at]
+    setPage(h.page)
+    // the column has to be moved as well; the page box alone only labels the
+    // page, it does not bring it into view
+    if (continuous) requestAnimationFrame(() => scrollToPage(h.page))
+  }
+
+  /**
+   * Walk every page.  Hits are published as they are found rather than at the
+   * end, so a long paper reports its first matches while the rest is still
+   * being read.
+   */
+  const runFind = useCallback(
+    async (q: string) => {
+      const needle = q.trim().toLowerCase()
+      if (!pdf || needle.length < 2) {
+        setFindHits([])
+        setFindAt(0)
+        setFindBusy(false)
+        return
+      }
+      const id = ++scanId.current
+      setFindBusy(true)
+      const all: FindHit[] = []
+      for (let n = 1; n <= numPages; n++) {
+        if (id !== scanId.current) return
+        try {
+          const hits = await findInPage(n, needle)
+          if (id !== scanId.current) return
+          if (hits.length) {
+            all.push(...hits)
+            setFindHits([...all])
+          }
+        } catch {
+          /* a page that will not give up its text costs a hit, not the scan */
+        }
+      }
+      setFindBusy(false)
+      if (all.length) gotoHit(0, all)
+    },
+    // gotoHit reads page/scale through the closure on purpose: a stale copy
+    // would only mean one extra scroll
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pdf, numPages]
+  )
+
+  // a query is worth a scan once the typing pauses; 250ms is long enough that
+  // a four-character word costs one scan rather than four
+  useEffect(() => {
+    if (!findOpen) return
+    const t = setTimeout(() => runFind(findQ), 250)
+    return () => clearTimeout(t)
+  }, [findQ, findOpen, runFind])
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      const typing =
+        !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || !!t.isContentEditable)
+      const mine = !!t && !!paneRef.current && paneRef.current.contains(t)
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+        // The library search owns Ctrl+F only while the caret is in it.  While
+        // the user is reading, the same key has to mean "find in this PDF",
+        // which is what every other reader does.
+        if (typing && !mine) return
+        e.preventDefault()
+        e.stopPropagation()
+        setFindOpen(true)
+        requestAnimationFrame(() => {
+          findInput.current?.focus()
+          findInput.current?.select()
+        })
+        return
+      }
+      if (!findOpen) return
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        setFindOpen(false)
+        return
+      }
+      // only the find box answers Enter: the note box has its own meaning for
+      // it, and swallowing that would silently stop notes from saving
+      if (e.key === 'F3' || (e.key === 'Enter' && t === findInput.current)) {
+        e.preventDefault()
+        gotoHit(findAt + (e.shiftKey ? -1 : 1))
+      }
+    }
+    // Capture, because App installs the library-wide Ctrl+F on window first and
+    // a bubble listener would always run after it.
+    window.addEventListener('keydown', h, true)
+    return () => window.removeEventListener('keydown', h, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findOpen, findAt, findHits, continuous])
+
+  // exposed so the smoke run can assert on a hit count without screenshotting
+  useEffect(() => {
+    const d = document.documentElement.dataset
+    d.findHits = String(findHits.length)
+    d.findPage = findHits.length ? String(findHits[findAt]?.page ?? '') : ''
+  }, [findHits, findAt])
+
   /** The selection, resolved to the page it was made on and to rects in that
    *  page's own 0..1 coordinates.  In continuous mode the column has one text
    *  layer per page, so the layers on screen are tried in reading order. */
@@ -1014,6 +1273,27 @@ export default function PdfViewer({
     />
   )
 
+  /** The query's boxes on page `n`.  The one the caret is on is drawn louder,
+   *  because "which of them am I looking at" is the whole point of a count. */
+  const findMarks = (n: number) =>
+    findHits.flatMap((h, i) =>
+      h.page !== n
+        ? []
+        : h.rects.map((r, k) => (
+            <div
+              key={`f-${i}-${k}`}
+              className={i === findAt ? 'find-hit cur' : 'find-hit'}
+              style={{
+                position: 'absolute',
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.w * 100}%`,
+                height: `${r.h * 100}%`
+              }}
+            />
+          ))
+    )
+
   /** Everything on this document, in reading order, for the sidebar. */
   const annsByPage = useMemo(
     () =>
@@ -1059,7 +1339,7 @@ export default function PdfViewer({
   if (err) return <div className="err">PDF 打开失败：{err}</div>
 
   return (
-    <div className="pdf-pane">
+    <div className="pdf-pane" ref={paneRef}>
       <div className="pdf-bar">
         <button
           onClick={() => {
@@ -1151,6 +1431,18 @@ export default function PdfViewer({
         >
           标注 {anns.length ? `(${anns.length})` : ''}
         </button>
+        <button
+          className={findOpen ? 'primary' : ''}
+          title="在这篇 PDF 里查找文字  (Ctrl+F)"
+          onClick={() => {
+            setFindOpen((v) => {
+              if (!v) requestAnimationFrame(() => findInput.current?.focus())
+              return !v
+            })
+          }}
+        >
+          查找
+        </button>
         <span style={{ flex: 1 }} />
         <button onClick={syncCloud} disabled={busy}>
           云同步标注
@@ -1159,6 +1451,44 @@ export default function PdfViewer({
           拖框可高亮 · 本页 {pageAnns.length} 条
         </span>
       </div>
+
+      {findOpen && (
+        <div className="pdf-find">
+          <input
+            ref={findInput}
+            value={findQ}
+            placeholder="在这篇 PDF 里查找…"
+            onChange={(e) => setFindQ(e.target.value)}
+          />
+          <button
+            disabled={!findHits.length}
+            title="上一个 (Shift+Enter)"
+            onClick={() => gotoHit(findAt - 1)}
+          >
+            ↑
+          </button>
+          <button
+            disabled={!findHits.length}
+            title="下一个 (Enter / F3)"
+            onClick={() => gotoHit(findAt + 1)}
+          >
+            ↓
+          </button>
+          <span className="find-count">
+            {findBusy
+              ? '查找中…'
+              : findHits.length
+                ? `${findAt + 1} / ${findHits.length}`
+                : findQ.trim().length >= 2
+                  ? '无匹配'
+                  : ''}
+          </span>
+          <span style={{ flex: 1 }} />
+          <button title="关闭 (Esc)" onClick={() => setFindOpen(false)}>
+            ×
+          </button>
+        </div>
+      )}
 
       {msg && (
         <div className="pdf-msg" onClick={() => setMsg(null)}>
@@ -1250,6 +1580,7 @@ export default function PdfViewer({
               {pageAnns.map((a) =>
                 rectsFor(a, page).map((r, i) => overlay(a, r, `${a.id}-${i}`))
               )}
+              {findMarks(page)}
               {drag && rubberBand(drag)}
               {/* invisible, selectable, the reason highlights follow words */}
               <div className="tx-layer" ref={layerRef} />
@@ -1291,6 +1622,7 @@ export default function PdfViewer({
                     {annsOn(n).map((a) =>
                       rectsFor(a, n).map((r, i) => overlay(a, r, `${a.id}-${i}`))
                     )}
+                    {findMarks(n)}
                     {drag && dragPage.current === n && rubberBand(drag)}
                     <div
                       className="tx-layer"

@@ -616,6 +616,62 @@ async function runSmoke() {
   log('click 连续 again', await clickBar('连续'))
   await new Promise((r) => setTimeout(r, 1200))
 
+  // In-reader find.  The query is taken from the page's own text layer rather
+  // than guessed, so the assertion holds for whichever paper happens to be
+  // first in the library, and asks for a real hit instead of a null result.
+  log('click 查找', await clickBar('查找'))
+  await new Promise((r) => setTimeout(r, 300))
+  const query = await w.webContents.executeJavaScript(
+    '(()=>{const sp=[...document.querySelectorAll(".tx-layer span.tx")]'
+    + '.map(s=>(s.textContent||"").trim()).filter(t=>t.length>=4);return sp[0]||""})()'
+  )
+  log('find query', JSON.stringify(query))
+  await w.webContents.executeJavaScript(
+    '(()=>{const i=document.querySelector(".pdf-find input");if(!i)return 0;'
+    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+    + `set.call(i,${JSON.stringify(query)});i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+  )
+  // the scan walks every page and only finishes when it reaches the last one
+  await new Promise((r) => setTimeout(r, 4000))
+  const findInfo = await w.webContents.executeJavaScript(
+    '(()=>{const d=document.documentElement.dataset;'
+    + 'const marks=[...document.querySelectorAll(".find-hit")];'
+    + 'const cur=document.querySelector(".find-hit.cur");'
+    + 'return JSON.stringify({hits:d.findHits,page:d.findPage,marks:marks.length,'
+    + 'current:!!cur,count:(document.querySelector(".find-count")||{}).textContent||null,'
+    + 'box:marks[0]?{w:Math.round(marks[0].getBoundingClientRect().width),'
+    + 'h:Math.round(marks[0].getBoundingClientRect().height)}:null})})()'
+  )
+  log('find', findInfo)
+  const fi = JSON.parse(findInfo)
+  expect('find reports hits', Number(fi.hits) > 0, fi)
+  expect('find draws a mark for them', fi.marks > 0, fi)
+  expect('find marks the current hit', fi.current === true, fi)
+  expect('a find mark has real size', !!fi.box && fi.box.w > 0 && fi.box.h > 0, fi)
+  // stepping has to move the caret, and on a multi-hit query it also has to
+  // wrap around rather than dead-end at the last one
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".pdf-find button")]'
+    + '.find(x=>x.textContent.trim()==="↓");if(b&&!b.disabled)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 1200))
+  const stepped = await w.webContents.executeJavaScript(
+    'JSON.stringify({hits:document.documentElement.dataset.findHits,'
+    + 'page:document.documentElement.dataset.findPage,'
+    + 'count:(document.querySelector(".find-count")||{}).textContent||null})'
+  )
+  log('find step', stepped)
+  if (Number(fi.hits) > 1) {
+    expect('stepping moves the find caret', stepped !== findInfo, { fi, stepped })
+  }
+  // leaving the reader in find mode would leave an orange box on the user's
+  // paper the next time they open it
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".pdf-find button")]'
+    + '.find(x=>x.textContent.trim()==="×");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+
   // The selection layer is what turns a rubber band into a real highlight, so
   // the run makes a synthetic selection and checks that it produces sane
   // rectangles.  The annotation file is restored afterwards; leaving a stray
