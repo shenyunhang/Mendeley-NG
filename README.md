@@ -120,6 +120,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 导入 PDF | 把 PDF 拖进窗口就建条目，元数据交给服务端从文件里抽 |
 | 导入书目 | BibTeX / RIS / EndNote XML，先预览再导入，已有的标为重复 |
 | 改元数据 | 右侧详情面板直接编辑，PATCH 回 Mendeley 云端 |
+| 标记 | 星标 / 已读 / 标签，点一下就写回云端；工具栏 ★ 只看星标，未读加粗 |
 | 补全元数据 | 查 Crossref 与 arXiv，列出候选让你挑，不自动覆盖 |
 | 按标识符添加 | 粘 DOI / arXiv id / 标题，查到后确认再建条目，不需要 PDF |
 | 查重合并 | 按 DOI / arXiv id / 标题找重复；合并只补缺失字段 |

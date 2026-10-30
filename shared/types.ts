@@ -36,6 +36,11 @@ export interface Doc {
   publisher?: string
   url?: string
   keywords?: string[]
+  /** The three per-user flags.  All three are writable and come back with
+   *  `view=all`, unlike `keywords`, which is publisher metadata. */
+  tags?: string[]
+  starred?: boolean
+  read?: boolean
   /** filled in by us, not by Mendeley */
   localPdf?: string
 }

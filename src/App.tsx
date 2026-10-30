@@ -14,7 +14,7 @@ import { buildTree } from './lib/tree'
 import { findDuplicates, type DupeGroup } from './lib/dupes'
 import { parseAny, type Entry } from './lib/import'
 
-type SortKey = 'title' | 'authors' | 'year' | 'source' | 'citation_key'
+type SortKey = 'title' | 'authors' | 'year' | 'source' | 'citation_key' | 'starred'
 
 /** Toolbar wording for each updater phase; null means "say nothing". */
 const UPD_TEXT: Record<UpdateState['phase'], ((s: UpdateState) => string) | null> = {
@@ -47,6 +47,7 @@ export default function App() {
   const [dupes, setDupes] = useState<DupeGroup[] | null>(null)
   const [importing, setImporting] = useState<Entry[] | null>(null)
   const [adding, setAdding] = useState(false)
+  const [onlyStarred, setOnlyStarred] = useState(false)
   const [pdfDir, setPdfDir] = useState('')
   const [fontSize, setFontSize] = useState(15)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -151,6 +152,7 @@ export default function App() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     let out = docs
+    if (onlyStarred) out = out.filter((d) => d.starred)
     if (folderId) {
       const ids = new Set(tree.subtree.get(folderId) ?? [folderId])
       out = out.filter((d) => (d.folder_uuids ?? []).some((f) => ids.has(f)))
@@ -178,6 +180,7 @@ export default function App() {
       if (key === 'title') return (d.title ?? '').toLowerCase()
       if (key === 'source') return (d.source ?? '').toLowerCase()
       if (key === 'citation_key') return (d.citation_key ?? '').toLowerCase()
+      if (key === 'starred') return d.starred ? 1 : 0
       return d.year ?? 0
     }
     return [...out].sort((a, b) => {
@@ -186,12 +189,20 @@ export default function App() {
       if (x === y) return (a.title ?? '').localeCompare(b.title ?? '')
       return (x < y ? -1 : 1) * dir
     })
-  }, [docs, folderId, query, sort])
+  }, [docs, folderId, query, sort, onlyStarred])
 
   const selected = useMemo(
     () => filtered.find((d) => d.id === selId) ?? null,
     [filtered, selId]
   )
+
+  /** Starred / read / tags.  These are per-user flags rather than metadata,
+   *  so they are patched straight away instead of waiting for a save button. */
+  const setFlags = useCallback(async (d: Doc, patch: Partial<Doc>) => {
+    const updated = await window.api.patchDoc(d.id, patch as Record<string, unknown>)
+    const merged = { ...d, ...updated }
+    setLib((l) => (l ? { ...l, docs: l.docs.map((x) => (x.id === d.id ? merged : x)) } : l))
+  }, [])
 
   const exportBib = () => {
     const list = selected ? [selected] : filtered
@@ -314,6 +325,14 @@ export default function App() {
           title="浏览回收站并恢复"
         >
           回收站
+        </button>
+        <button
+          className={onlyStarred ? 'primary' : ''}
+          onClick={() => setOnlyStarred((v) => !v)}
+          title="只看星标"
+          style={{ color: onlyStarred ? undefined : '#ffd43b' }}
+        >
+          ★
         </button>
         <input
           ref={searchRef}
@@ -550,6 +569,9 @@ export default function App() {
               )
             }
             selectedId={selId}
+            onToggleStar={(d) => {
+              setFlags(d, { starred: !d.starred }).catch((e) => setErr(String(e)))
+            }}
             onSelect={(d) => {
               setSelId(d.id)
               setRightTab(d.localPdf ? 'pdf' : 'details')

@@ -56,6 +56,7 @@ export default function DetailsPanel({
   const [msg, setMsg] = useState<string | null>(null)
   const [cands, setCands] = useState<MetaCandidate[] | null>(null)
   const [looking, setLooking] = useState(false)
+  const [tags, setTags] = useState('')
 
   const doiOf = (d: Doc) => d.identifiers?.doi ?? d.doi ?? ''
 
@@ -71,6 +72,7 @@ export default function DetailsPanel({
     })
     setMsg(null)
     setCands(null)
+    setTags((doc.tags ?? []).join(', '))
   }, [doc.id])
 
   const dirty =
@@ -106,6 +108,28 @@ export default function DetailsPanel({
       setMsg('保存失败：' + String(e))
     }
     setSaving(false)
+  }
+
+  /** Flags are patched on the spot: nobody wants to press save to set a star.
+   *  The response is trusted over the local guess because Mendeley normalises
+   *  tags, and an emptied list comes back absent rather than as []. */
+  const setFlags = async (patch: Partial<Doc>) => {
+    setMsg(null)
+    try {
+      const updated = await window.api.patchDoc(doc.id, patch)
+      onSaved({ ...doc, ...updated })
+    } catch (e) {
+      setMsg('保存失败：' + String(e))
+    }
+  }
+
+  const saveTags = () => {
+    const list = tags
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (list.join('|') === (doc.tags ?? []).join('|')) return
+    return setFlags({ tags: list })
   }
 
   const owned = new Set(doc.folder_uuids ?? [])
@@ -208,6 +232,42 @@ export default function DetailsPanel({
               onChange={(e) => setForm({ ...form, doi: e.target.value })}
             />
           </div>
+        </div>
+        <div className="field">
+          <label>标签（逗号分隔）</label>
+          <input
+            value={tags}
+            placeholder="to-read, 综述…"
+            onChange={(e) => setTags(e.target.value)}
+            onBlur={saveTags}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                saveTags()
+              }
+            }}
+          />
+        </div>
+        <div className="flag-row">
+          <label>
+            <input
+              type="checkbox"
+              checked={!!doc.starred}
+              onChange={(e) => setFlags({ starred: e.target.checked })}
+            />
+            星标
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={doc.read !== false}
+              onChange={(e) => setFlags({ read: e.target.checked })}
+            />
+            已读
+          </label>
+          <span style={{ color: 'var(--fg-dim)', fontSize: 11 }}>
+            标签 / 星标 / 已读都存在云端，跟着账号走
+          </span>
         </div>
         <div className="field">
           <label>摘要</label>

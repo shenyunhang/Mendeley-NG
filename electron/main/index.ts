@@ -161,6 +161,29 @@ async function runSmoke() {
   )
   log('renderer', info)
   if (errs.length) log('renderer errors', errs.slice(0, 10).join(' | '))
+
+  // the starred filter is read-only, so it can be exercised here without
+  // writing to the cloud, unlike the star toggle itself
+  const stars = await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+    + '.find(x=>x.textContent.trim()==="★");if(!b)return "no star button";'
+    + 'const badge=()=>[...document.querySelectorAll(".toolbar .badge")].pop().textContent.trim();'
+    + 'const rows=()=>document.querySelectorAll(".row .star").length;'
+    + 'const before=badge();const n=rows();b.click();'
+    + 'return JSON.stringify({before,rows:n})})()'
+  )
+  log('stars rendered', stars)
+  await new Promise((r) => setTimeout(r, 300))
+  log(
+    'starred filter on',
+    await w.webContents.executeJavaScript(
+      '[...document.querySelectorAll(".toolbar .badge")].pop().textContent.trim()'
+    )
+  )
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+    + '.find(x=>x.textContent.trim()==="★");b.click();return 1})()'
+  )
   const shot = async (name: string) => {
     const p = path.join(app.getPath('temp'), 'mendeley-ng-' + name + '.png')
     const img = await w.webContents.capturePage()

@@ -2,26 +2,30 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Doc } from '../../shared/types'
 
-const COLS = '26px 1.5fr 3.2fr 56px 1.3fr 1.1fr'
+const COLS = '24px 26px 1.5fr 3.2fr 56px 1.3fr 1.1fr'
+
+type SortKey = 'title' | 'authors' | 'year' | 'source' | 'citation_key' | 'starred'
 
 interface Props {
   docs: Doc[]
   sort: { key: string; dir: 1 | -1 }
-  onSort: (k: 'title' | 'authors' | 'year' | 'source' | 'citation_key') => void
+  onSort: (k: SortKey) => void
   selectedId: string | null
   onSelect: (d: Doc) => void
+  onToggleStar: (d: Doc) => void
   /** base UI font size; the row height follows it, so the virtualiser has to
    *  re-measure whenever it changes */
   fontSize: number
 }
 
-const HEAD: [string, 'title' | 'authors' | 'year' | 'source' | 'citation_key', string][] = [
-  ['', 'year', ''],
-  ['作者', 'authors', ''],
-  ['标题', 'title', ''],
-  ['年份', 'year', ''],
-  ['发表处', 'source', ''],
-  ['Key', 'citation_key', '']
+const HEAD: [string, SortKey][] = [
+  ['★', 'starred'],
+  ['', 'year'],
+  ['作者', 'authors'],
+  ['标题', 'title'],
+  ['年份', 'year'],
+  ['发表处', 'source'],
+  ['Key', 'citation_key']
 ]
 
 export default function DocTable({
@@ -30,6 +34,7 @@ export default function DocTable({
   onSort,
   selectedId,
   onSelect,
+  onToggleStar,
   fontSize
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
@@ -127,6 +132,21 @@ export default function DocTable({
                     cursor: 'pointer'
                   }}
                 >
+                  <div style={{ paddingLeft: 6 }}>
+                    <span
+                      className="star"
+                      style={{ color: d.starred ? '#ffd43b' : '#4d4d4d' }}
+                      title={d.starred ? '取消星标' : '加星标'}
+                      onClick={(e) => {
+                        // without this the click also selects the row, and a
+                        // star toggle is not a request to open the paper
+                        e.stopPropagation()
+                        onToggleStar(d)
+                      }}
+                    >
+                      {d.starred ? '★' : '☆'}
+                    </span>
+                  </div>
                   <div style={{ paddingLeft: 8 }}>
                     <span
                       className={'pdf-dot' + (d.localPdf || d.file_attached ? '' : ' no-pdf')}
@@ -141,7 +161,14 @@ export default function DocTable({
                     {(d.authors?.length ?? 0) > 1 ? ' 等' : ''}
                   </div>
                   <div
-                    style={{ padding: '0 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    style={{
+                      padding: '0 8px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      // unread stands out the way an unread mail does
+                      fontWeight: d.read === false ? 600 : undefined
+                    }}
                     title={d.title}
                   >
                     {d.title || '(无标题)'}
