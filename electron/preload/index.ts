@@ -65,6 +65,8 @@ const api = {
     ipcRenderer.invoke('dialog:openFiles') as Promise<{ name: string; text: string }[]>,
   lookupMeta: (docId: string) =>
     ipcRenderer.invoke('meta:lookup', docId) as Promise<MetaCandidate[]>,
+  resolveIdentifier: (value: string) =>
+    ipcRenderer.invoke('meta:resolve', value) as Promise<MetaCandidate[]>,
   importPdf: (
     name: string,
     bytes: ArrayBuffer,

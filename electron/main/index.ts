@@ -12,7 +12,7 @@ import {
   saveLibrary
 } from './store'
 import { attachPdfs, parseName } from './pdfindex'
-import { lookup } from './lookup'
+import { lookup, resolveIdentifier } from './lookup'
 import { initUpdater, type UpdateState } from './updater'
 import type {
   Annotation,
@@ -513,6 +513,19 @@ ipcMain.handle('meta:lookup', async (_e, docId: string) => {
   const doc = lib?.docs.find((d) => d.id === docId)
   if (!doc) return []
   return lookup(doc)
+})
+
+/** Add a paper by pasting a DOI, an arXiv id or a title.  Mendeley's catalogue
+ *  needs a token, but the whole thing is still useful without one: the DOI
+ *  then falls back to Crossref, which is anonymous. */
+ipcMain.handle('meta:resolve', async (_e, value: string) => {
+  let bearer: string | undefined
+  try {
+    bearer = await ensureClient().bearer()
+  } catch {
+    /* no token: DOI resolution degrades to Crossref instead of failing */
+  }
+  return resolveIdentifier(value, bearer)
 })
 
 ipcMain.handle(

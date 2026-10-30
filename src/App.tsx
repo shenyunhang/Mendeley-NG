@@ -4,6 +4,7 @@ import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
 import DupesView from './components/DupesView'
 import ImportView from './components/ImportView'
+import AddByIdView from './components/AddByIdView'
 import DocTable from './components/DocTable'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
@@ -45,6 +46,7 @@ export default function App() {
   const [trash, setTrash] = useState<Doc[] | null>(null)
   const [dupes, setDupes] = useState<DupeGroup[] | null>(null)
   const [importing, setImporting] = useState<Entry[] | null>(null)
+  const [adding, setAdding] = useState(false)
   const [pdfDir, setPdfDir] = useState('')
   const [fontSize, setFontSize] = useState(15)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -285,6 +287,12 @@ export default function App() {
           导入文献
         </button>
         <button
+          onClick={() => setAdding(true)}
+          title="按 DOI / arXiv id / 标题添加条目，不需要 PDF"
+        >
+          按标识符添加
+        </button>
+        <button
           onClick={() => setDupes(findDuplicates(docs))}
           disabled={!docs.length}
           title="按 DOI / arXiv id / 标题找重复条目"
@@ -410,7 +418,17 @@ export default function App() {
           />
         </div>
 
-        {importing ? (
+        {adding ? (
+          <AddByIdView
+            docs={docs}
+            onClose={() => setAdding(false)}
+            onAdded={(created) => {
+              if (created.length) {
+                setLib((l) => (l ? { ...l, docs: [...l.docs, ...created] } : l))
+              }
+            }}
+          />
+        ) : importing ? (
           <ImportView
             entries={importing}
             docs={docs}

@@ -96,6 +96,15 @@ export class Mendeley {
     this.save()
   }
 
+  /** A bearer token for callers that talk to Mendeley without going through
+   *  `request`, which is what the catalogue lookup in lookup.ts does.  GET
+   *  /catalog answers 401 "No auth header" anonymously, so it cannot be used
+   *  without this. */
+  async bearer(): Promise<string> {
+    if ((this.tok._expires_at ?? 0) < Date.now() / 1000) await this.refresh()
+    return this.tok.access_token
+  }
+
   async request<T = unknown>(
     method: string,
     p: string,

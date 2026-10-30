@@ -45,6 +45,7 @@ export interface Api {
   createDoc: (body: Record<string, unknown>) => Promise<Doc>
   openRefFiles: () => Promise<{ name: string; text: string }[]>
   lookupMeta: (docId: string) => Promise<MetaCandidate[]>
+  resolveIdentifier: (value: string) => Promise<MetaCandidate[]>
   importPdf: (
     name: string,
     bytes: ArrayBuffer,

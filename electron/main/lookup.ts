@@ -72,11 +72,17 @@ function fromCrossref(it: CrItem): Partial<Doc> {
  *  anonymous pool and get 429s during any burst of lookups. */
 const CR_UA = 'Mendeley-NG/0.1 (https://github.com/shenyunhang/Mendeley-NG)'
 
-async function getJson(url: string): Promise<unknown | null> {
+async function getJson(
+  url: string,
+  bearer?: string
+): Promise<unknown | null> {
   try {
-    const r = await fetch(url, {
-      headers: { 'User-Agent': CR_UA, Accept: 'application/json' }
-    })
+    const headers: Record<string, string> = {
+      'User-Agent': CR_UA,
+      Accept: 'application/json'
+    }
+    if (bearer) headers.Authorization = 'Bearer ' + bearer
+    const r = await fetch(url, { headers })
     if (!r.ok) return null
     return await r.json()
   } catch {
@@ -160,6 +166,174 @@ function decodeXml(s: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, '&')
+}
+
+const CATALOG_TYPE = new Set([
+  'journal',
+  'conference_proceedings',
+  'book',
+  'book_section',
+  'thesis',
+  'report',
+  'generic',
+  'web_page',
+  'working_paper',
+  'patent',
+  'magazine_article',
+  'newspaper_article'
+])
+
+interface CatalogItem {
+  title?: string
+  type?: string
+  authors?: { first_name?: string; last_name?: string }[]
+  year?: number
+  source?: string
+  identifiers?: Record<string, string>
+  link?: string
+}
+
+/** Mendeley's own catalogue, which has identifiers Crossref does not
+ *  (scopus, pui) and a type already in Mendeley's vocabulary.  Only `doi` is
+ *  trustworthy here: `?isbn=` and `?pmid=` happily return unrelated records.
+ *  The endpoint refuses anonymous callers, so it needs a bearer token. */
+async function catalogByDoi(
+  doi: string,
+  bearer?: string
+): Promise<MetaCandidate[]> {
+  if (!bearer) return []
+  const j = (await getJson(
+    `https://api.mendeley.com/catalog?doi=${encodeURIComponent(doi)}&limit=3`,
+    bearer
+  )) as CatalogItem[] | null
+  const out: MetaCandidate[] = []
+  for (const it of j ?? []) {
+    if (!it.title) continue
+    out.push({
+      from: 'catalog',
+      score: 1,
+      title: it.title,
+      patch: {
+        title: it.title,
+        ...(it.authors?.length
+          ? {
+              authors: it.authors.map((a) => ({
+                first_name: a.first_name ?? '',
+                last_name: a.last_name ?? ''
+              }))
+            }
+          : {}),
+        ...(it.year ? { year: it.year } : {}),
+        ...(it.source ? { source: it.source } : {}),
+        ...(it.type && CATALOG_TYPE.has(it.type) ? { type: it.type } : {}),
+        ...(it.identifiers ? { identifiers: it.identifiers } : {}),
+        ...(it.link ? { url: it.link } : {})
+      }
+    })
+  }
+  return out
+}
+
+/** Fetch one arXiv record by id.  The Atom feed is per-entry, so the title
+ *  match that `arxivByTitle` needs is not applied here. */
+async function arxivById(id: string): Promise<MetaCandidate[]> {
+  const clean = id.replace(/^arXiv:/i, '').replace(/v\d+$/, '')
+  let xml: string
+  try {
+    const r = await fetch(
+      `http://export.arxiv.org/api/query?id_list=${encodeURIComponent(clean)}`,
+      { headers: { 'User-Agent': UA } }
+    )
+    if (!r.ok) return []
+    xml = await r.text()
+  } catch {
+    return []
+  }
+  const entry = xml.split('<entry>')[1]
+  if (!entry) return []
+  const title = decodeXml((entry.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? '').trim())
+  if (!title || /Error/i.test(title)) return []
+  const published = entry.match(/<published>([^<]+)<\/published>/)?.[1]
+  const authors = [...entry.matchAll(/<name>([^<]+)<\/name>/g)].map((m) => {
+    const parts = m[1].trim().split(/\s+/)
+    return { first_name: parts.slice(0, -1).join(' '), last_name: parts[parts.length - 1] }
+  })
+  return [
+    {
+      from: 'arxiv',
+      score: 1,
+      title,
+      patch: {
+        title,
+        authors,
+        year: published ? Number(published.slice(0, 4)) : undefined,
+        type: 'working_paper',
+        identifiers: { arxiv: clean }
+      }
+    }
+  ]
+}
+
+/** Identifiers Mendeley accepts in `identifiers`.  The catalogue also hands
+ *  back pui / sgr / scopus, which are real Mendeley fields, but POST rejects
+ *  a body it does not recognise, so anything unknown is dropped here rather
+ *  than costing the whole create. */
+const IDENT_KEYS = ['doi', 'arxiv', 'pmid', 'isbn', 'issn']
+
+function cleanIdentifiers(raw?: Record<string, string>): Record<string, string> | undefined {
+  if (!raw) return undefined
+  const out: Record<string, string> = {}
+  for (const k of IDENT_KEYS) if (raw[k]) out[k] = raw[k]
+  return Object.keys(out).length ? out : undefined
+}
+
+/**
+ * Both sources for one DOI, merged.  Crossref wins wherever they disagree
+ * because the catalogue sentence-cases titles — it turns "Deep Residual
+ * Learning" into "Deep residual learning" — while Crossref keeps what the
+ * publisher deposited.  The catalogue still contributes the type, already in
+ * Mendeley's vocabulary, and the extra identifiers.
+ */
+async function resolveDoi(
+  doi: string,
+  bearer?: string
+): Promise<MetaCandidate[]> {
+  const [cat, cr] = await Promise.all([catalogByDoi(doi, bearer), crossrefByDoi(doi)])
+  if (!cat.length) return cr ? [cr] : []
+  const merged: Partial<Doc> = { ...cat[0].patch, ...(cr?.patch ?? {}) }
+  const ident = cleanIdentifiers({
+    ...(cat[0].patch.identifiers ?? {}),
+    ...(cr?.patch.identifiers ?? {})
+  })
+  if (ident) merged.identifiers = ident
+  else delete merged.identifiers
+  return [
+    {
+      from: cr ? 'crossref-doi' : 'catalog',
+      score: 1,
+      title: (merged.title ?? cat[0].title) as string,
+      patch: merged
+    }
+  ]
+}
+
+/**
+ * Resolve something the user pasted: a DOI, an arXiv id, or a title.
+ * arXiv ids never go through /catalog, whose arxiv parameter returns
+ * unrelated records; anything else is treated as a title.
+ */
+export async function resolveIdentifier(
+  value: string,
+  bearer?: string
+): Promise<MetaCandidate[]> {
+  const v = value.trim()
+  if (!v) return []
+  if (/^10\.\d{4,9}\//.test(v) || /^https?:\/\/(dx\.)?doi\.org\//i.test(v)) {
+    const doi = v.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')
+    return resolveDoi(doi, bearer)
+  }
+  if (/^(arXiv:)?\d{4}\.\d{4,5}(v\d+)?$/i.test(v)) return arxivById(v)
+  return [...(await crossrefByTitle(v)), ...(await arxivByTitle(v))]
 }
 
 /** Everything worth trying for one document, best first. */
