@@ -100,6 +100,15 @@ export interface CloudAnnotation {
   }[]
 }
 
+/** One result offered by a metadata lookup, ready to be patched onto a doc. */
+export interface MetaCandidate {
+  from: 'crossref-doi' | 'crossref' | 'arxiv' | 'catalog'
+  /** 0..1 similarity against the document's current title */
+  score: number
+  title: string
+  patch: Partial<Doc>
+}
+
 export interface SyncStatus {
   phase: 'idle' | 'folders' | 'documents' | 'files' | 'pdf' | 'done' | 'error'
   done: number

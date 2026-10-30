@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Doc, Folder } from '../../shared/types'
+import type { Doc, Folder, MetaCandidate } from '../../shared/types'
 
 interface Props {
   doc: Doc
@@ -54,6 +54,10 @@ export default function DetailsPanel({
   })
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  const [cands, setCands] = useState<MetaCandidate[] | null>(null)
+  const [looking, setLooking] = useState(false)
+
+  const doiOf = (d: Doc) => d.identifiers?.doi ?? d.doi ?? ''
 
   useEffect(() => {
     setForm({
@@ -62,10 +66,11 @@ export default function DetailsPanel({
       year: doc.year != null ? String(doc.year) : '',
       source: doc.source ?? '',
       citation_key: doc.citation_key ?? '',
-      doi: doc.doi ?? '',
+      doi: doiOf(doc),
       abstract: doc.abstract ?? ''
     })
     setMsg(null)
+    setCands(null)
   }, [doc.id])
 
   const dirty =
@@ -74,7 +79,7 @@ export default function DetailsPanel({
     form.year !== (doc.year != null ? String(doc.year) : '') ||
     form.source !== (doc.source ?? '') ||
     form.citation_key !== (doc.citation_key ?? '') ||
-    form.doi !== (doc.doi ?? '') ||
+    form.doi !== doiOf(doc) ||
     form.abstract !== (doc.abstract ?? '')
 
   const save = async () => {
@@ -88,7 +93,10 @@ export default function DetailsPanel({
     }
     const y = parseInt(form.year, 10)
     body.year = Number.isFinite(y) ? y : null
-    if (form.doi.trim()) body.doi = form.doi.trim()
+    // doi only survives under identifiers; the top-level field is swallowed
+    if (form.doi.trim()) {
+      body.identifiers = { ...(doc.identifiers ?? {}), doi: form.doi.trim() }
+    }
     if (form.abstract.trim()) body.abstract = form.abstract.trim()
     try {
       const updated = await window.api.patchDoc(doc.id, body)
@@ -102,8 +110,58 @@ export default function DetailsPanel({
 
   const owned = new Set(doc.folder_uuids ?? [])
 
+  const findMeta = async () => {
+    setLooking(true)
+    setMsg(null)
+    try {
+      const list = await window.api.lookupMeta(doc.id)
+      setCands(list)
+      if (!list.length) setMsg('没找到可信的匹配（阈值 0.90，宁缺勿错）')
+    } catch (e) {
+      setMsg('查询失败：' + String(e))
+    }
+    setLooking(false)
+  }
+
+  const applyCandidate = async (c: MetaCandidate) => {
+    setSaving(true)
+    try {
+      const updated = await window.api.patchDoc(doc.id, c.patch)
+      onSaved({ ...doc, ...updated })
+      setCands(null)
+      setMsg('已按 ' + c.from + ' 补全')
+    } catch (e) {
+      setMsg('写入失败：' + String(e))
+    }
+    setSaving(false)
+  }
+
   return (
     <>
+      {cands && cands.length > 0 && (
+        <div className="cand-box">
+          <div className="cand-head">
+            <span>候选元数据 · 点一条写回云端</span>
+            <span style={{ flex: 1 }} />
+            <button style={{ padding: '2px 6px', fontSize: '0.733rem' }} onClick={() => setCands(null)}>
+              收起
+            </button>
+          </div>
+          {cands.map((c, i) => (
+            <div key={i} className="cand-row" onClick={() => applyCandidate(c)}>
+              <span className="t" title={c.title}>
+                {c.title}
+              </span>
+              <span className="n">
+                {c.patch.year ?? '—'}
+                {c.patch.source ? ` · ${c.patch.source}` : ''}
+              </span>
+              <span className="badge">{c.from}</span>
+              <span className="badge">{c.score.toFixed(2)}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="details">
         <div className="field">
           <label>标题</label>
@@ -230,6 +288,9 @@ export default function DetailsPanel({
             {msg}
           </span>
         )}
+        <button onClick={findMeta} disabled={looking} title="查 Crossref 与 arXiv 补全">
+          {looking ? '查询中…' : '补全元数据'}
+        </button>
         <span style={{ flex: 1 }} />
         <button
           className="danger"

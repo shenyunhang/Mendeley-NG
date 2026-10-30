@@ -5,6 +5,7 @@ import type {
   Doc,
   Folder,
   Library,
+  MetaCandidate,
   SyncStatus,
   UpdateState
 } from '../shared/types'
@@ -41,6 +42,7 @@ export interface Api {
   deleteRemoteAnnotation: (id: string) => Promise<{ ok: boolean }>
   fileHash: (docId: string) => Promise<string | null>
   saveAnnotations: (list: Annotation[]) => Promise<{ ok: boolean }>
+  lookupMeta: (docId: string) => Promise<MetaCandidate[]>
   importPdf: (
     name: string,
     bytes: ArrayBuffer,

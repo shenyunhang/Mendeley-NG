@@ -12,6 +12,7 @@ import {
   saveLibrary
 } from './store'
 import { attachPdfs, parseName } from './pdfindex'
+import { lookup } from './lookup'
 import { initUpdater, type UpdateState } from './updater'
 import type {
   Annotation,
@@ -437,6 +438,13 @@ function pdfNameFor(doc: Doc | undefined, fallback?: string): string {
   const base = safe(parts || safe(fallback || 'download') || 'download')
   return (base.slice(0, 150) || 'download') + '.pdf'
 }
+
+ipcMain.handle('meta:lookup', async (_e, docId: string) => {
+  const lib = loadLibrary()
+  const doc = lib?.docs.find((d) => d.id === docId)
+  if (!doc) return []
+  return lookup(doc)
+})
 
 ipcMain.handle(
   'doc:importPdf',

@@ -389,6 +389,47 @@ button.danger:hover:not(:disabled) {
   pointer-events: none;
   z-index: 50;
 }
+.cand-box {
+  flex: 0 0 auto;
+  max-height: 40%;
+  overflow: auto;
+  border-bottom: 1px solid var(--border);
+  background: #1b1f27;
+}
+.cand-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  position: sticky;
+  top: 0;
+  background: #1b1f27;
+}
+.cand-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid #2c2c2c;
+  font-size: 0.867rem;
+  cursor: pointer;
+}
+.cand-row:hover {
+  background: #262b34;
+}
+.cand-row .t {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cand-row .n {
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+  white-space: nowrap;
+}
 .pdf-msg {
   padding: 4px 10px;
   border-bottom: 1px solid var(--border);

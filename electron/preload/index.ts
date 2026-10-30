@@ -6,6 +6,7 @@ import type {
   Doc,
   Folder,
   Library,
+  MetaCandidate,
   SyncStatus,
   UpdateState
 } from '../../shared/types'
@@ -58,6 +59,8 @@ const api = {
   fileHash: (docId: string) =>
     ipcRenderer.invoke('annotations:fileHash', docId) as Promise<string | null>,
   saveAnnotations: (list: Annotation[]) => ipcRenderer.invoke('annotations:save', list),
+  lookupMeta: (docId: string) =>
+    ipcRenderer.invoke('meta:lookup', docId) as Promise<MetaCandidate[]>,
   importPdf: (
     name: string,
     bytes: ArrayBuffer,
