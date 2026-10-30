@@ -45,6 +45,7 @@ export interface Api {
   }>
   ftStatus: () => Promise<FtStatus>
   ftBuild: (rebuild?: boolean) => Promise<FtStatus>
+  ftCancel: () => Promise<FtStatus>
   ftClear: () => Promise<FtStatus>
   ftSearch: (q: string) => Promise<FtHit[]>
   onFtProgress: (cb: (s: FtStatus) => void) => () => void

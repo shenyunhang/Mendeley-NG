@@ -845,6 +845,19 @@ td .no-pdf {
   max-width: 220px;
 }
 
+/* the file currently being parsed. it has to be able to shrink to nothing
+   when the name is missing, otherwise the progress text gets pushed off */
+.ft-current {
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-dim);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.733rem;
+}
+
 .flag-row {
   display: flex;
   align-items: center;

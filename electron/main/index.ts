@@ -19,6 +19,7 @@ import { lookup, resolveIdentifier } from './lookup'
 import {
   initFullText,
   ftBuild,
+  ftCancel,
   ftClear,
   ftSearch,
   ftStatus,
@@ -1013,19 +1014,41 @@ async function runSmoke() {
     '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
     + '.find(x=>x.textContent.trim()==="建索引");if(!b)return 0;b.click();return 1})()'
   )
-  // small list, but still a real read of real PDFs, so poll rather than guess
+  // small list, but still a real read of real PDFs, so poll rather than guess.
+  // Polled fast on purpose: the whole complaint being fixed is that the build
+  // looked frozen, so what matters is not only that it finishes but that it
+  // says which file it is on while it runs.
   let ftStat1 = ftStat0
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 1000))
+  const seenDone = new Set<number>()
+  let sawCurrent = ''
+  for (let i = 0; i < 150; i++) {
+    await new Promise((r) => setTimeout(r, 200))
     ftStat1 = JSON.parse(
       await w.webContents.executeJavaScript(
         '(async()=>JSON.stringify(await window.api.ftStatus()))()'
       )
     )
+    seenDone.add(ftStat1.done)
+    if (ftStat1.current) sawCurrent = ftStat1.current
     if (!ftStat1.building) break
   }
-  log('ft after build', ftStat1)
+  log('ft after build', ftStat1, { steps: [...seenDone], current: sawCurrent })
   expect('indexing reads the PDFs', ftStat1.indexed > 0, ftStat1)
+  expect('progress counted every document', ftStat1.done === ftStat1.total, ftStat1)
+  expect('progress names the file being read', sawCurrent.length > 0, sawCurrent)
+  // Stopping has to be safe to press at any time, including after the run has
+  // already finished: what was read stays readable.
+  const ftCancelStat = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>JSON.stringify(await window.api.ftCancel()))()'
+    )
+  )
+  log('ft cancel', ftCancelStat)
+  expect(
+    'stopping keeps what was already read',
+    ftCancelStat.indexed === ftStat1.indexed && !ftCancelStat.building,
+    { ftCancelStat, ftStat1 }
+  )
   await w.webContents.executeJavaScript(
     '(()=>{const i=document.querySelector(".toolbar input");'
     + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
@@ -1800,6 +1823,13 @@ ipcMain.handle('ft:build', async (_e, rebuild?: boolean) => {
   const send = (s: FtStatus) => win?.webContents.send('ft:progress', s)
   void ftBuild(docs, send, !!rebuild).catch(() => {})
   return ftStatus(docs)
+})
+// Stopping a build has to be its own call.  The build is answered
+// immediately and runs in the background, so "cancel" cannot arrive on the
+// same channel as the thing being cancelled.
+ipcMain.handle('ft:cancel', () => {
+  ftCancel()
+  return ftStatus(ftDocs())
 })
 ipcMain.handle('ft:clear', () => {
   ftClear()

@@ -1,4 +1,6 @@
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app } from 'electron'
@@ -110,7 +112,28 @@ let dir: string = ''
 let meta: Meta | null = null
 let blob: string | null = null
 let building = false
-let progress: { done: number; total: number } = { done: 0, total: 0 }
+/** Set by `ftCancel`.  The build loop checks it between batches, which is
+ *  often enough: a batch is one PDF per lane, not the whole library. */
+let cancelled = false
+let progress: { done: number; total: number; current: string } = {
+  done: 0,
+  total: 0,
+  current: ''
+}
+
+/**
+ * How many PDFs to read at once.
+ *
+ * One at a time was the obvious choice and it is the reason building felt
+ * like a hang: 5245 documents at ~90 ms each is eight minutes of watching a
+ * bar that only moves every couple of seconds.  Reading a few in parallel
+ * cuts that by the number of lanes.
+ *
+ * It is deliberately not "as many as there are cores".  The point of the
+ * whole exercise is a text index, and a build that maximises throughput at
+ * the cost of the app becoming unresponsive has solved the wrong problem.
+ */
+const lanes = () => Math.max(1, Math.min(4, (os.cpus()?.length ?? 4) - 1))
 
 export function initFullText(baseDir: string) {
   dir = baseDir
@@ -182,21 +205,51 @@ export function ftStatus(docs: Doc[]): FtStatus {
     building,
     done: progress.done,
     pages: pages,
-    bytes
+    bytes,
+    current: progress.current
   }
 }
 
+type PdfDoc = Awaited<ReturnType<typeof pdfjs.getDocument>['promise']>
+
+/**
+ * How long one document is allowed to take before it is abandoned.
+ *
+ * pdf.js will spend unbounded time on a malformed file — a broken xref
+ * table, a stream that never terminates.  With the queue read one document
+ * at a time, a single such file stops the whole build: everything behind it
+ * waits forever and the progress bar never moves again, which is exactly
+ * what "creating the index hangs" looks like from the outside.  A finite
+ * budget turns an infinite wait into one skipped paper.
+ */
+const DOC_TIMEOUT_MS = 20_000
+
+let failures = 0
+
 /** Pull the text of the first `n` pages, or null if the PDF will not open. */
 async function extract(file: string, n: number): Promise<{ text: string; bounds: number[] } | null> {
-  let doc: Awaited<ReturnType<typeof pdfjs.getDocument>['promise']> | null = null
-  try {
-    const data = new Uint8Array(fs.readFileSync(file))
-    doc = await pdfjs.getDocument({ data, useSystemFonts: false }).promise
-    const count = Math.min(n, doc.numPages)
+  // held in a box rather than a plain `let`, because the only assignment is
+  // inside `parse` and TypeScript would otherwise narrow it to null in the
+  // timer callback, where it is the whole point
+  const box: { doc: PdfDoc | null } = { doc: null }
+  let stopped = false
+  let timer: NodeJS.Timeout | undefined
+
+  const parse = async (): Promise<{ text: string; bounds: number[] }> => {
+    // asynchronous read: a synchronous one blocks the main process for as
+    // long as the file takes, and the largest PDFs here are 35 MB
+    const raw = await fsp.readFile(file)
+    const data = new Uint8Array(raw)
+    const d = await pdfjs.getDocument({ data, useSystemFonts: false }).promise
+    box.doc = d
+    // the timer may have fired while getDocument was still resolving; nothing
+    // would be left to destroy it, so check before parsing pages
+    if (stopped) throw new Error('timed out')
+    const count = Math.min(n, d.numPages)
     let out = ''
     const bounds: number[] = []
     for (let i = 1; i <= count; i++) {
-      const p = await doc.getPage(i)
+      const p = await d.getPage(i)
       const tc = await p.getTextContent()
       for (const it of tc.items as unknown as { str?: string }[]) {
         if (it.str) out += it.str + ' '
@@ -205,17 +258,39 @@ async function extract(file: string, n: number): Promise<{ text: string; bounds:
       p.cleanup()
     }
     return { text: out, bounds }
+  }
+
+  try {
+    return await Promise.race([
+      parse(),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          stopped = true
+          // destroying the document is what actually stops the worker thread.
+          // Only resolving the race would abandon the promise and leave the
+          // parse burning a core for as long as it liked.
+          void box.doc?.destroy().catch(() => {})
+          if (failures++ < 3) console.warn('[fulltext] timed out', file)
+          resolve(null)
+        }, DOC_TIMEOUT_MS)
+      })
+    ])
   } catch (e) {
     // the first few failures are worth seeing: a library-wide problem, such as
-    // a worker that will not start, shows up as every document failing
-    if (failures++ < 3) console.warn('[fulltext] cannot read', file, String(e))
+    // a worker that will not start, shows up as every document failing.  A
+    // timeout already reported itself.
+    if (!stopped && failures++ < 3) console.warn('[fulltext] cannot read', file, String(e))
     return null
   } finally {
-    await doc?.destroy().catch(() => {})
+    if (timer) clearTimeout(timer)
+    await box.doc?.destroy().catch(() => {})
   }
 }
 
-let failures = 0
+/** Stop the run in progress.  Whatever has been indexed stays indexed. */
+export function ftCancel() {
+  if (building) cancelled = true
+}
 
 /**
  * Index everything that is not indexed yet.  Documents whose file has not
@@ -231,62 +306,102 @@ export async function ftBuild(
 ): Promise<FtStatus> {
   if (building) return ftStatus(docs)
   building = true
+  cancelled = false
   const m = loadMeta()
   if (rebuild) {
     meta = { version: 1, pages: pages, entries: {} }
   }
   const fresh = meta!
   const queue = docs.filter((d) => d.localPdf)
-  progress = { done: 0, total: queue.length }
+  progress = { done: 0, total: queue.length, current: '' }
   const out = fs.openSync(dataFile(), rebuild ? 'w' : 'a')
-  let at = rebuild ? 0 : fs.fstatSync(out).size
+  // Offsets are counted in UTF-16 code units, because that is what the search
+  // side indexes with once the file has been read back as a string.  Taking
+  // the byte size here instead looks right and is not: one Chinese character
+  // is three bytes but one code unit, so every offset after the first
+  // non-ASCII document would be short and the hits would point into the
+  // wrong paper.
+  let at = 0
+  if (!rebuild) {
+    for (const e of Object.values(fresh.entries)) {
+      if (e.start + e.len > at) at = e.start + e.len
+    }
+  }
+  let lastPing = 0
+  const ping = (cur: string) => {
+    const now = Date.now()
+    // throttled by time, not by count: a batch of slow PDFs and a batch of
+    // fast ones should both move the bar about three times a second.  Only
+    // count mattered before, which meant a re-run over cached documents —
+    // every batch finishing in microseconds — sent hundreds of progress
+    // messages a second, and that is its own kind of freeze.
+    if (now - lastPing < 300) return
+    lastPing = now
+    progress.current = cur
+    onProgress(ftStatus(docs))
+  }
   try {
-    for (const d of queue) {
-      const file = d.localPdf as string
-      let st: fs.Stats
-      try {
-        st = fs.statSync(file)
-      } catch {
+    const width = lanes()
+    for (let i = 0; i < queue.length; i += width) {
+      if (cancelled) break
+      const batch = queue.slice(i, i + width)
+      // the cheap checks stay serial: stat and "already indexed" cost a
+      // fraction of a millisecond, and doing them up front is what keeps the
+      // lane below filled with PDFs that actually need reading
+      const todo: { d: Doc; st: fs.Stats }[] = []
+      for (const d of batch) {
+        let st: fs.Stats
+        try {
+          st = fs.statSync(d.localPdf as string)
+        } catch {
+          progress.done++
+          continue
+        }
+        const prev = fresh.entries[d.id]
+        if (
+          prev &&
+          prev.mtime === Math.floor(st.mtimeMs) &&
+          prev.size === st.size &&
+          prev.start + prev.len <= at
+        ) {
+          progress.done++
+          continue
+        }
+        todo.push({ d, st })
+      }
+      ping(path.basename(todo[0]?.d.localPdf ?? ''))
+      const got = await Promise.all(
+        todo.map((t) => extract(t.d.localPdf as string, pages))
+      )
+      // written in queue order even though it was read in parallel, so the
+      // offsets stay contiguous and the entry table stays monotonic
+      for (let k = 0; k < todo.length; k++) {
+        const { d, st } = todo[k]!
+        const g = got[k]
         progress.done++
-        continue
+        if (!g || !g.text.trim()) continue
+        fs.writeSync(out, Buffer.from(g.text.toLowerCase(), 'utf8'))
+        fresh.entries[d.id] = {
+          start: at,
+          len: g.text.length,
+          bounds: g.bounds.map((b) => at + b),
+          mtime: Math.floor(st.mtimeMs),
+          size: st.size
+        }
+        at += g.text.length
       }
-      const prev = fresh.entries[d.id]
-      if (
-        prev &&
-        prev.mtime === Math.floor(st.mtimeMs) &&
-        prev.size === st.size &&
-        prev.start + prev.len <= at
-      ) {
-        progress.done++
-        continue
-      }
-      const got = await extract(file, pages)
-      if (!got || !got.text.trim()) {
-        progress.done++
-        continue
-      }
-      const buf = Buffer.from(got.text.toLowerCase(), 'utf8')
-      fs.writeSync(out, buf)
-      fresh.entries[d.id] = {
-        start: at,
-        len: got.text.length,
-        bounds: got.bounds.map((b) => at + b),
-        mtime: Math.floor(st.mtimeMs),
-        size: st.size
-      }
-      at += got.text.length
-      progress.done++
-      // yield often enough that the UI keeps painting progress, and write
-      // the offset table as we go so an interrupted run is not wasted
-      if (progress.done % 25 === 0) {
-        saveMeta()
-        onProgress(ftStatus(docs))
-        await new Promise((r) => setImmediate(r))
-      }
+      // the offset table is written as we go, so a run that is cancelled or
+      // crashes is not wasted
+      if (i % (width * 8) === 0) saveMeta()
+      // give the event loop a turn between batches: this is the only chance
+      // a queued IPC, including a cancel, has to be delivered
+      await new Promise((r) => setImmediate(r))
     }
   } finally {
     fs.closeSync(out)
     building = false
+    cancelled = false
+    progress.current = ''
     blob = null
     saveMeta()
   }
@@ -352,25 +467,59 @@ export function ftSearch(q: string): FtHit[] {
     return hits
   }
 
-  // several words: prefer the phrase, then fall back to all of them present
-  for (const [id, e] of sorted) {
-    const slice = body.slice(e.start, e.start + e.len)
-    let at = slice.indexOf(needle)
-    if (at === -1) {
-      let every = true
-      let first = -1
-      for (const t of tokens) {
-        const i = slice.indexOf(t)
-        if (i === -1) {
-          every = false
-          break
-        }
-        if (first === -1 || i < first) first = i
+  // Several words.  The phrase comes first, as one pass over the whole
+  // corpus; only if that finds nothing does it fall back to "every word
+  // present in the same document".
+  //
+  // The fallback used to slice out each document and search the slices.
+  // That is 5245 slices of a 60 MB string per keystroke, which is 60 MB of
+  // copying and a few hundred million character comparisons — enough to
+  // stall the main process for seconds on every letter typed.  Walking the
+  // whole string once per word instead, and asking `docAt` which document
+  // each offset belongs to, does the same job with no copying at all.
+  const phrase: { docId: string; page: number; snippet: string }[] = []
+  for (let at = body.indexOf(needle); at !== -1; at = body.indexOf(needle, at + 1)) {
+    const found = docAt(sorted, at)
+    if (!found) continue
+    phrase.push({
+      docId: found[0],
+      page: pageOf(found[1], at),
+      snippet: snippetAt(at, needle.length)
+    })
+    if (phrase.length >= MAX_HITS) break
+    // the rest of this document cannot hold another hit worth listing
+    at = found[1].start + found[1].len
+  }
+  if (phrase.length) return phrase
+
+  const seen = new Map<string, { mask: number; at: number }>()
+  for (let w = 0; w < tokens.length; w++) {
+    const t = tokens[w]!
+    for (let at = body.indexOf(t); at !== -1; ) {
+      const found = docAt(sorted, at)
+      if (!found) {
+        at = body.indexOf(t, at + 1)
+        continue
       }
-      if (!every) continue
-      at = first
+      const rec = seen.get(found[0])
+      if (rec) {
+        rec.mask |= 1 << w
+        if (at < rec.at) rec.at = at
+      } else {
+        seen.set(found[0], { mask: 1 << w, at })
+      }
+      at = body.indexOf(t, found[1].start + found[1].len)
     }
-    hits.push({ docId: id, page: pageOf(e, e.start + at), snippet: snippetAt(e.start + at, needle.length) })
+  }
+  const want = (1 << tokens.length) - 1
+  for (const [id, rec] of seen) {
+    if (rec.mask !== want) continue
+    const e = m.entries[id]!
+    hits.push({
+      docId: id,
+      page: pageOf(e, rec.at),
+      snippet: snippetAt(rec.at, tokens[0]!.length)
+    })
     if (hits.length >= MAX_HITS) break
   }
   return hits

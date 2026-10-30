@@ -1436,6 +1436,7 @@ export default function App() {
               window.api.ftBuild(rebuild).then(setFtStat)
             }}
             onClear={() => window.api.ftClear().then(setFtStat)}
+            onCancel={() => window.api.ftCancel().then(setFtStat)}
             onOpen={(d, p) => {
               setSelId(d.id)
               setRightTab('pdf')

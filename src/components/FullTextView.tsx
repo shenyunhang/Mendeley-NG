@@ -9,6 +9,7 @@ interface Props {
   onClose: () => void
   onOpen: (d: Doc, page: number) => void
   onBuild: (rebuild: boolean) => void
+  onCancel: () => void
   onClear: () => void
 }
 
@@ -25,6 +26,7 @@ export default function FullTextView({
   onClose,
   onOpen,
   onBuild,
+  onCancel,
   onClear
 }: Props) {
   const byId = useMemo(() => {
@@ -97,13 +99,30 @@ export default function FullTextView({
 
       {building && (
         <div className="batch-bar">
-          <span>正在读取 PDF 正文 {status?.done ?? 0} / {status?.total ?? 0}</span>
+          <span>
+            正在读取 PDF 正文 {status?.done ?? 0} / {status?.total ?? 0}（{pct}%）
+          </span>
+          {/* which file is the only honest answer to "is it stuck?": a bar
+              that has not moved for a minute looks exactly like a hang */}
+          <span className="ft-current" title={status?.current}>
+            {status?.current || ''}
+          </span>
+          <span style={{ flex: 1 }} />
+          <button
+            className="danger"
+            style={{ padding: '2px 6px', fontSize: '0.733rem' }}
+            title="停下。已经读进去的会留着，下次接着读"
+            onClick={onCancel}
+          >
+            停止
+          </button>
         </div>
       )}
 
       {!status?.indexed && !building && (
         <div className="empty">
-          还没有索引。点「建索引」读取本地 PDF 的正文，大约每篇 40 毫秒。
+          还没有索引。点「建索引」读取本地 PDF 的正文，大约每篇 90 毫秒，
+          几千篇要几分钟——中途可以停，下次会接着读。
         </div>
       )}
 

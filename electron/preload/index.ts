@@ -61,6 +61,7 @@ const api = {
 
   ftStatus: () => ipcRenderer.invoke('ft:status') as Promise<FtStatus>,
   ftBuild: (rebuild?: boolean) => ipcRenderer.invoke('ft:build', rebuild) as Promise<FtStatus>,
+  ftCancel: () => ipcRenderer.invoke('ft:cancel') as Promise<FtStatus>,
   ftClear: () => ipcRenderer.invoke('ft:clear') as Promise<FtStatus>,
   ftSearch: (q: string) => ipcRenderer.invoke('ft:search', q) as Promise<FtHit[]>,
   onFtProgress: (cb: (s: FtStatus) => void) => {

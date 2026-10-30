@@ -179,6 +179,9 @@ export interface FtStatus {
   /** how many leading pages of each PDF are indexed */
   pages: number
   bytes: number
+  /** Name of the file being read, so a long run shows it is doing something
+   *  rather than just that it is not finished. */
+  current?: string
 }
 
 /** One place where the query appears in one document. */
