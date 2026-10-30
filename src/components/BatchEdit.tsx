@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { DOC_TYPES, DOC_TYPE_LABELS } from '../lib/doctypes'
 
 export type BatchOp = 'tag-add' | 'tag-del' | 'type' | 'starred' | 'read'
 
@@ -12,24 +13,6 @@ interface OpDef {
   /** What the button will do, spelled out before it is clicked. */
   hint: string
 }
-
-/** The same list export.ts maps EndNote types through, so a type set here is
- *  one the importer understands on the way back out. */
-const TYPES = [
-  'journal',
-  'conference_proceedings',
-  'book',
-  'book_section',
-  'thesis',
-  'report',
-  'working_paper',
-  'web_page',
-  'patent',
-  'magazine_article',
-  'newspaper_article',
-  'computer_program',
-  'generic'
-]
 
 const OPS: OpDef[] = [
   {
@@ -49,7 +32,7 @@ const OPS: OpDef[] = [
   {
     key: 'type',
     label: '改类型',
-    options: TYPES.map((t) => ({ value: t, label: t })),
+    options: DOC_TYPES.map((t) => ({ value: t, label: DOC_TYPE_LABELS[t] ?? t })),
     hint: '整条覆盖，不保留原类型'
   },
   {
