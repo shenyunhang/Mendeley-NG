@@ -42,6 +42,8 @@ export interface Api {
   deleteRemoteAnnotation: (id: string) => Promise<{ ok: boolean }>
   fileHash: (docId: string) => Promise<string | null>
   saveAnnotations: (list: Annotation[]) => Promise<{ ok: boolean }>
+  loadNotes: () => Promise<Record<string, string>>
+  saveNotes: (notes: Record<string, string>) => Promise<{ ok: boolean }>
   createDoc: (body: Record<string, unknown>) => Promise<Doc>
   openRefFiles: () => Promise<{ name: string; text: string }[]>
   lookupMeta: (docId: string) => Promise<MetaCandidate[]>

@@ -7,9 +7,11 @@ import {
   loadAnnotations,
   loadConfig,
   loadLibrary,
+  loadNotes,
   saveAnnotations,
   saveConfig,
-  saveLibrary
+  saveLibrary,
+  saveNotes
 } from './store'
 import { attachPdfs, parseName } from './pdfindex'
 import { lookup, resolveIdentifier } from './lookup'
@@ -421,6 +423,39 @@ async function runSmoke() {
   await w.webContents.executeJavaScript(
     '(async()=>await window.api.saveAnnotations(window.__before))()'
   )
+
+  // document notes are local only, so a write / read / clear round trip here
+  // touches nothing but notes.json and leaves it empty again
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".pane-right button")]'
+    + '.find(x=>x.textContent.trim()==="详情");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  const setNote = (v: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const t=document.querySelector("textarea.note-box");if(!t)return "no notes box";`
+      + `const set=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,"value").set;`
+      + `set.call(t,${JSON.stringify(v)});t.dispatchEvent(new Event("input",{bubbles:true}));`
+      + `t.dispatchEvent(new FocusEvent("focusout",{bubbles:true}));return "ok"})()`
+    )
+  log('notes write', await setNote('smoke test note'))
+  await new Promise((r) => setTimeout(r, 400))
+  log(
+    'notes read back',
+    await w.webContents.executeJavaScript(
+      '(async()=>{const n=await window.api.loadNotes();'
+      + 'return JSON.stringify({keys:Object.keys(n).length,sample:Object.values(n)[0]||null})})()'
+    )
+  )
+  await setNote('')
+  await new Promise((r) => setTimeout(r, 400))
+  log(
+    'notes cleared',
+    await w.webContents.executeJavaScript(
+      '(async()=>{const n=await window.api.loadNotes();'
+      + 'return JSON.stringify({keys:Object.keys(n).length})})()'
+    )
+  )
   if (annBackup) fs.writeFileSync(annPath, annBackup)
   const afterCount = await w.webContents.executeJavaScript(
     '(async()=>(await window.api.loadAnnotations()).length)()'
@@ -657,6 +692,13 @@ ipcMain.handle('annotations:deleteRemote', async (_e, id: string) => {
 ipcMain.handle('annotations:load', () => loadAnnotations())
 ipcMain.handle('annotations:save', (_e, list: Annotation[]) => {
   saveAnnotations(list)
+  return { ok: true }
+})
+
+// notes are local only: Mendeley's /notes endpoint does not exist
+ipcMain.handle('notes:load', () => loadNotes())
+ipcMain.handle('notes:save', (_e, notes: Record<string, string>) => {
+  saveNotes(notes)
   return { ok: true }
 })
 

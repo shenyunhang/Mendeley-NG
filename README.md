@@ -124,6 +124,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 导入书目 | BibTeX / RIS / EndNote XML，先预览再导入，已有的标为重复 |
 | 改元数据 | 右侧详情面板直接编辑，PATCH 回 Mendeley 云端 |
 | 标记 | 星标 / 已读 / 标签，点一下就写回云端；工具栏 ★ 只看星标，未读加粗 |
+| 笔记 | 每篇一条，**只存本地**：Mendeley 没有 /notes 接口，界面里写明了不同步 |
 | 批量 | Shift 选范围、Ctrl 加减选；批量加入文件夹 / 移入回收站 / 导出 |
 | 补全元数据 | 查 Crossref 与 arXiv，列出候选让你挑，不自动覆盖 |
 | 按标识符添加 | 粘 DOI / arXiv id / 标题，查到后确认再建条目，不需要 PDF |

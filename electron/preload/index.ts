@@ -59,6 +59,9 @@ const api = {
   fileHash: (docId: string) =>
     ipcRenderer.invoke('annotations:fileHash', docId) as Promise<string | null>,
   saveAnnotations: (list: Annotation[]) => ipcRenderer.invoke('annotations:save', list),
+  loadNotes: () => ipcRenderer.invoke('notes:load') as Promise<Record<string, string>>,
+  saveNotes: (notes: Record<string, string>) =>
+    ipcRenderer.invoke('notes:save', notes) as Promise<{ ok: boolean }>,
   createDoc: (body: Record<string, unknown>) =>
     ipcRenderer.invoke('doc:create', body) as Promise<Doc>,
   openRefFiles: () =>

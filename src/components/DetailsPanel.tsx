@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Doc, Folder, MetaCandidate } from '../../shared/types'
 
 interface Props {
@@ -57,6 +57,7 @@ export default function DetailsPanel({
   const [cands, setCands] = useState<MetaCandidate[] | null>(null)
   const [looking, setLooking] = useState(false)
   const [tags, setTags] = useState('')
+  const [note, setNote] = useState('')
 
   const doiOf = (d: Doc) => d.identifiers?.doi ?? d.doi ?? ''
 
@@ -73,6 +74,14 @@ export default function DetailsPanel({
     setMsg(null)
     setCands(null)
     setTags((doc.tags ?? []).join(', '))
+    setNote('')
+    window.api
+      .loadNotes()
+      .then((n) => {
+        // the doc may have changed while the notes were in flight
+        if (n && typeof n[doc.id] === 'string' && !noteDirty.current) setNote(n[doc.id])
+      })
+      .catch(() => undefined)
   }, [doc.id])
 
   const dirty =
@@ -108,6 +117,24 @@ export default function DetailsPanel({
       setMsg('保存失败：' + String(e))
     }
     setSaving(false)
+  }
+
+  const noteDirty = useRef(false)
+
+  /** Notes are per document and local, so the whole map is rewritten rather
+   *  than patched.  A stray blur with no changes must not touch the file. */
+  const saveNote = async () => {
+    if (!noteDirty.current) return
+    noteDirty.current = false
+    try {
+      const all = await window.api.loadNotes()
+      const text = note.trim()
+      if (text) all[doc.id] = text
+      else delete all[doc.id]
+      await window.api.saveNotes(all)
+    } catch {
+      setMsg('笔记保存失败')
+    }
   }
 
   /** Flags are patched on the spot: nobody wants to press save to set a star.
@@ -246,6 +273,19 @@ export default function DetailsPanel({
                 saveTags()
               }
             }}
+          />
+        </div>
+        <div className="field">
+          <label>笔记（只存在本地，Mendeley 没有 /notes 接口，不会同步）</label>
+          <textarea
+            className="note-box"
+            value={note}
+            placeholder="这篇讲了什么、要不要读、和哪篇相关…"
+            onChange={(e) => {
+              noteDirty.current = true
+              setNote(e.target.value)
+            }}
+            onBlur={saveNote}
           />
         </div>
         <div className="flag-row">

@@ -12,6 +12,7 @@ function dir() {
 const libFile = () => path.join(dir(), 'library.json')
 const annFile = () => path.join(dir(), 'annotations.json')
 const cfgFile = () => path.join(dir(), 'config.json')
+const notesFile = () => path.join(dir(), 'notes.json')
 
 export type Config = AppConfig
 
@@ -72,6 +73,22 @@ export function loadAnnotations(): Annotation[] {
   } catch {
     return []
   }
+}
+
+/** Document-level notes.  Mendeley has no /notes endpoint — it answers 404
+ *  "No service found" — so these can only ever live here, and the UI says so. */
+export function loadNotes(): Record<string, string> {
+  try {
+    return JSON.parse(fs.readFileSync(notesFile(), 'utf-8')) as Record<string, string>
+  } catch {
+    return {}
+  }
+}
+
+export function saveNotes(notes: Record<string, string>) {
+  const tmp = notesFile() + '.tmp'
+  fs.writeFileSync(tmp, JSON.stringify(notes, null, 1), 'utf-8')
+  fs.renameSync(tmp, notesFile())
 }
 
 export function saveAnnotations(list: Annotation[]) {
