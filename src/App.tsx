@@ -118,10 +118,13 @@ export default function App() {
     return () => window.removeEventListener('keydown', h)
   }, [bumpFont])
 
-  const doSync = useCallback(async () => {
+  /** `full` re-pulls the whole library.  Incremental is the default because a
+   *  5.6k-document pull takes long enough to be annoying, but deletions are
+   *  only visible to a full one, which is why that stays one click away. */
+  const doSync = useCallback(async (full = false) => {
     setBusy(true)
     setErr(null)
-    const r = await window.api.sync(true)
+    const r = await window.api.sync(full)
     if (r && 'error' in r) {
       setErr(r.error)
     } else if (r) {
@@ -334,8 +337,15 @@ export default function App() {
       onDrop={onDrop}
     >
       <div className="toolbar">
-        <button className="primary" onClick={doSync} disabled={busy}>
+        <button className="primary" onClick={() => doSync(false)} disabled={busy}>
           {busy ? '同步中…' : '同步云端'}
+        </button>
+        <button
+          onClick={() => doSync(true)}
+          disabled={busy}
+          title="忽略上次同步时间，重新拉全库；也是发现云端删除的唯一办法"
+        >
+          全量
         </button>
         <button onClick={exportBib} disabled={!filtered.length}>
           导出 BibTeX

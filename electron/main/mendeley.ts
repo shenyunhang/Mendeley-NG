@@ -146,11 +146,15 @@ export class Mendeley {
     return (txt.trim() ? JSON.parse(txt) : undefined) as T
   }
 
-  /** Full pull.  `view=all` is mandatory: the default view omits
-   *  citation_key, file_attached and folder_uuids. */
-  async allDocuments(onPage?: (n: number) => void): Promise<Doc[]> {
+  /** Full or incremental pull.  `view=all` is mandatory: the default view
+   *  omits citation_key, file_attached and folder_uuids.  `since` is an
+   *  ISO timestamp and really does filter — verified against the live API,
+   *  where "now" returns nothing and "an hour ago" returns the one document
+   *  touched in that window. */
+  async allDocuments(onPage?: (n: number) => void, since?: string): Promise<Doc[]> {
     const out: Doc[] = []
     const params: Record<string, string> = { limit: '100', view: 'all' }
+    if (since) params.modified_since = since
     for (let guard = 0; guard < 200; guard++) {
       const batch = await this.request<Doc[]>('GET', '/documents', { params })
       if (!batch || batch.length === 0) break
