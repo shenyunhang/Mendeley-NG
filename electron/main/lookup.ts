@@ -1,64 +1,18 @@
 import type { Doc, MetaCandidate } from '../../shared/types'
+import { acceptable, norm, ratio } from '../../shared/text'
 
 /**
  * Metadata lookup, the replacement for Mendeley Desktop's "Update Details".
  * GET /metadata would have been the obvious route but is documented as not
  * implemented, so this goes to Crossref and arXiv directly.
+ *
+ * The matching threshold lives in shared/text.ts next to `ratio`, because
+ * duplicate detection has to agree with it.
  */
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-
-/** Anything below this is not a match.  The old project used 0.72 and it was
- *  unusable: "Object detection" against "Lifelong Object Detection" scores
- *  0.78 and is a different paper.  0.90 is the point where false positives
- *  stop showing up in practice, and a miss is far cheaper than a wrong
- *  citation. */
-const THRESHOLD = 0.9
-
-/** Substring containment is only trusted on long titles; two short titles
- *  that contain each other are usually different papers. */
-const CONTAINS_MIN_LEN = 40
-
-export const norm = (s: string) =>
-  (s || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-/** Similarity in 0..1.  Longest-common-subsequence based, like difflib's
- *  ratio, which behaves better than plain Levenshtein on titles where one
- *  version has a subtitle appended. */
-export function ratio(a: string, b: string): number {
-  const A = norm(a)
-  const B = norm(b)
-  if (!A || !B) return 0
-  if (A === B) return 1
-  const n = A.length
-  const m = B.length
-  // rolling row of the LCS table; titles are short so the O(n*m) is fine
-  let prev = new Array(m + 1).fill(0)
-  for (let i = 1; i <= n; i++) {
-    const cur = new Array(m + 1).fill(0)
-    for (let j = 1; j <= m; j++) {
-      cur[j] = A[i - 1] === B[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1])
-    }
-    prev = cur
-  }
-  return (2 * prev[m]) / (n + m)
-}
-
-/** Is `cand` the same paper as `title`? */
-export function acceptable(title: string, cand: string): boolean {
-  const r = ratio(title, cand)
-  if (r >= THRESHOLD) return true
-  const A = norm(title)
-  const B = norm(cand)
-  if (A.length < CONTAINS_MIN_LEN || B.length < CONTAINS_MIN_LEN) return false
-  return (A.includes(B) || B.includes(A)) && r >= 0.75
-}
 
 type Candidate = MetaCandidate
 

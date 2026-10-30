@@ -389,6 +389,17 @@ button.danger:hover:not(:disabled) {
   pointer-events: none;
   z-index: 50;
 }
+.dupe-group {
+  border-bottom: 1px solid #333;
+}
+.dupe-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: #1e1e1e;
+  font-size: 0.8rem;
+}
 .cand-box {
   flex: 0 0 auto;
   max-height: 40%;

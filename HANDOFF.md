@@ -134,9 +134,9 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 | PDF 高亮标注 | ✅ | ⚠️ | 可删除 / 改色 / 加笔记；矩形框而非文本选区 |
 | 标注同步到云端 | ✅ | ✅ | 坐标须按 PDF 点换算，见第 6 节 |
 | 云端 PDF 下载到本地 | ✅ | ✅ | `GET /files/{id}` 是 303 到 S3 预签名地址 |
-| 导入文献（拖 PDF / BibTeX / RIS / EndNote） | ✅ | ❌ | API 有 `POST /documents` 与文件上传 |
-| Update Details（补全元数据） | ✅ | ❌ | `/metadata` 未实现，需 Crossref / arXiv 兜底 |
-| 查重与合并 | ✅ | ❌ | 1.19.8 的核心功能之一 |
+| 导入文献（拖 PDF / BibTeX / RIS / EndNote） | ✅ | ⚠️ | 拖 PDF 已可用；BibTeX / RIS / EndNote 导入仍缺 |
+| Update Details（补全元数据） | ✅ | ✅ | `/metadata` 未实现，走 Crossref + arXiv，见第 5 节 |
+| 查重与合并 | ✅ | ✅ | 合并只补齐缺失字段，落败者进回收站 |
 | 回收站 / 删除 / 恢复 | ✅ | ❌ | API 有 `/trash`、`POST /documents/{id}/trash` |
 | 导出 BibTeX / RIS | ✅ | ✅ | 缺 EndNote XML |
 | 库内检索（`/search/documents`） | ✅ | ⚠️ | 现在是本地过滤，没走 API，也没做高阶筛选 |

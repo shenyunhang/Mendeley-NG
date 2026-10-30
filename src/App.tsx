@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Doc, Folder, Library, SyncStatus, UpdateState } from '../shared/types'
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
+import DupesView from './components/DupesView'
 import DocTable from './components/DocTable'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
 import { extractIds } from './lib/pdfmeta'
 import { toBibtex, toRis } from './lib/export'
 import { buildTree } from './lib/tree'
+import { findDuplicates, type DupeGroup } from './lib/dupes'
 
 type SortKey = 'title' | 'authors' | 'year' | 'source' | 'citation_key'
 
@@ -39,6 +41,7 @@ export default function App() {
   const [err, setErr] = useState<string | null>(null)
   const [upd, setUpd] = useState<UpdateState | null>(null)
   const [trash, setTrash] = useState<Doc[] | null>(null)
+  const [dupes, setDupes] = useState<DupeGroup[] | null>(null)
   const [pdfDir, setPdfDir] = useState('')
   const [fontSize, setFontSize] = useState(15)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -268,6 +271,13 @@ export default function App() {
           {upd?.phase === 'downloading' ? `下载中 ${upd.percent ?? 0}%` : '检查更新'}
         </button>
         <button
+          onClick={() => setDupes(findDuplicates(docs))}
+          disabled={!docs.length}
+          title="按 DOI / arXiv id / 标题找重复条目"
+        >
+          查重
+        </button>
+        <button
           onClick={async () => {
             const list = await window.api.listTrash()
             setTrash(list)
@@ -386,7 +396,67 @@ export default function App() {
           />
         </div>
 
-        {trash ? (
+        {dupes ? (
+          <DupesView
+            groups={dupes}
+            onClose={() => setDupes(null)}
+            onMerge={async (g, keeper) => {
+              const others = g.docs.filter((d) => d.id !== keeper.id)
+              // fill only what the keeper is missing, so merging never
+              // overwrites a good field with a worse one
+              const patch: Record<string, unknown> = {}
+              const field = (d: Doc, f: string) =>
+                (d as unknown as Record<string, unknown>)[f]
+              for (const f of [
+                'abstract',
+                'source',
+                'publisher',
+                'volume',
+                'issue',
+                'pages',
+                'citation_key',
+                'keywords',
+                'url'
+              ]) {
+                if (field(keeper, f)) continue
+                const hit = others.find((o) => field(o, f))
+                if (hit) patch[f] = field(hit, f)
+              }
+              if (!keeper.year) {
+                const y = others.find((o) => o.year)?.year
+                if (y) patch.year = y
+              }
+              if (!keeper.authors?.length) {
+                const a = others.find((o) => o.authors?.length)?.authors
+                if (a) patch.authors = a
+              }
+              const ident = { ...(keeper.identifiers ?? {}) }
+              if (!ident.doi) {
+                ident.doi = others.map((o) => o.identifiers?.doi ?? o.doi).find(Boolean)
+              }
+              if (!ident.arxiv) {
+                ident.arxiv = others.map((o) => o.identifiers?.arxiv ?? o.arxiv).find(Boolean)
+              }
+              if (ident.doi || ident.arxiv) patch.identifiers = ident
+              const updated = Object.keys(patch).length
+                ? await window.api.patchDoc(keeper.id, patch)
+                : keeper
+              for (const o of others) await window.api.trashDoc(o.id)
+              const gone = new Set(others.map((o) => o.id))
+              setLib((l) =>
+                l
+                  ? {
+                      ...l,
+                      docs: l.docs
+                        .filter((d) => !gone.has(d.id))
+                        .map((d) => (d.id === keeper.id ? { ...d, ...updated } : d))
+                    }
+                  : l
+              )
+              setDupes((prev) => (prev ? prev.filter((x) => x.key !== g.key) : prev))
+            }}
+          />
+        ) : trash ? (
           <TrashView
             docs={trash}
             onClose={() => setTrash(null)}
