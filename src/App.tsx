@@ -21,6 +21,13 @@ import DocTable from './components/DocTable'
 import ColumnPicker from './components/ColumnPicker'
 import FullTextView from './components/FullTextView'
 import { normaliseCols, type ColKey, type SortKey } from './lib/columns'
+import {
+  CITE_STYLES,
+  DEFAULT_CITE_STYLE,
+  formatCitation,
+  isCiteStyle,
+  type CiteStyle
+} from './lib/cite'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
 import { extractIds } from './lib/pdfmeta'
@@ -103,6 +110,7 @@ export default function App() {
   const [views, setViews] = useState<SavedView[]>([])
   const [showCols, setShowCols] = useState(false)
   const [nameTemplate, setNameTemplate] = useState(DEFAULT_PDF_TEMPLATE)
+  const [citeStyle, setCiteStyle] = useState<CiteStyle>(DEFAULT_CITE_STYLE)
   const [ftMode, setFtMode] = useState(false)
   const [ftQuery, setFtQuery] = useState('')
   const [ftHits, setFtHits] = useState<FtHit[]>([])
@@ -129,6 +137,7 @@ export default function App() {
       setViews(c.views ?? [])
       setCols(normaliseCols(c.cols))
       if (c.pdfNameTemplate) setNameTemplate(c.pdfNameTemplate)
+      if (isCiteStyle(c.citeStyle)) setCiteStyle(c.citeStyle)
       setTheme(c.theme === 'light' ? 'light' : 'dark')
       if (c.fontSize) {
         fontRef.current = c.fontSize
@@ -192,6 +201,12 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault()
         undoRef.current()
+      }
+      // Ctrl+C stays the browser's own copy; Shift is what asks for a
+      // formatted citation instead of whatever text happens to be selected
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+        e.preventDefault()
+        copyRef.current()
       }
     }
     window.addEventListener('keydown', h)
@@ -604,6 +619,29 @@ export default function App() {
   const exportRis = () => download(toRis(target), 'library.ris')
   const exportEndnote = () => download(toEndnoteXml(target), 'library.xml')
 
+  /**
+   * Put a formatted citation on the clipboard.  This is the single most
+   * frequent thing a reference manager is for — pick a paper, paste it into
+   * the manuscript — and it used to need a whole-file export and a search.
+   * The style is remembered, because it is a fact about how the user writes,
+   * not about the document in front of them.
+   */
+  const copyCitation = async (list: Doc[], style: CiteStyle = citeStyle) => {
+    if (!list.length) return
+    const text = formatCitation(list, style)
+    await window.api.copyText(text)
+    setBatchMsg(
+      list.length > 1 ? `已复制 ${list.length} 条引文` : `已复制引文：${text.split('\n')[0]}`
+    )
+    setTimeout(() => setBatchMsg(null), 2400)
+  }
+  // the shortcut lives in a listener installed once, so it reads the current
+  // selection through a ref instead of a stale closure
+  const copyRef = useRef<(list?: Doc[]) => void>(() => {})
+  copyRef.current = () => {
+    void copyCitation(target)
+  }
+
   const [dropping, setDropping] = useState(false)
   const [importMsg, setImportMsg] = useState<string | null>(null)
 
@@ -662,6 +700,31 @@ export default function App() {
         <button onClick={exportEndnote} disabled={!filtered.length}>
           导出 EndNote
         </button>
+        <span className="cite-box">
+          <button
+            onClick={() => copyCitation(target)}
+            disabled={!target.length}
+            title="把选中条目的格式化引文复制到剪贴板  (Ctrl+Shift+C)"
+          >
+            复制引文
+          </button>
+          <select
+            value={citeStyle}
+            onChange={(e) => {
+              const s = e.target.value
+              if (!isCiteStyle(s)) return
+              setCiteStyle(s)
+              void window.api.setConfig({ citeStyle: s })
+            }}
+            title="引文样式"
+          >
+            {CITE_STYLES.map((c) => (
+              <option key={c.key} value={c.key} title={c.sample}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </span>
         <button
           onClick={async () => {
             const r = await window.api.importToken()
@@ -1102,6 +1165,9 @@ export default function App() {
               <button onClick={exportBib}>导出 BibTeX</button>
               <button onClick={exportRis}>导出 RIS</button>
               <button onClick={exportEndnote}>导出 EndNote</button>
+              <button onClick={() => copyCitation(docs.filter((d) => multi.includes(d.id)))}>
+                复制引文
+              </button>
               <span style={{ flex: 1 }} />
               <button onClick={() => setMulti([])}>取消选择</button>
             </div>

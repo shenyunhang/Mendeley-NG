@@ -28,6 +28,8 @@ const api = {
 
   getConfig: () => ipcRenderer.invoke('config:get') as Promise<AppConfig>,
   setConfig: (c: Partial<AppConfig>) => ipcRenderer.invoke('config:set', c) as Promise<AppConfig>,
+  copyText: (t: string) => ipcRenderer.invoke('clipboard:write', t) as Promise<boolean>,
+  readClipboard: () => ipcRenderer.invoke('clipboard:read') as Promise<string>,
   pickPdfDir: () => ipcRenderer.invoke('dialog:pickPdfDir') as Promise<string | null>,
   importToken: () => ipcRenderer.invoke('dialog:importToken') as Promise<{ ok: boolean; error?: string } | null>,
 

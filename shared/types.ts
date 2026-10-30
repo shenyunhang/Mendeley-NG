@@ -151,6 +151,8 @@ export interface AppConfig {
   /** Named column layouts.  Unlike a saved search, a view does not filter:
    *  it only decides what the rows look like. */
   views?: SavedView[]
+  /** Shape of the citation the copy button puts on the clipboard. */
+  citeStyle?: string
 }
 
 /** How local PDFs are named unless the user says otherwise.  Shared so the

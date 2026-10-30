@@ -1,4 +1,4 @@
-import { BrowserWindow, app, dialog, ipcMain, net, protocol, screen, shell } from 'electron'
+import { BrowserWindow, app, clipboard, dialog, ipcMain, net, protocol, screen, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { Mendeley, findToken, importTokenFrom } from './mendeley'
@@ -499,6 +499,45 @@ async function runSmoke() {
   )
   await shot('smoke-pdf')
 
+  // A formatted citation is what a reference manager is actually for, so the
+  // run copies one and reads it back.  Both the clipboard and the style are
+  // restored: a smoke test has no business eating what the user had copied or
+  // leaving their citation style switched over.
+  const clipBefore = await w.webContents.executeJavaScript('window.api.readClipboard()')
+  const styleBefore = await w.webContents.executeJavaScript(
+    '(document.querySelector(".cite-box select")||{}).value||"author-year"'
+  )
+  const clickCite = () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+      + '.find(x=>x.textContent.trim()==="复制引文");if(!b||b.disabled)return 0;b.click();return 1})()'
+    )
+  const setStyle = (v: string) =>
+    w.webContents.executeJavaScript(
+      '(()=>{const s=document.querySelector(".cite-box select");if(!s)return 0;'
+      + 'const set=Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype,"value").set;'
+      + `set.call(s,"${v}");s.dispatchEvent(new Event("change",{bubbles:true}));return 1})()`
+    )
+  log('click 复制引文', await clickCite())
+  await new Promise((r) => setTimeout(r, 800))
+  const cited = await w.webContents.executeJavaScript('window.api.readClipboard()')
+  log('citation', JSON.stringify(cited))
+  expect('copying a citation reaches the clipboard', /\(20\d\d\)|\(n\.d\.\)/.test(cited), cited)
+  log('cite style -> numeric', await setStyle('numeric'))
+  await new Promise((r) => setTimeout(r, 400))
+  await clickCite()
+  await new Promise((r) => setTimeout(r, 800))
+  const citedNumeric = await w.webContents.executeJavaScript('window.api.readClipboard()')
+  log('citation numeric', JSON.stringify(citedNumeric))
+  expect('the cite style changes what is copied', citedNumeric === '[1]', {
+    cited,
+    citedNumeric
+  })
+  log('cite style restored', await setStyle(styleBefore))
+  await w.webContents.executeJavaScript(
+    `window.api.copyText(${JSON.stringify(String(clipBefore ?? ''))})`
+  )
+
   // zoom is the one thing a screenshot cannot prove: check that "fit width"
   // really fills the pane and that "fit page" then fits the height too
   const measure = () =>
@@ -893,6 +932,16 @@ ipcMain.handle('config:set', (_e, c: Partial<AppConfig>) => {
   saveConfig({ ...cur, ...c })
   return loadConfig()
 })
+
+// The renderer is a file:// page, where navigator.clipboard is a permission
+// policy away from silently doing nothing.  Going through Electron's own
+// clipboard is deterministic, and it lets the smoke run read back what was
+// copied instead of trusting that a write happened.
+ipcMain.handle('clipboard:write', (_e, text: string) => {
+  clipboard.writeText(String(text ?? ''))
+  return true
+})
+ipcMain.handle('clipboard:read', () => clipboard.readText())
 
 ipcMain.handle('dialog:pickPdfDir', async () => {
   if (!win) return null

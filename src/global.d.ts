@@ -19,6 +19,8 @@ export interface Api {
   onSyncStatus: (cb: (s: SyncStatus) => void) => () => void
   getConfig: () => Promise<AppConfig>
   setConfig: (c: Partial<AppConfig>) => Promise<AppConfig>
+  copyText: (t: string) => Promise<boolean>
+  readClipboard: () => Promise<string>
   pickPdfDir: () => Promise<string | null>
   importToken: () => Promise<{ ok: boolean; error?: string } | null>
   patchDoc: (id: string, body: Record<string, unknown>) => Promise<Doc>

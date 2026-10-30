@@ -145,6 +145,25 @@ textarea:focus {
 .toolbar .grow {
   flex: 1;
 }
+/* the style picker belongs to the copy button, so the two read as one control
+   rather than as another toolbar entry */
+.cite-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+.cite-box button {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.cite-box select {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+  font-size: 0.733rem;
+  padding: 3px 2px;
+  max-width: 110px;
+}
 .toolbar .status {
   font-size: 0.8rem;
   color: var(--fg-dim);
