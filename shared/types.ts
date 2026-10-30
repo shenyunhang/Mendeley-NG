@@ -143,6 +143,18 @@ export interface AppConfig {
   theme?: 'dark' | 'light'
   /** Scroll all pages in one column instead of one page at a time. */
   pdfContinuous?: boolean
+  /** Which columns the document table shows, in order. */
+  cols?: string[]
+  /** Named column layouts.  Unlike a saved search, a view does not filter:
+   *  it only decides what the rows look like. */
+  views?: SavedView[]
+}
+
+/** A named column layout for the document table. */
+export interface SavedView {
+  id: string
+  name: string
+  cols: string[]
 }
 
 /** Progress of an auto-update, pushed from main to the renderer. */

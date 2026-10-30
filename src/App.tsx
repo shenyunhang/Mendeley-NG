@@ -4,6 +4,7 @@ import type {
   Folder,
   Library,
   SavedSearch,
+  SavedView,
   SyncStatus,
   UpdateState
 } from '../shared/types'
@@ -14,6 +15,8 @@ import ImportView from './components/ImportView'
 import AddByIdView from './components/AddByIdView'
 import AskDialog from './components/AskDialog'
 import DocTable from './components/DocTable'
+import ColumnPicker from './components/ColumnPicker'
+import { normaliseCols, type ColKey, type SortKey } from './lib/columns'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
 import { extractIds } from './lib/pdfmeta'
@@ -22,7 +25,6 @@ import { buildTree } from './lib/tree'
 import { findDuplicates, type DupeGroup } from './lib/dupes'
 import { parseAny, type Entry } from './lib/import'
 
-type SortKey = 'title' | 'authors' | 'year' | 'source' | 'citation_key' | 'starred'
 
 /** Toolbar wording for each updater phase; null means "say nothing". */
 const UPD_TEXT: Record<UpdateState['phase'], ((s: UpdateState) => string) | null> = {
@@ -82,6 +84,9 @@ export default function App() {
   const [pdfDir, setPdfDir] = useState('')
   const [fontSize, setFontSize] = useState(15)
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+  const [cols, setCols] = useState<ColKey[]>(() => normaliseCols(undefined))
+  const [views, setViews] = useState<SavedView[]>([])
+  const [showCols, setShowCols] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -94,6 +99,8 @@ export default function App() {
     window.api.getConfig().then((c) => {
       setPdfDir(c.pdfDir)
       setSaved(c.savedSearches ?? [])
+      setViews(c.views ?? [])
+      setCols(normaliseCols(c.cols))
       setTheme(c.theme === 'light' ? 'light' : 'dark')
       if (c.fontSize) {
         fontRef.current = c.fontSize
@@ -212,6 +219,9 @@ export default function App() {
       if (key === 'source') return (d.source ?? '').toLowerCase()
       if (key === 'citation_key') return (d.citation_key ?? '').toLowerCase()
       if (key === 'starred') return d.starred ? 1 : 0
+      // ISO strings compare correctly as strings, and a missing date sorting
+      // first is the least surprising place for it
+      if (key === 'created') return d.created ?? ''
       return d.year ?? 0
     }
     return [...out].sort((a, b) => {
@@ -277,6 +287,39 @@ export default function App() {
     setSaved(next)
     if (activeSearch === id) setActiveSearch(null)
     window.api.setConfig({ savedSearches: next })
+  }
+
+  /** A view is the column layout and nothing else: saving one must not quietly
+   *  change which rows are on screen, which is what folding the sort or the
+   *  filter into it would do. */
+  const changeCols = (next: ColKey[]) => {
+    setCols(next)
+    window.api.setConfig({ cols: next })
+  }
+
+  const saveView = () => {
+    setAsk({
+      title: '给这个视图起个名字',
+      initial: cols.length + ' 列',
+      onOk: (name) => {
+        setAsk(null)
+        if (!name) return
+        const next: SavedView[] = [
+          ...views,
+          { id: 'v' + Date.now().toString(36), name, cols: [...cols] }
+        ]
+        setViews(next)
+        window.api.setConfig({ views: next })
+      }
+    })
+  }
+
+  const applyView = (v: SavedView) => changeCols(normaliseCols(v.cols))
+
+  const deleteView = (id: string) => {
+    const next = views.filter((v) => v.id !== id)
+    setViews(next)
+    window.api.setConfig({ views: next })
   }
 
   const savedCounts = useMemo(() => {
@@ -525,6 +568,26 @@ export default function App() {
         >
           ★
         </button>
+        <div style={{ position: 'relative', display: 'inline-flex' }}>
+          <button
+            className={showCols ? 'primary' : ''}
+            onClick={() => setShowCols((v) => !v)}
+            title="选择要显示哪些列、按什么顺序，并可以存成视图"
+          >
+            列
+          </button>
+          {showCols && (
+            <ColumnPicker
+              cols={cols}
+              onChange={changeCols}
+              views={views}
+              onSaveView={saveView}
+              onApplyView={applyView}
+              onDeleteView={deleteView}
+              onClose={() => setShowCols(false)}
+            />
+          )}
+        </div>
         <input
           ref={searchRef}
           style={{ width: 320 }}
@@ -817,6 +880,7 @@ export default function App() {
           <DocTable
             docs={filtered}
             fontSize={fontSize}
+            cols={cols}
             sort={sort}
             onSort={(k) =>
               setSort((s) =>

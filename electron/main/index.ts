@@ -302,6 +302,103 @@ async function runSmoke() {
     '(()=>{const c=[...document.querySelectorAll(".batch-bar button")]'
     + '.find(b=>b.textContent.trim()==="取消选择");if(c)c.click();return 1})()'
   )
+  // Column customisation and saved views.  Both live in the config, so the
+  // run puts the layout and the view list back afterwards; a smoke run has no
+  // business leaving the user's table rearranged.
+  const cfg0 = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>JSON.stringify(await window.api.getConfig()))()'
+    )
+  )
+  const headCols = () =>
+    w.webContents.executeJavaScript(
+      'JSON.stringify([...document.querySelectorAll(".col-head > div")].map(d=>d.dataset.col))'
+    )
+  const tickCol = (label: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const r=[...document.querySelectorAll(".col-row")]`
+      + `.find(x=>x.textContent.includes("${label}"));if(!r)return 0;`
+      + `r.querySelector("input").click();return 1})()`
+    )
+  const colsBefore = JSON.parse(await headCols())
+  log('columns before', colsBefore)
+  log(
+    'click 列',
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+      + '.find(x=>x.textContent.trim()==="列");if(!b)return "missing";b.click();return "ok"})()'
+    )
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  const pickerOpen = await w.webContents.executeJavaScript(
+    'document.querySelectorAll(".col-picker").length'
+  )
+  expect('column picker opens', pickerOpen === 1, pickerOpen)
+  log('untick 发表处', await tickCol('发表处'))
+  await new Promise((r) => setTimeout(r, 400))
+  const colsFewer = JSON.parse(await headCols())
+  expect('unticking a column drops it', !colsFewer.includes('source'), colsFewer)
+  log('tick 标签', await tickCol('标签'))
+  await new Promise((r) => setTimeout(r, 400))
+  const colsTags = JSON.parse(await headCols())
+  expect('ticking a column adds it', colsTags.includes('tags'), colsTags)
+
+  // save the layout as a view, apply a different one, then confirm the saved
+  // one comes back
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".col-picker button")]'
+    + '.find(x=>x.textContent.includes("保存为视图"));if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  await w.webContents.executeJavaScript(
+    '(()=>{const i=document.querySelector(".modal input");if(!i)return 0;'
+    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+    + 'set.call(i,"smoke view");i.dispatchEvent(new Event("input",{bubbles:true}));'
+    + 'const b=[...document.querySelectorAll(".modal-acts button")]'
+    + '.find(x=>x.textContent.trim()==="确定");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 500))
+  const viewRows = await w.webContents.executeJavaScript(
+    'JSON.stringify([...document.querySelectorAll(".col-views .ol-row .name")].map(n=>n.textContent))'
+  )
+  log('saved views', viewRows)
+  expect('a saved view is listed', /smoke view/.test(viewRows), viewRows)
+  log('restore default columns', await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".col-picker button")]'
+    + '.find(x=>x.textContent.includes("恢复默认"));if(!b)return 0;b.click();return 1})()'
+  ))
+  await new Promise((r) => setTimeout(r, 400))
+  const colsDefault = JSON.parse(await headCols())
+  expect('resetting restores the default columns', !colsDefault.includes('tags'), colsDefault)
+  // apply the saved view again, which is the point of having saved it
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".col-views .ol-row")]'
+    + '.find(x=>x.textContent.includes("smoke view"));if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  const colsFromView = JSON.parse(await headCols())
+  expect('applying a view restores its columns', colsFromView.includes('tags'), colsFromView)
+  // back to the default layout, so the rest of the run sees the table it
+  // expects, then close the picker and put the config back
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".col-picker button")]'
+    + '.find(x=>x.textContent.includes("恢复默认"));if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".col-picker button")]'
+    + '.find(x=>x.textContent.trim()==="✕");if(b)b.click();return 1})()'
+  )
+  await w.webContents.executeJavaScript(
+    `(async()=>{await window.api.setConfig(${JSON.stringify({
+      // only name the keys that were already there, so the run does not leave
+      // a null behind for a setting the user never touched
+      ...(cfg0.cols ? { cols: cfg0.cols } : {}),
+      views: cfg0.views ?? []
+    })});return 1})()`
+  )
+  await new Promise((r) => setTimeout(r, 300))
+
   const shot = async (name: string) => {
     const p = path.join(app.getPath('temp'), 'mendeley-ng-' + name + '.png')
     const img = await w.webContents.capturePage()

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Doc } from '../../shared/types'
-
-const COLS = '24px 26px 1.5fr 3.2fr 56px 1.3fr 1.1fr'
-
-type SortKey = 'title' | 'authors' | 'year' | 'source' | 'citation_key' | 'starred'
+import {
+  COL_BY_KEY,
+  gridTemplate,
+  type ColKey,
+  type SortKey
+} from '../lib/columns'
 
 interface Props {
   docs: Doc[]
@@ -20,17 +22,9 @@ interface Props {
   /** base UI font size; the row height follows it, so the virtualiser has to
    *  re-measure whenever it changes */
   fontSize: number
+  /** which columns to show, in order */
+  cols: ColKey[]
 }
-
-const HEAD: [string, SortKey][] = [
-  ['★', 'starred'],
-  ['', 'year'],
-  ['作者', 'authors'],
-  ['标题', 'title'],
-  ['年份', 'year'],
-  ['发表处', 'source'],
-  ['Key', 'citation_key']
-]
 
 export default function DocTable({
   docs,
@@ -40,7 +34,8 @@ export default function DocTable({
   onSelect,
   onToggleStar,
   multi,
-  fontSize
+  fontSize,
+  cols
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
 
@@ -68,9 +63,19 @@ export default function DocTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rowH])
 
+  const defs = useMemo(
+    () =>
+      cols
+        .map((k) => COL_BY_KEY.get(k))
+        .filter((c): c is NonNullable<typeof c> => Boolean(c)),
+    [cols]
+  )
+  const COLS = useMemo(() => gridTemplate(cols), [cols])
+
   return (
     <>
       <div
+        className="col-head"
         style={{
           display: 'grid',
           gridTemplateColumns: COLS,
@@ -79,24 +84,26 @@ export default function DocTable({
           flex: '0 0 auto'
         }}
       >
-        {HEAD.map(([label, key], i) => (
+        {defs.map((c) => (
           <div
-            key={i}
-            onClick={() => label && onSort(key)}
+            key={c.key}
+            data-col={c.key}
+            onClick={() => c.sort && onSort(c.sort)}
             style={{
               padding: '6px 8px',
               fontSize: '0.8rem',
               fontWeight: 600,
-              color: sort.key === key ? 'var(--accent)' : 'var(--fg-dim)',
-              cursor: label ? 'pointer' : 'default',
+              color: sort.key === c.sort ? 'var(--accent)' : 'var(--fg-dim)',
+              cursor: c.sort ? 'pointer' : 'default',
               userSelect: 'none',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap'
             }}
+            title={c.sort ? `按${c.label || '此列'}排序` : undefined}
           >
-            {label}
-            {sort.key === key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
+            {c.label}
+            {c.sort && sort.key === c.sort ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
           </div>
         ))}
       </div>
@@ -109,10 +116,6 @@ export default function DocTable({
             {v.getVirtualItems().map((vi) => {
               const d = docs[vi.index]
               const picked = multi.includes(d.id)
-              const au = d.authors?.[0]
-              const name = au
-                ? [au.last_name, au.first_name].filter(Boolean).join(' ')
-                : ''
               return (
                 <div
                   key={d.id}
@@ -142,66 +145,57 @@ export default function DocTable({
                     cursor: 'pointer'
                   }}
                 >
-                  <div style={{ paddingLeft: 6 }}>
-                    <span
-                      className="star"
-                      style={{ color: d.starred ? 'var(--star-on)' : 'var(--star-off)' }}
-                      title={d.starred ? '取消星标' : '加星标'}
-                      onClick={(e) => {
-                        // without this the click also selects the row, and a
-                        // star toggle is not a request to open the paper
-                        e.stopPropagation()
-                        onToggleStar(d)
-                      }}
-                    >
-                      {d.starred ? '★' : '☆'}
-                    </span>
-                  </div>
-                  <div style={{ paddingLeft: 8 }}>
-                    <span
-                      className={'pdf-dot' + (d.localPdf || d.file_attached ? '' : ' no-pdf')}
-                      title={d.localPdf ? '有本地 PDF' : d.file_attached ? '云端有文件' : '无 PDF'}
-                    />
-                  </div>
-                  <div
-                    style={{ padding: '0 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    title={name}
-                  >
-                    {name}
-                    {(d.authors?.length ?? 0) > 1 ? ' 等' : ''}
-                  </div>
-                  <div
-                    style={{
-                      padding: '0 8px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      // unread stands out the way an unread mail does
-                      fontWeight: d.read === false ? 600 : undefined
-                    }}
-                    title={d.title}
-                  >
-                    {d.title || '(无标题)'}
-                  </div>
-                  <div style={{ padding: '0 8px' }}>{d.year ?? ''}</div>
-                  <div
-                    style={{ padding: '0 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    title={d.source}
-                  >
-                    {d.source ?? ''}
-                  </div>
-                  <div
-                    style={{
-                      padding: '0 8px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      color: 'var(--fg-dim)'
-                    }}
-                    title={d.citation_key}
-                  >
-                    {d.citation_key ?? ''}
-                  </div>
+                  {defs.map((c) => {
+                    if (c.kind === 'star') {
+                      return (
+                        <div key={c.key} style={{ paddingLeft: 6 }}>
+                          <span
+                            className="star"
+                            style={{ color: d.starred ? 'var(--star-on)' : 'var(--star-off)' }}
+                            title={d.starred ? '取消星标' : '加星标'}
+                            onClick={(e) => {
+                              // without this the click also selects the row,
+                              // and a star toggle is not a request to open it
+                              e.stopPropagation()
+                              onToggleStar(d)
+                            }}
+                          >
+                            {d.starred ? '★' : '☆'}
+                          </span>
+                        </div>
+                      )
+                    }
+                    if (c.kind === 'pdf') {
+                      return (
+                        <div key={c.key} style={{ paddingLeft: 8 }}>
+                          <span
+                            className={
+                              'pdf-dot' + (d.localPdf || d.file_attached ? '' : ' no-pdf')
+                            }
+                            title={c.text(d)}
+                          />
+                        </div>
+                      )
+                    }
+                    return (
+                      <div
+                        key={c.key}
+                        style={{
+                          padding: '0 8px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          // unread stands out the way an unread mail does
+                          fontWeight:
+                            c.key === 'title' && d.read === false ? 600 : undefined,
+                          color: c.key === 'citation_key' ? 'var(--fg-dim)' : undefined
+                        }}
+                        title={c.text(d)}
+                      >
+                        {c.text(d)}
+                      </div>
+                    )
+                  })}
                 </div>
               )
             })}

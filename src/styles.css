@@ -403,6 +403,64 @@ td .no-pdf {
   user-select: none;
 }
 
+/* column picker: floats under its button so the table can be watched while
+   boxes are ticked */
+.col-picker {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  width: 232px;
+  max-height: 420px;
+  overflow: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-size: 0.8rem;
+}
+.col-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.col-picker-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+}
+.col-row {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px;
+}
+.col-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  cursor: pointer;
+}
+.col-move {
+  display: flex;
+  gap: 2px;
+}
+.col-views .ol-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.col-views .ol-row .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ann-dot {
   display: inline-block;
   width: 8px;
