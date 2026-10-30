@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Doc, Folder } from '../../shared/types'
+import type { CloudAnnotation, Doc, Folder } from '../../shared/types'
 
 const BASE = 'https://api.mendeley.com'
 const TOKEN_URL = BASE + '/oauth/token'
@@ -15,6 +15,7 @@ const UA =
 
 const CT_DOC = 'application/vnd.mendeley-document.1+json'
 const CT_FOLDER = 'application/vnd.mendeley-folder.1+json'
+const CT_ANNOTATION = 'application/vnd.mendeley-annotation.1+json'
 
 interface Token {
   access_token: string
@@ -189,6 +190,62 @@ export class Mendeley {
       body,
       contentType: CT_FOLDER
     })
+  }
+
+  /** Annotations for one document.  Highlight positions are absolute PDF
+   *  points, not the normalised 0..1 rects we keep locally. */
+  async listAnnotations(documentId: string): Promise<CloudAnnotation[]> {
+    const out: CloudAnnotation[] = []
+    const params: Record<string, string> = {
+      document_id: documentId,
+      limit: '200'
+    }
+    for (let guard = 0; guard < 50; guard++) {
+      const batch = await this.request<CloudAnnotation[]>('GET', '/annotations', {
+        params
+      })
+      if (!batch || batch.length === 0) break
+      out.push(...batch)
+      if (batch.length < 200) break
+      params.marker = batch[batch.length - 1].id
+    }
+    return out
+  }
+
+  /**
+   * The live API is picky here, and getting it wrong silently downgrades the
+   * annotation instead of failing:
+   *   - no filehash  -> becomes a plain note and **positions are dropped**
+   *   - filehash + positions + text -> sticky_note
+   *   - filehash + positions, no text -> highlight
+   * so a highlight must be sent without `text`.
+   */
+  async createAnnotation(body: {
+    document_id: string
+    filehash: string
+    type: 'highlight' | 'sticky_note'
+    positions: { top_left: { x: number; y: number }; bottom_right: { x: number; y: number }; page: number }[]
+    text?: string
+    privacy_level?: string
+  }): Promise<CloudAnnotation> {
+    return this.request<CloudAnnotation>('POST', '/annotations', {
+      body: { privacy_level: 'private', ...body },
+      contentType: CT_ANNOTATION
+    })
+  }
+
+  async deleteAnnotation(id: string): Promise<void> {
+    await this.request('DELETE', '/annotations/' + id, { contentType: CT_ANNOTATION })
+  }
+
+  /** filehash of a document's attached file; highlights cannot be created
+   *  without it.  It is the SHA-1 of the PDF bytes, so a local copy can stand
+   *  in if the API ever stops returning it. */
+  async fileHash(documentId: string): Promise<string | null> {
+    const files = await this.request<{ filehash?: string }[]>('GET', '/files', {
+      params: { document_id: documentId, limit: '10' }
+    })
+    return files?.[0]?.filehash ?? null
   }
 
   /** Move to trash.  Mendeley has no hard delete for documents. */

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   Annotation,
   AppConfig,
+  CloudAnnotation,
   Doc,
   Folder,
   Library,
@@ -44,6 +45,17 @@ const api = {
   deleteFolder: (id: string) => ipcRenderer.invoke('folder:delete', id) as Promise<{ ok: boolean }>,
 
   loadAnnotations: () => ipcRenderer.invoke('annotations:load') as Promise<Annotation[]>,
+  pullAnnotations: (docId: string) =>
+    ipcRenderer.invoke('annotations:pull', docId) as Promise<CloudAnnotation[]>,
+  pushAnnotations: (
+    docId: string,
+    filehash: string,
+    items: { page: number; x: number; y: number; w: number; h: number }[]
+  ) => ipcRenderer.invoke('annotations:push', docId, filehash, items) as Promise<CloudAnnotation[]>,
+  deleteRemoteAnnotation: (id: string) =>
+    ipcRenderer.invoke('annotations:deleteRemote', id) as Promise<{ ok: boolean }>,
+  fileHash: (docId: string) =>
+    ipcRenderer.invoke('annotations:fileHash', docId) as Promise<string | null>,
   saveAnnotations: (list: Annotation[]) => ipcRenderer.invoke('annotations:save', list),
 
   checkUpdate: () =>

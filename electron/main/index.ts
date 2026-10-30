@@ -13,7 +13,14 @@ import {
 } from './store'
 import { attachPdfs } from './pdfindex'
 import { initUpdater, type UpdateState } from './updater'
-import type { Annotation, AppConfig, Doc, Folder, SyncStatus } from '../../shared/types'
+import type {
+  Annotation,
+  AppConfig,
+  CloudAnnotation,
+  Doc,
+  Folder,
+  SyncStatus
+} from '../../shared/types'
 
 let win: BrowserWindow | null = null
 let client: Mendeley | null = null
@@ -354,6 +361,46 @@ ipcMain.handle('folder:create', async (_e, name: string) => {
   const lib = loadLibrary()
   if (lib) saveLibrary(lib.docs, [...lib.folders, f])
   return f
+})
+
+ipcMain.handle('annotations:pull', async (_e, docId: string) => {
+  const c = ensureClient()
+  return c.listAnnotations(docId)
+})
+
+ipcMain.handle('annotations:fileHash', async (_e, docId: string) => {
+  const c = ensureClient()
+  return c.fileHash(docId)
+})
+
+ipcMain.handle(
+  'annotations:push',
+  async (_e, docId: string, filehash: string, items: { page: number; x: number; y: number; w: number; h: number }[]) => {
+    const c = ensureClient()
+    const out: CloudAnnotation[] = []
+    for (const it of items) {
+      const created = await c.createAnnotation({
+        document_id: docId,
+        filehash,
+        type: 'highlight',
+        positions: [
+          {
+            top_left: { x: it.x, y: it.y },
+            bottom_right: { x: it.x + it.w, y: it.y + it.h },
+            page: it.page
+          }
+        ]
+      })
+      out.push(created)
+    }
+    return out
+  }
+)
+
+ipcMain.handle('annotations:deleteRemote', async (_e, id: string) => {
+  const c = ensureClient()
+  await c.deleteAnnotation(id)
+  return { ok: true }
 })
 
 ipcMain.handle('annotations:load', () => loadAnnotations())

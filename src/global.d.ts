@@ -1,6 +1,7 @@
 import type {
   Annotation,
   AppConfig,
+  CloudAnnotation,
   Doc,
   Folder,
   Library,
@@ -30,6 +31,14 @@ export interface Api {
   ) => Promise<Folder>
   deleteFolder: (id: string) => Promise<{ ok: boolean }>
   loadAnnotations: () => Promise<Annotation[]>
+  pullAnnotations: (docId: string) => Promise<CloudAnnotation[]>
+  pushAnnotations: (
+    docId: string,
+    filehash: string,
+    items: { page: number; x: number; y: number; w: number; h: number }[]
+  ) => Promise<CloudAnnotation[]>
+  deleteRemoteAnnotation: (id: string) => Promise<{ ok: boolean }>
+  fileHash: (docId: string) => Promise<string | null>
   saveAnnotations: (list: Annotation[]) => Promise<{ ok: boolean }>
   checkUpdate: () => Promise<{
     version?: string | null
