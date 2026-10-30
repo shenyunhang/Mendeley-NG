@@ -302,7 +302,11 @@ const ENDNOTE_TYPE: Record<string, string> = {
   Patent: 'patent',
   'Magazine Article': 'magazine_article',
   'Newspaper Article': 'newspaper_article',
-  'Computer Program': 'computer_program'
+  'Computer Program': 'computer_program',
+  // the two export.ts writes that had no reverse mapping, which made a
+  // round trip through EndNote XML lose the type
+  'Working Paper': 'working_paper',
+  Generic: 'generic'
 }
 
 /** EndNote XML.  The schema is loose, so every field is optional and looked

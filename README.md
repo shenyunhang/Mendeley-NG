@@ -113,15 +113,18 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 归文件夹 | 把文献行拖到左侧文件夹即可加入；详情面板可勾选移出 |
 | 读 PDF | pdf.js，按 `devicePixelRatio` 出后备缓冲，高 DPI 下不虚 |
 | 高亮 | 选中文字即高亮，可改色、加笔记、删除 |
+| 缩放 | 适宽 / 整页，跟着窗口变；手动缩放后不再被覆盖 |
+| PDF 目录 | 读 PDF 自带的 outline，点击跳到对应页 |
 | 标注同步 | 高亮推到 Mendeley `/annotations`，也能把云端的拉回来 |
 | 补 PDF | 云端有附件但本地没有的，一键下载到本地 PDF 目录 |
 | 导入 PDF | 把 PDF 拖进窗口就建条目，元数据交给服务端从文件里抽 |
 | 导入书目 | BibTeX / RIS / EndNote XML，先预览再导入，已有的标为重复 |
 | 改元数据 | 右侧详情面板直接编辑，PATCH 回 Mendeley 云端 |
 | 补全元数据 | 查 Crossref 与 arXiv，列出候选让你挑，不自动覆盖 |
+| 按标识符添加 | 粘 DOI / arXiv id / 标题，查到后确认再建条目，不需要 PDF |
 | 查重合并 | 按 DOI / arXiv id / 标题找重复；合并只补缺失字段 |
 | 回收站 | 移入回收站、恢复、彻底删除 |
-| 导出 | BibTeX / RIS，可只导出当前筛选结果或单条 |
+| 导出 | BibTeX / RIS / EndNote XML，可只导出当前筛选结果或单条 |
 | 检查更新 | 一键从 GitHub Releases 拉新版、下载、安装并重启 |
 | 字号 | 工具栏 A−/A+，或 Ctrl+− / Ctrl+=。整站 rem，一个旋钮全跟着变 |
 
@@ -149,6 +152,7 @@ electron/preload/index.ts   contextBridge，只暴露白名单方法
 src/                        renderer：React + 虚拟滚动 + pdf.js 文本层
 src/lib/dupes.ts            查重分组与保留哪一条的取舍
 src/lib/import.ts           BibTeX / RIS / EndNote XML 解析
+src/lib/export.ts           BibTeX / RIS / EndNote XML 生成
 src/lib/pdfmeta.ts          从 PDF 前两页抽 DOI / arXiv id
 shared/types.ts             三端共享的类型
 shared/text.ts              标题归一化与相似度（查源与查重共用）

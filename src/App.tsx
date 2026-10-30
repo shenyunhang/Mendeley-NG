@@ -9,7 +9,7 @@ import DocTable from './components/DocTable'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
 import { extractIds } from './lib/pdfmeta'
-import { toBibtex, toRis } from './lib/export'
+import { toBibtex, toEndnoteXml, toRis } from './lib/export'
 import { buildTree } from './lib/tree'
 import { findDuplicates, type DupeGroup } from './lib/dupes'
 import { parseAny, type Entry } from './lib/import'
@@ -201,6 +201,10 @@ export default function App() {
     const list = selected ? [selected] : filtered
     download(toRis(list), 'library.ris')
   }
+  const exportEndnote = () => {
+    const list = selected ? [selected] : filtered
+    download(toEndnoteXml(list), 'library.xml')
+  }
 
   const [dropping, setDropping] = useState(false)
   const [importMsg, setImportMsg] = useState<string | null>(null)
@@ -249,6 +253,9 @@ export default function App() {
         </button>
         <button onClick={exportRis} disabled={!filtered.length}>
           导出 RIS
+        </button>
+        <button onClick={exportEndnote} disabled={!filtered.length}>
+          导出 EndNote
         </button>
         <button
           onClick={async () => {
