@@ -20,6 +20,7 @@ import { attachPdfs, parseName } from './pdfindex'
 import { lookup, resolveIdentifier } from './lookup'
 import {
   initFullText,
+  ftAdd,
   ftBuild,
   ftCancel,
   ftClear,
@@ -1512,6 +1513,63 @@ async function runSmoke() {
     '(async()=>(await window.api.loadAnnotations()).length)()'
   )
   log('annotations file restored ->', afterCount, 'entries')
+
+  // A paper that arrives has to be searchable without reading the library
+  // again.  ftAdd is called here rather than through an import, because an
+  // import needs the cloud and what is being checked is the append.
+  const corpus = ftDocs().filter((d) => d.localPdf)
+  let addInfo: {
+    ok: boolean
+    indexed?: number[]
+    bytes?: number[]
+    hits?: number
+    owned?: boolean
+  } = { ok: false }
+  if (corpus.length >= 4) {
+    const first = corpus.slice(0, 2)
+    const second = corpus.slice(2, 4)
+    ftClear()
+    const before = ftStatus(ftDocs())
+    await ftAdd(first, first.map((d) => d.id))
+    const mid = ftStatus(ftDocs())
+    await ftAdd(second, second.map((d) => d.id))
+    const after = ftStatus(ftDocs())
+    // whichever of these words turns up: what matters is that the hit is
+    // reported against a paper that was actually indexed here
+    const probe =
+      ['the', 'of', 'and', 'in'].map((word) => ftSearch(word)).find((h) => h.length) ?? []
+    addInfo = {
+      ok: true,
+      indexed: [before.indexed, mid.indexed, after.indexed],
+      bytes: [before.bytes, mid.bytes, after.bytes],
+      hits: probe.length,
+      owned: probe.every((h) => corpus.slice(0, 4).some((d) => d.id === h.docId))
+    }
+  }
+  log('indexing what was just added', addInfo)
+  expect(
+    'a paper that arrives is indexed on its own',
+    addInfo.ok === true && addInfo.indexed?.[1] === 2,
+    addInfo
+  )
+  // counted as growth rather than as an exact number: a scan with no text
+  // layer yields nothing to index, and that is a property of the paper, not
+  // of the append
+  expect(
+    'a second arrival appends instead of replacing',
+    (addInfo.indexed?.[2] ?? 0) > (addInfo.indexed?.[1] ?? 0) &&
+      (addInfo.bytes?.[2] ?? 0) > (addInfo.bytes?.[1] ?? 0),
+    addInfo
+  )
+  expect(
+    'text appended this way can be found',
+    (addInfo.hits ?? 0) > 0 && addInfo.owned === true,
+    addInfo
+  )
+  // the run left the throwaway index holding only those four; put it back the
+  // way the next run expects to find it
+  ftClear()
+
   if (fails.length) {
     log('FAILED CHECKS', fails.join(' | '))
     app.exit(1)
@@ -1971,9 +2029,27 @@ ipcMain.handle(
         lib.folders
       )
     }
+    indexAdded(doc)
     return doc
   }
 )
+
+/**
+ * Index a paper that has just been given a local PDF.
+ *
+ * It is not awaited: the import has already answered, and the point of it is
+ * that nothing is asked of the reader.  One PDF is a fraction of a second,
+ * where indexing the library takes minutes — which is why a newly imported
+ * paper used to stay invisible to full-text search until the whole thing was
+ * rebuilt, and usually was not.
+ */
+function indexAdded(doc: Doc) {
+  void ftAdd([doc], [doc.id])
+    .then((n) => {
+      if (n > 0) win?.webContents.send('ft:progress', ftStatus(ftDocs()))
+    })
+    .catch(() => undefined)
+}
 
 ipcMain.handle('pdf:download', async (_e, docId: string) => {
   try {
@@ -1997,6 +2073,9 @@ ipcMain.handle('pdf:download', async (_e, docId: string) => {
     if (lib && doc) {
       doc.localPdf = dest
       saveLibrary(lib.docs, lib.folders)
+      // a paper pulled down from the cloud is as new to the index as one that
+      // was imported; it has to be searchable for the same reason
+      indexAdded(doc)
     }
     return { ok: true, path: dest, size: buf.length }
   } catch (e) {

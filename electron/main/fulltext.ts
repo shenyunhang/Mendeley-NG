@@ -112,6 +112,11 @@ let dir: string = ''
 let meta: Meta | null = null
 let blob: string | null = null
 let building = false
+/** Either a build or an append is writing the text file.  They must not
+ *  overlap: both compute the offset they start writing at from the entry
+ *  table, so two of them at once would put two papers on the same offset
+ *  and every hit in one of them would be reported under the other. */
+let busy = false
 /** Set by `ftCancel`.  The build loop checks it between batches, which is
  *  often enough: a batch is one PDF per lane, not the whole library. */
 let cancelled = false
@@ -304,7 +309,8 @@ export async function ftBuild(
   onProgress: (s: FtStatus) => void,
   rebuild = false
 ): Promise<FtStatus> {
-  if (building) return ftStatus(docs)
+  if (busy) return ftStatus(docs)
+  busy = true
   building = true
   cancelled = false
   const m = loadMeta()
@@ -314,7 +320,17 @@ export async function ftBuild(
   const fresh = meta!
   const queue = docs.filter((d) => d.localPdf)
   progress = { done: 0, total: queue.length, current: '' }
-  const out = fs.openSync(dataFile(), rebuild ? 'w' : 'a')
+  // An increment over a dropped entry table has to start the file again, not
+  // append to it: the offsets would restart at zero while the text sat behind
+  // everything already written, and a hit would then be reported against
+  // whichever paper really owns that offset.  Dropping happens when the page
+  // budget changes, which throws the index away.
+  const stale =
+    !rebuild &&
+    !Object.keys(fresh.entries).length &&
+    fs.existsSync(dataFile()) &&
+    fs.statSync(dataFile()).size > 0
+  const out = fs.openSync(dataFile(), rebuild || stale ? 'w' : 'a')
   // Offsets are counted in UTF-16 code units, because that is what the search
   // side indexes with once the file has been read back as a string.  Taking
   // the byte size here instead looks right and is not: one Chinese character
@@ -399,6 +415,7 @@ export async function ftBuild(
     }
   } finally {
     fs.closeSync(out)
+    busy = false
     building = false
     cancelled = false
     progress.current = ''
@@ -408,6 +425,67 @@ export async function ftBuild(
   const s = ftStatus(docs)
   onProgress(s)
   return s
+}
+
+/**
+ * Index just the documents that were added, appending their text after
+ * everything already there.  Nothing has to be rewritten: the offsets of the
+ * indexed papers stay where they were, so this costs one PDF of work rather
+ * than a run over the library.
+ *
+ * It exists because importing a paper used to leave it invisible to
+ * full-text search until the whole library was indexed again.  Rebuilding
+ * takes minutes, so the newest paper — the one somebody is most likely to
+ * look for — was reliably the one that could not be found.
+ */
+export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
+  if (busy || !dir) return 0
+  const want = docs.filter((d) => d.localPdf && ids.includes(d.id))
+  if (!want.length) return 0
+  busy = true
+  const m = loadMeta()
+  let at = 0
+  for (const e of Object.values(m.entries)) {
+    if (e.start + e.len > at) at = e.start + e.len
+  }
+  // With no entries the offset table starts again from zero, so the text file
+  // has to as well.  Appending here would put the new paper at offset 0 while
+  // its text sits after everything else, and every hit in it would be
+  // reported under whichever paper really owns that offset — the same trap
+  // `ftBuild` guards against on a rebuild.
+  const out = fs.openSync(dataFile(), Object.keys(m.entries).length ? 'a' : 'w')
+  let added = 0
+  try {
+    for (const d of want) {
+      let st: fs.Stats
+      try {
+        st = fs.statSync(d.localPdf as string)
+      } catch {
+        continue
+      }
+      const g = await extract(d.localPdf as string, pages)
+      if (!g || !g.text.trim()) continue
+      fs.writeSync(out, Buffer.from(g.text.toLowerCase(), 'utf8'))
+      m.entries[d.id] = {
+        start: at,
+        len: g.text.length,
+        bounds: g.bounds.map((b) => at + b),
+        mtime: Math.floor(st.mtimeMs),
+        size: st.size
+      }
+      at += g.text.length
+      added++
+    }
+  } finally {
+    fs.closeSync(out)
+    busy = false
+    // The corpus is held in memory as one string.  Appending invalidates it,
+    // and without this a search straight after an import would read the text
+    // as it was before the paper arrived.
+    if (added) blob = null
+    saveMeta()
+  }
+  return added
 }
 
 export function ftClear() {
