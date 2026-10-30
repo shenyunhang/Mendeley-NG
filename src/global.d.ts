@@ -4,6 +4,8 @@ import type {
   CloudAnnotation,
   Doc,
   Folder,
+  FtHit,
+  FtStatus,
   Library,
   MetaCandidate,
   SyncStatus,
@@ -38,6 +40,11 @@ export interface Api {
     skipped: number
     sample: string[]
   }>
+  ftStatus: () => Promise<FtStatus>
+  ftBuild: (rebuild?: boolean) => Promise<FtStatus>
+  ftClear: () => Promise<FtStatus>
+  ftSearch: (q: string) => Promise<FtHit[]>
+  onFtProgress: (cb: (s: FtStatus) => void) => () => void
   loadAnnotations: () => Promise<Annotation[]>
   pullAnnotations: (docId: string) => Promise<CloudAnnotation[]>
   pushAnnotations: (

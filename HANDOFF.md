@@ -39,6 +39,7 @@ Chromium 天然按系统 scale factor 缩放 CSS 像素，**不需要任何 DPI 
 | 星标 / 已读 / 标签 | 可用；写回云端 |
 | 列定制与保存视图 | 可用；存配置 |
 | 撤销栈（删除 / 合并 / 批量改文件夹） | 可用；Ctrl+Z |
+| 全文检索（PDF 正文） | 可用；每篇前 3 页，命中带页码与上下文 |
 | 批量操作（Shift / Ctrl 多选） | 可用 |
 | 自更新（GitHub Releases） | 可用 |
 | 界面字号调节 | 可用 |
@@ -157,6 +158,11 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 26. **连续滚动里"适配宽度"不能跟着当前页变**：列里每一页都有自己的尺寸，按顶部那一页
     算缩放，滚动时缩放就会变，变了要重排整列，重排又改变滚动位置 → 死循环。
     改成取**最宽的那一页**算，整列共用一个稳定的缩放。
+28. **主进程里用 pdf.js 必须自带 worker**。pdf.js 用运行期 import() 加载 worker，
+    解析基准是发起导入的模块，打包后就是 `out/main/pdf.worker.mjs`。该文件不存在时
+    **每一篇** PDF 都失败，报 Setting up fake worker failed，看起来像全库损坏，
+    其实是缺一个文件。`scripts/copy-worker.mjs` 在 build 后复制它。
+
 27. **`electron-builder` 没有证书时会静默跳过签名**：安装包照常编出来、照常能跑，
     和签过名的一模一样看不出区别。所以 CI 不能只看"构建成功"，得用
     `npm run signcheck`（`Get-AuthenticodeSignature`）问 Windows 拿真实状态。
@@ -243,8 +249,11 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
    1.19.8 的合并是有字段级冲突预览和 Undo 的，值得照做。
 8. **导入 BibTeX / RIS / EndNote XML**　✅ 已完成
    现在只有导出，没有导入，换库或迁移时会卡住。
-9. **全文检索**
-   pdf.js 出 text layer，本地建倒排索引。库大，索引要能增量更新并落盘复用。
+9. **全文检索**　✅ 已完成：只索引每篇前 3 页，文本落一个平文件 + 偏移表，
+   不用倒排索引（60 MB 直接 indexOf 扫只要几十毫秒，倒排表比原文还大）。
+   增量：文件 mtime+size 没变就跳过。删掉的文献留下的空洞只有「重建」能回收。
+   **坑**：主进程里跑 pdf.js 需要把 `pdf.worker.mjs` 复制到 `out/main/`，
+   否则每一篇都报 Setting up fake worker failed（见第 5 节第 28 条）。
 10. **PDF 文本选区高亮**　✅ 已完成
     替换现在的矩形拖框，接 text layer 拿真实选区，顺带能复制文本。
 

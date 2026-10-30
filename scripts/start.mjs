@@ -28,6 +28,17 @@ const env = { ...process.env }
 delete env.ELECTRON_RUN_AS_NODE
 delete env.NODE_OPTIONS
 
+// A smoke run must not spend four minutes reading every PDF, and must not
+// touch the real full-text index, so it gets its own throwaway one and a
+// short document list.
+if (process.argv.includes('--smoke')) {
+  env.MENDELEY_FT_DIR ??= path.join(root, '.ft-smoke')
+  env.MENDELEY_FT_LIMIT ??= '80'
+  // a throwaway index is only throwaway if each run gets a fresh one, or the
+  // "index starts empty" check starts failing on the second run
+  fs.rmSync(env.MENDELEY_FT_DIR, { recursive: true, force: true })
+}
+
 const args = [root, ...process.argv.slice(2)]
 const child = spawn(bin, args, { stdio: 'inherit', env, cwd: root })
 child.on('close', (code) => process.exit(code ?? 0))

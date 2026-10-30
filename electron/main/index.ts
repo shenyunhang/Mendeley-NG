@@ -4,6 +4,7 @@ import path from 'node:path'
 import { Mendeley, findToken, importTokenFrom } from './mendeley'
 import {
   DEFAULT_PDF_DIR,
+  dataDir,
   loadAnnotations,
   loadConfig,
   loadLibrary,
@@ -15,6 +16,8 @@ import {
 } from './store'
 import { attachPdfs, parseName } from './pdfindex'
 import { lookup, resolveIdentifier } from './lookup'
+import { initFullText, ftBuild, ftClear, ftSearch, ftStatus } from './fulltext'
+import type { FtStatus } from '../../shared/types'
 import { initUpdater, type UpdateState } from './updater'
 import type {
   Annotation,
@@ -699,6 +702,72 @@ async function runSmoke() {
       + 'return JSON.stringify({keys:Object.keys(n).length})})()'
     )
   )
+  // Full-text search, over the throwaway index the launcher keeps in
+  // .ft-smoke/ so that neither the real index nor four minutes of PDF reading
+  // are involved.  It runs last because it takes over the middle pane.
+  log(
+    'click 全文',
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+      + '.find(x=>x.textContent.trim()==="全文");if(!b)return "missing";b.click();return "ok"})()'
+    )
+  )
+  await new Promise((r) => setTimeout(r, 600))
+  const ftStat0 = JSON.parse(
+    await w.webContents.executeJavaScript('(async()=>JSON.stringify(await window.api.ftStatus()))()')
+  )
+  log('ft status', ftStat0)
+  expect('full text starts unindexed', ftStat0.indexed === 0 && ftStat0.total > 0, ftStat0)
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
+    + '.find(x=>x.textContent.trim()==="建索引");if(!b)return 0;b.click();return 1})()'
+  )
+  // small list, but still a real read of real PDFs, so poll rather than guess
+  let ftStat1 = ftStat0
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 1000))
+    ftStat1 = JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(async()=>JSON.stringify(await window.api.ftStatus()))()'
+      )
+    )
+    if (!ftStat1.building) break
+  }
+  log('ft after build', ftStat1)
+  expect('indexing reads the PDFs', ftStat1.indexed > 0, ftStat1)
+  await w.webContents.executeJavaScript(
+    '(()=>{const i=document.querySelector(".toolbar input");'
+    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+    + 'set.call(i,"the");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 1200))
+  const ftRows = await w.webContents.executeJavaScript(
+    'JSON.stringify({rows:document.querySelectorAll(".ft-row").length,'
+    + 'hits:document.querySelectorAll(".ft-hit").length,'
+    + 'pages:[...document.querySelectorAll(".ft-hit .pg")].slice(0,3).map(p=>p.textContent),'
+    + 'snip:(document.querySelector(".ft-snip")||{}).textContent||null})'
+  )
+  log('ft results', ftRows)
+  const ftOut = JSON.parse(ftRows)
+  expect('full text finds hits', ftOut.rows > 0 && ftOut.hits > 0, ftOut)
+  expect('a hit carries a page number', /^p\d+$/.test(ftOut.pages[0] ?? ''), ftOut.pages)
+  // opening a hit has to land on the page the hit named
+  const wantPage = Number((ftOut.pages[0] ?? 'p1').slice(1))
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=document.querySelector(".ft-hit");if(r)r.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 1500))
+  const landed = await w.webContents.executeJavaScript(
+    'document.querySelector(".pdf-bar input").value'
+  )
+  log('ft open at page', { want: wantPage, got: landed })
+  expect('opening a hit jumps to its page', Number(landed) === wantPage, { want: wantPage, got: landed })
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
+    + '.find(x=>x.textContent.trim()==="返回列表");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+
   if (annBackup) fs.writeFileSync(annPath, annBackup)
   const afterCount = await w.webContents.executeJavaScript(
     '(async()=>(await window.api.loadAnnotations()).length)()'
@@ -1177,6 +1246,34 @@ ipcMain.handle('pdf:read', async (_e, p: string) => {
 })
 
 // updater events are pushed to the renderer, which renders them in the toolbar
+// MENDELEY_FT_DIR puts the index somewhere other than alongside the library,
+// which is also how the smoke run keeps a throwaway index of its own.
+// MENDELEY_FT_LIMIT caps how many documents one run will read; it exists so
+// the smoke run can exercise indexing without reading every PDF.
+initFullText(process.env.MENDELEY_FT_DIR || dataDir())
+const ftDocs = () => {
+  const all = loadLibrary()?.docs ?? []
+  const n = Number(process.env.MENDELEY_FT_LIMIT || 0)
+  if (n <= 0) return all
+  return all.filter((d) => d.localPdf).slice(0, n)
+}
+
+// Full-text search.  Building the index reads every local PDF, which takes
+// minutes on a large library, so it is started on request and reports
+// progress rather than blocking an invoke for the whole run.
+ipcMain.handle('ft:status', () => ftStatus(ftDocs()))
+ipcMain.handle('ft:build', async (_e, rebuild?: boolean) => {
+  const docs = ftDocs()
+  const send = (s: FtStatus) => win?.webContents.send('ft:progress', s)
+  void ftBuild(docs, send, !!rebuild).catch(() => {})
+  return ftStatus(docs)
+})
+ipcMain.handle('ft:clear', () => {
+  ftClear()
+  return ftStatus(ftDocs())
+})
+ipcMain.handle('ft:search', (_e, q: string) => ftSearch(q))
+
 initUpdater((s: UpdateState) => win?.webContents.send('updater:state', s))
 
 ipcMain.handle('shell:openExternal', (_e, url: string) => {

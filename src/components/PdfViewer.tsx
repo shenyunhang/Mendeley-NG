@@ -109,10 +109,14 @@ const rectToPos = (r: Rect, page: number, s: Size): PdfPos => ({
 
 export default function PdfViewer({
   doc,
-  onLocalPdf
+  onLocalPdf,
+  jumpTo
 }: {
   doc: Doc
   onLocalPdf?: (docId: string, p: string) => void
+  /** Open at this page.  The nonce is what makes a second jump to the same
+   *  page on the same document possible, e.g. two hits on page 3. */
+  jumpTo?: { page: number; nonce: number } | null
 }) {
   const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null)
   const [numPages, setNumPages] = useState(0)
@@ -220,6 +224,16 @@ export default function PdfViewer({
       pending.current?.cancel()
     }
   }, [doc.localPdf])
+
+  // declared after the load effect above so that it wins the race on a
+  // document change: opening a full-text hit has to land on the right page
+  // rather than on page 1
+  useEffect(() => {
+    if (!jumpTo) return
+    setPage(Math.min(Math.max(1, jumpTo.page), numPages || jumpTo.page))
+    if (continuous) requestAnimationFrame(() => scrollToPage(jumpTo.page))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpTo])
 
   /** Page size in PDF points, fetched on demand and cached. */
   const sizeOf = useCallback(

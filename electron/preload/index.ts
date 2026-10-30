@@ -5,6 +5,8 @@ import type {
   CloudAnnotation,
   Doc,
   Folder,
+  FtHit,
+  FtStatus,
   Library,
   MetaCandidate,
   SyncStatus,
@@ -53,6 +55,16 @@ const api = {
       skipped: number
       sample: string[]
     }>,
+
+  ftStatus: () => ipcRenderer.invoke('ft:status') as Promise<FtStatus>,
+  ftBuild: (rebuild?: boolean) => ipcRenderer.invoke('ft:build', rebuild) as Promise<FtStatus>,
+  ftClear: () => ipcRenderer.invoke('ft:clear') as Promise<FtStatus>,
+  ftSearch: (q: string) => ipcRenderer.invoke('ft:search', q) as Promise<FtHit[]>,
+  onFtProgress: (cb: (s: FtStatus) => void) => {
+    const h = (_e: unknown, s: FtStatus) => cb(s)
+    ipcRenderer.on('ft:progress', h)
+    return () => ipcRenderer.removeListener('ft:progress', h)
+  },
 
   loadAnnotations: () => ipcRenderer.invoke('annotations:load') as Promise<Annotation[]>,
   pullAnnotations: (docId: string) =>

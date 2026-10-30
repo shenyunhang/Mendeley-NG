@@ -157,6 +157,24 @@ export interface AppConfig {
  *  dialog can offer it as the starting point and main can fall back to it. */
 export const DEFAULT_PDF_TEMPLATE = '{authors} - {year} - {title}'
 
+/** Progress and size of the full-text index. */
+export interface FtStatus {
+  indexed: number
+  total: number
+  building: boolean
+  done: number
+  /** how many leading pages of each PDF are indexed */
+  pages: number
+  bytes: number
+}
+
+/** One place where the query appears in one document. */
+export interface FtHit {
+  docId: string
+  page: number
+  snippet: string
+}
+
 /** A named column layout for the document table. */
 export interface SavedView {
   id: string

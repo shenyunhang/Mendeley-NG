@@ -16,3 +16,6 @@ mendeley-token.json
 
 .DS_Store
 Thumbs.db
+
+# throwaway full-text index used by the smoke run
+.ft-smoke/

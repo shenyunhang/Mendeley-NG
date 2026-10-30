@@ -403,6 +403,57 @@ td .no-pdf {
   user-select: none;
 }
 
+/* full-text results: one block per paper, one line per place it matched */
+.ft-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.ft-row {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--sep);
+}
+.ft-title {
+  font-size: 0.867rem;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ft-title:hover {
+  color: var(--accent);
+}
+.ft-meta {
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+}
+.ft-hit {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0 1px 4px;
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.ft-hit:hover .ft-snip {
+  color: var(--fg);
+}
+.ft-hit .pg {
+  flex: 0 0 auto;
+  font-size: 0.733rem;
+}
+.ft-snip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ft-more {
+  padding-left: 4px;
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+}
+
 /* column picker: floats under its button so the table can be watched while
    boxes are ticked */
 .col-picker {

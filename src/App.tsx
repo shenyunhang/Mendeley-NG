@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   Doc,
   Folder,
+  FtHit,
+  FtStatus,
   Library,
   SavedSearch,
   SavedView,
@@ -17,6 +19,7 @@ import AddByIdView from './components/AddByIdView'
 import AskDialog from './components/AskDialog'
 import DocTable from './components/DocTable'
 import ColumnPicker from './components/ColumnPicker'
+import FullTextView from './components/FullTextView'
 import { normaliseCols, type ColKey, type SortKey } from './lib/columns'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
@@ -100,6 +103,13 @@ export default function App() {
   const [views, setViews] = useState<SavedView[]>([])
   const [showCols, setShowCols] = useState(false)
   const [nameTemplate, setNameTemplate] = useState(DEFAULT_PDF_TEMPLATE)
+  const [ftMode, setFtMode] = useState(false)
+  const [ftQuery, setFtQuery] = useState('')
+  const [ftHits, setFtHits] = useState<FtHit[]>([])
+  const [ftStat, setFtStat] = useState<FtStatus | null>(null)
+  /** Page to open the reader at.  The nonce re-triggers a jump to the same
+   *  page on the same document, which a bare number could not. */
+  const [jump, setJump] = useState<{ page: number; nonce: number } | null>(null)
   const [undo, setUndo] = useState<UndoEntry[]>([])
   const searchRef = useRef<HTMLInputElement>(null)
   // the keydown listener is installed once, so it has to reach the undo stack
@@ -127,9 +137,11 @@ export default function App() {
     })
     const off = window.api.onSyncStatus(setStatus)
     const offUpd = window.api.onUpdateState(setUpd)
+    const offFt = window.api.onFtProgress(setFtStat)
     return () => {
       off()
       offUpd()
+      offFt()
     }
   }, [])
 
@@ -253,6 +265,21 @@ export default function App() {
       return (x < y ? -1 : 1) * dir
     })
   }, [docs, folderId, query, sort, onlyStarred])
+
+  // Full-text search runs in the main process against the whole corpus, so it
+  // is debounced: typing a word should not start one scan per keystroke.
+  useEffect(() => {
+    if (!ftMode) return
+    const q = ftQuery.trim()
+    if (q.length < 2) {
+      setFtHits([])
+      return
+    }
+    const t = setTimeout(() => {
+      window.api.ftSearch(q).then(setFtHits).catch(() => setFtHits([]))
+    }, 250)
+    return () => clearTimeout(t)
+  }, [ftMode, ftQuery])
 
   const selected = useMemo(
     () => filtered.find((d) => d.id === selId) ?? null,
@@ -742,10 +769,29 @@ export default function App() {
         <input
           ref={searchRef}
           style={{ width: 320 }}
-          placeholder="搜索标题 / 作者 / 期刊 / citation key  (Ctrl+F)"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          placeholder={
+            ftMode
+              ? '搜索 PDF 正文（只索引每篇前几页）  (Ctrl+F)'
+              : '搜索标题 / 作者 / 期刊 / citation key  (Ctrl+F)'
+          }
+          value={ftMode ? ftQuery : query}
+          onChange={(e) => (ftMode ? setFtQuery(e.target.value) : setQuery(e.target.value))}
         />
+        <button
+          className={ftMode ? 'primary' : ''}
+          onClick={async () => {
+            const next = !ftMode
+            setFtMode(next)
+            if (next) {
+              const s = await window.api.ftStatus()
+              setFtStat(s)
+              if (!ftQuery.trim()) setFtQuery(query.trim())
+            }
+          }}
+          title="按 PDF 正文搜索，而不是只搜书目字段"
+        >
+          全文
+        </button>
         <span className="grow" />
         {upd && UPD_TEXT[upd.phase] && (
           <span
@@ -902,6 +948,23 @@ export default function App() {
               if (created.length) {
                 setLib((l) => (l ? { ...l, docs: [...l.docs, ...created] } : l))
               }
+            }}
+          />
+        ) : ftMode ? (
+          <FullTextView
+            query={ftQuery}
+            hits={ftHits}
+            docs={docs}
+            status={ftStat}
+            onClose={() => setFtMode(false)}
+            onBuild={(rebuild) => {
+              window.api.ftBuild(rebuild).then(setFtStat)
+            }}
+            onClear={() => window.api.ftClear().then(setFtStat)}
+            onOpen={(d, p) => {
+              setSelId(d.id)
+              setRightTab('pdf')
+              setJump({ page: p, nonce: Date.now() })
             }}
           />
         ) : dupes ? (
@@ -1126,6 +1189,7 @@ export default function App() {
           ) : (
             <PdfViewer
               doc={selected}
+              jumpTo={jump}
               onLocalPdf={(id, p) =>
                 setLib((l) =>
                   l ? { ...l, docs: l.docs.map((x) => (x.id === id ? { ...x, localPdf: p } : x)) } : l

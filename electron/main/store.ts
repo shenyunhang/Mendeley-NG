@@ -9,6 +9,9 @@ function dir() {
   return d
 }
 
+/** Where the library, the config and the full-text index live. */
+export const dataDir = dir
+
 const libFile = () => path.join(dir(), 'library.json')
 const annFile = () => path.join(dir(), 'annotations.json')
 const cfgFile = () => path.join(dir(), 'config.json')
