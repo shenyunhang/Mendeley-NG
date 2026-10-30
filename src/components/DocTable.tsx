@@ -67,6 +67,17 @@ export default function DocTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rowH])
 
+  // Arrow keys move the selection through rows that are not on screen, so the
+  // list has to follow it; without this, arrowing past the fold looks exactly
+  // like nothing happened.  `align: 'auto'` leaves a row alone when it is
+  // already visible, so a mouse click never causes a jump.
+  useEffect(() => {
+    if (!selectedId) return
+    const i = docs.findIndex((d) => d.id === selectedId)
+    if (i >= 0) v.scrollToIndex(i, { align: 'auto' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId])
+
   const defs = useMemo(
     () =>
       cols

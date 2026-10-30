@@ -578,6 +578,45 @@ async function runSmoke() {
     `window.api.copyText(${JSON.stringify(String(clipBefore ?? ''))})`
   )
 
+  // Keyboard navigation.  Two things have to hold: the arrows walk the list
+  // when the table has the keyboard, and they do not hijack the search box,
+  // where ↑↓ belong to the text being typed.
+  const selTitle = () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const r=document.querySelector("div.row.sel");'
+      + 'return r?r.innerText.replace(/\\n/g," | ").slice(0,60):null})()'
+    )
+  const press = (key: string, where: 'body' | 'search') =>
+    w.webContents.executeJavaScript(
+      `(()=>{const t=${where === 'search' ? 'document.querySelector(\'input[placeholder^="搜索"]\')' : 'document.body'};`
+      + `if(!t)return 0;if(t.focus)t.focus();`
+      + `t.dispatchEvent(new KeyboardEvent("keydown",{key:"${key}",bubbles:true,cancelable:true}));return 1})()`
+    )
+  const navFrom = await selTitle()
+  log('press ArrowDown', await press('ArrowDown', 'body'))
+  await new Promise((r) => setTimeout(r, 500))
+  const navDown = await selTitle()
+  log('press ArrowUp', await press('ArrowUp', 'body'))
+  await new Promise((r) => setTimeout(r, 500))
+  const navBack = await selTitle()
+  log('keyboard nav', JSON.stringify({ navFrom, navDown, navBack }))
+  expect('ArrowDown moves the selection', !!navDown && navDown !== navFrom, {
+    navFrom,
+    navDown
+  })
+  expect('ArrowUp comes back', navBack === navFrom, { navFrom, navBack })
+  await press('ArrowDown', 'search')
+  await new Promise((r) => setTimeout(r, 500))
+  const navInSearch = await selTitle()
+  expect('arrows inside the search box do not move the selection', navInSearch === navFrom, {
+    navFrom,
+    navInSearch
+  })
+  // blur again so the rest of the run does not type into the library search
+  await w.webContents.executeJavaScript(
+    '(()=>{const i=document.querySelector(\'input[placeholder^="搜索"]\');if(i)i.blur();return 1})()'
+  )
+
   // zoom is the one thing a screenshot cannot prove: check that "fit width"
   // really fills the pane and that "fit page" then fits the height too
   const measure = () =>

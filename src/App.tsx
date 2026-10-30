@@ -126,6 +126,14 @@ export default function App() {
   // the keydown listener is installed once, so it has to reach the undo stack
   // through a ref rather than closing over a stale one
   const undoRef = useRef<() => void>(() => {})
+  /** Same reason, for the table navigation: the listener outlives every
+   *  change to the filtered list it has to walk. */
+  const navRef = useRef<{
+    step: (d: number) => void
+    edge: (end: boolean) => void
+    open: () => void
+    del: () => void
+  }>({ step: () => {}, edge: () => {}, open: () => {}, del: () => {} })
 
   useEffect(() => {
     window.api.loadLibrary().then((r) => {
@@ -187,6 +195,49 @@ export default function App() {
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      // Arrow keys, Enter and Delete belong to the table only when nothing
+      // else has claimed them: inside a search box, a note box or a rename box
+      // they have to keep doing what they do there, and on a focused button
+      // Enter is a click.
+      const t = e.target as HTMLElement | null
+      const claimed =
+        !!t &&
+        (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(t.tagName) ||
+          !!t.isContentEditable)
+      if (!claimed && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          navRef.current.step(1)
+          return
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          navRef.current.step(-1)
+          return
+        }
+        if (e.key === 'Home') {
+          e.preventDefault()
+          navRef.current.edge(false)
+          return
+        }
+        if (e.key === 'End') {
+          e.preventDefault()
+          navRef.current.edge(true)
+          return
+        }
+        // Delete, not Backspace: Backspace is the browser's own Back on some
+        // platforms and wresting it away surprises people
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          navRef.current.open()
+          return
+        }
+        if (e.key === 'Delete') {
+          e.preventDefault()
+          navRef.current.del()
+          return
+        }
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault()
         searchRef.current?.focus()
@@ -432,6 +483,32 @@ export default function App() {
     setRightTab(d.localPdf ? 'pdf' : 'details')
   }
 
+  /**
+   * Move the selection without opening anything, which is what an arrow key
+   * has to do.  Deliberately not `onRowSelect`: that also switches the right
+   * pane, and walking down the list with the arrows would then open a PDF per
+   * row.
+   */
+  const selectOnly = (index: number) => {
+    const d = filtered[index]
+    if (!d) return
+    lastIdx.current = index
+    setMulti([d.id])
+    setSelId(d.id)
+  }
+
+  /** Where the arrows start from: the selected row, or just outside the list
+   *  when nothing is selected yet, so the first press lands on the first row
+   *  rather than the second. */
+  const stepSel = (delta: number) => {
+    if (!filtered.length) return
+    const cur = filtered.findIndex((d) => d.id === selId)
+    const from = cur < 0 ? (delta > 0 ? -1 : 0) : cur
+    const next = Math.min(filtered.length - 1, Math.max(0, from + delta))
+    if (next === cur) return
+    selectOnly(next)
+  }
+
   /** What an export or a batch action applies to: the multi-selection when
    *  there is one, else the single selected row, else the whole view. */
   const target = useMemo(() => {
@@ -464,6 +541,18 @@ export default function App() {
   }
   undoRef.current = () => {
     void doUndo()
+  }
+  navRef.current = {
+    step: stepSel,
+    edge: (end) => selectOnly(end ? filtered.length - 1 : 0),
+    // Enter means "open this one": the reader when there is a PDF, otherwise
+    // the details, which is where a download would be started from
+    open: () => {
+      if (selected) setRightTab(selected.localPdf ? 'pdf' : 'details')
+    },
+    del: () => {
+      if (selected) void trashDocs([selected])
+    }
   }
 
   /** Bring a trashed document back, locally as well as in the cloud. */
