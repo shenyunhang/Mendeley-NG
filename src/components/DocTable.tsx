@@ -164,8 +164,6 @@ export default function DocTable({
                     gridTemplateColumns: COLS,
                     alignItems: 'center',
                     fontSize: '0.867rem',
-                    borderBottom: '1px solid #2c2c2c',
-                    background: selectedId === d.id ? 'var(--accent-dim)' : undefined,
                     cursor: 'pointer'
                   }}
                 >

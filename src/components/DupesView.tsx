@@ -47,7 +47,7 @@ export default function DupesView({ groups, onClose, onMerge }: Props) {
                 <span className="badge">{REASON[g.reason]}</span>
                 <span style={{ color: 'var(--fg-dim)' }}>{g.docs.length} 条</span>
                 {g.reason === 'title' && (
-                  <span style={{ color: '#e8b339', fontSize: '0.733rem' }}>
+                  <span style={{ color: 'var(--warn)', fontSize: '0.733rem' }}>
                     仅标题相同，可能是不同文件（如多份 rebuttal）
                   </span>
                 )}
@@ -70,8 +70,7 @@ export default function DupesView({ groups, onClose, onMerge }: Props) {
               {g.docs.map((d) => (
                 <div
                   key={d.id}
-                  className="trash-row"
-                  style={d.id === keeper.id ? { background: '#1f2a20' } : undefined}
+                  className={'trash-row' + (d.id === keeper.id ? ' keeper' : '')}
                   title={d.title}
                 >
                   <span className="t">

@@ -32,6 +32,7 @@
   --danger-bg: #4a2626;
   --err: #ff8080;
   --sep: #333;
+  --keeper-bg: #1f2a20;
   --star-on: #ffd43b;
   --star-off: #4d4d4d;
   --row-h: 2rem;
@@ -69,6 +70,7 @@
   --danger-bg: #f7dcdd;
   --err: #b3261e;
   --sep: #cfd4da;
+  --keeper-bg: #dff0e3;
   --star-on: #e0a800;
   --star-off: #b8bec6;
   color-scheme: light;
@@ -843,8 +845,24 @@ td .no-pdf {
   user-select: none;
 }
 
+/* The rules between rows and the hover feedback live here rather than in the
+   component, because the component had the line colour as a literal: it was
+   a copy of the dark --row-line, so the light theme drew a dark rule under
+   every row and there was nothing in the stylesheet to override. */
+.row {
+  border-bottom: 1px solid var(--row-line);
+}
+/* A table this long gives no other hint of which row a click will land on. */
+.row:hover {
+  background: var(--hover);
+}
 .row.multi {
   background: var(--multi);
+}
+/* last, so a row that is both selected and part of a multi-selection reads
+   as the one being read rather than as one of the batch */
+.row.sel {
+  background: var(--accent-dim);
 }
 
 .batch-bar {
@@ -1035,6 +1053,11 @@ button.danger:hover:not(:disabled) {
   color: var(--fg-dim);
   font-size: 0.733rem;
   white-space: nowrap;
+}
+/* the row that survives a merge; it had its background as a literal, so in
+   the light theme the one row you are being asked to keep was dark green */
+.trash-row.keeper {
+  background: var(--keeper-bg);
 }
 .app.dropping {
   outline: 2px dashed var(--accent);

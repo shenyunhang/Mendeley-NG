@@ -317,6 +317,34 @@ async function runSmoke() {
     + 'set.call(i,"");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()'
   )
 
+  // The rule under every row has to come from the palette.  It was written
+  // as a literal in the component, a copy of the dark --row-line, so the
+  // light theme drew a dark line across a light row and no stylesheet could
+  // override it — an inline colour outranks any selector.
+  const rowPaint = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const row=document.querySelector("div.row");'
+      + 'if(!row)return JSON.stringify({ok:false});'
+      + 'const dark=getComputedStyle(row).borderBottomColor;'
+      + 'document.documentElement.dataset.theme="light";'
+      + 'const light=getComputedStyle(row).borderBottomColor;'
+      + 'delete document.documentElement.dataset.theme;'
+      + 'const back=getComputedStyle(row).borderBottomColor;'
+      + 'return JSON.stringify({ok:true,dark,light,back,inline:row.getAttribute("style")||""})})()'
+    )
+  )
+  log('row rule across themes', rowPaint)
+  expect(
+    'the rule under a row follows the theme',
+    rowPaint.ok === true && rowPaint.dark !== rowPaint.light && rowPaint.back === rowPaint.dark,
+    rowPaint
+  )
+  expect(
+    'the rule under a row is not written inline',
+    rowPaint.ok === true && !/border/.test(rowPaint.inline),
+    rowPaint
+  )
+
   // shift-click selection, checked without any of the batch actions that
   // would write to the library
   log(
