@@ -7,5 +7,12 @@ dist/
 smoke.png
 smoke-pdf.png
 
+# OAuth credentials — never commit these
+token.json
+mendeley-token.json
+*.token.json
+.env
+.env.*
+
 .DS_Store
 Thumbs.db

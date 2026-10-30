@@ -164,6 +164,16 @@ export default function App() {
         <button onClick={exportRis} disabled={!filtered.length}>
           导出 RIS
         </button>
+        <button
+          onClick={async () => {
+            const r = await window.api.importToken()
+            if (r?.ok) await doSync()
+            else if (r) setErr(r.error ?? '导入失败')
+          }}
+          title="选择 get-token 生成的 token.json"
+        >
+          导入 token
+        </button>
         <input
           ref={searchRef}
           style={{ width: 320 }}

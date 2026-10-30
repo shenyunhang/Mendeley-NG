@@ -7,12 +7,10 @@ const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 
-const tok = JSON.parse(
-  fs.readFileSync(
-    'C:\\Users\\shenyunhang\\WorkBuddy\\2026-10-19-15-35-36\\mendeley_work\\token.json',
-    'utf-8'
-  )
-)
+// token location: first argument, else MENDELEY_TOKEN_PATH, else ./token.json
+const TOKEN_PATH =
+  process.argv[2] || process.env.MENDELEY_TOKEN_PATH || './token.json'
+const tok = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'))
 
 async function refresh() {
   const headers = {

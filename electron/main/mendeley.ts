@@ -208,9 +208,11 @@ export class Mendeley {
 export function findToken(): { path: string; tok: Token } | null {
   const candidates = [
     path.join(app.getPath('userData'), 'token.json'),
-    path.join(app.getPath('userData'), 'mendeley-token.json'),
-    'C:\\Users\\shenyunhang\\WorkBuddy\\2026-10-19-15-35-36\\mendeley_work\\token.json'
+    path.join(app.getPath('userData'), 'mendeley-token.json')
   ]
+  // an explicit override keeps this generic; nothing machine-specific belongs
+  // in the source tree
+  if (process.env.MENDELEY_TOKEN_PATH) candidates.push(process.env.MENDELEY_TOKEN_PATH)
   for (const c of candidates) {
     try {
       if (fs.existsSync(c)) {

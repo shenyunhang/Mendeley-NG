@@ -16,8 +16,14 @@ const cfgFile = () => path.join(dir(), 'config.json')
 export type Config = AppConfig
 
 
-export const DEFAULT_PDF_DIR =
-  'C:\\Users\\shenyunhang\\AppData\\Local\\Mendeley Ltd\\Mendeley Desktop\\Downloaded'
+/** Mendeley Desktop's own download folder, derived rather than hard-coded so
+ *  the tree carries no machine-specific paths. */
+export const DEFAULT_PDF_DIR = path.join(
+  process.env.LOCALAPPDATA ?? app.getPath('appData'),
+  'Mendeley Ltd',
+  'Mendeley Desktop',
+  'Downloaded'
+)
 
 export const DEFAULT_FONT_SIZE = 15
 
