@@ -26,15 +26,19 @@ Chromium 天然按系统 scale factor 缩放 CSS 像素，**不需要任何 DPI 
 
 | 能力 | 状态 |
 | --- | --- |
-| 云端同步（文献 + 文件夹 + 文件挂载情况） | 可用 |
+| 云端同步（文献 + 文件夹 + 文件挂载情况） | 可用；默认增量，见第 8 节第 14 条 |
 | 本地 PDF 目录扫描与匹配 | 可用 |
 | 虚拟滚动列表（数千行不卡） | 可用 |
 | 搜索 / 排序 | 可用 |
-| PDF 阅读（pdf.js，高 DPI 清晰） | 可用 |
-| 拖框高亮标注（本地持久化） | 可用 |
+| PDF 阅读（pdf.js，高 DPI 清晰） | 可用；适宽 / 整页缩放、目录侧栏 |
+| 文本选区高亮（本地持久化 + 云端同步） | 可用 |
 | 元数据编辑并 PATCH 回云端 | 可用 |
-| 文件夹加入 / 移出（拖拽 / 勾选） | 可用；**不能重命名、移动或删除** |
-| BibTeX / RIS 导出 | 可用；无导入 |
+| 文件夹树（建 / 改名 / 移动 / 删除 / 嵌套） | 可用 |
+| 导入 BibTeX / RIS / EndNote XML；导出这三种 | 可用 |
+| 按 DOI / arXiv id 添加条目 | 可用 |
+| 星标 / 已读 / 标签 | 可用；写回云端 |
+| 批量操作（Shift / Ctrl 多选） | 可用 |
+| 自更新（GitHub Releases） | 可用 |
 | 界面字号调节 | 可用 |
 | Windows 安装包（NSIS） | 可构建，未签名 |
 
@@ -122,6 +126,27 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
     返回的是一篇无关的海报。arXiv id 一律走 `export.arxiv.org`。
 16. **`GET /documents?modified_since=` 可用**，增量同步有戏；
     但 **`/deleted_documents` 是 404**，删了什么只能靠全量对账发现。
+17. **`GET /catalog` 拒绝匿名请求**：401 `"No auth header"`。它不像 `/documents`
+    那样可以不要 token，所以按 DOI 添加条目时必须先把 bearer 传进去
+    （`Mendeley.bearer()`），没有 token 时整个链路降级到 Crossref 而不是失败。
+18. **`/catalog` 只有 `?doi=` 可信**：`?isbn=9780262510875` 返回的是
+    "UNIVERSITY OF THE WEST INDIES Department…"，`?pmid=12345678` 返回
+    "Denpasar Declaration…"，都是无关记录。ISBN / PMID 一概不走这条路。
+19. **`/catalog` 会把标题改成句首大写**：`Deep Residual Learning` 出来是
+    `Deep residual learning`。所以 DOI 解析是 Crossref 与 catalog 并行取、再合并，
+    重叠字段以 Crossref 为准（它保留出版方存的原样），catalog 只贡献 type
+    和它多出来的标识符。
+20. **`identifiers` 只保留认得的键**：catalog 还会给 `pui` / `sgr` / `scopus`，
+    写进 `POST /documents` 的 body 未必被接受，所以统一过滤成
+    `doi` / `arxiv` / `pmid` / `isbn` / `issn`。
+21. **`GET /documents?sort=created&order=desc` 可用**，想看最近新增不必全量排一遍。
+22. **pdf.js 不允许同一个 canvas 并发渲染**：缩放变化触发第二次 render 时直接抛
+    "Cannot use the same canvas during multiple render() operations"。
+    必须 `cancel()` 上一个 RenderTask 并吞掉它的 `RenderingCancelledException`，
+    否则每次改窗口大小右侧阅读器都会挂掉。
+23. **`tags` 清空后字段会消失**：PATCH `tags: []` 回来的响应里没有 `tags`
+    （不是空数组）。所以详情面板的标签输入框要用"规范化后再比"判断是否改过，
+    否则清空一次就会永远显示成脏的。
 
 ## 6. 环境与打包的坑
 
@@ -171,47 +196,49 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 
 ### P0 — 补齐读写闭环（API 已支持，风险低，收益直接）
 
-1. **文件夹重命名 / 移动 / 删除 + 嵌套层级**
+1. **文件夹重命名 / 移动 / 删除 + 嵌套层级**　✅ 已完成
    `PATCH /folders/{id}`（改名或换 parent）、`DELETE /folders/{id}`。
    目前只能建和加，UI 里树是平的，1.19.8 支持子文件夹。
-2. **删除与回收站**
+2. **删除与回收站**　✅ 已完成
    `POST /documents/{id}/trash`、`GET /trash`、恢复。
    没有删除入口意味着库里的垃圾只能去网页端清，这是日常最痛的缺口。
-3. **标注同步到云端**
+3. **标注同步到云端**　✅ 已完成
    `/annotations` 的 GET / POST / PATCH / DELETE 齐全。
    顺带把本地缺失的**删除、编辑、笔记**一起补了——现在只能加不能删。
    注意云端与本地的冲突策略要想清楚（以 `created` 时间戳还是以云端为准）。
-4. **云端 PDF 下载**
+4. **云端 PDF 下载**　✅ 已完成
    `GET /files/{id}` 拉到本地缓存目录。
    目前约一成的条目云端有文件但本地没有，这些现在完全读不了。
 
 ### P1 — 日常真正会用到
 
-5. **导入：拖 PDF 进库**
+5. **导入：拖 PDF 进库**　✅ 已完成
    `POST /documents` 建条目，`POST /documents/{id}/files` 传文件。
    PDF 内嵌 DOI / arXiv ID 可以先抽出来查元数据，避免建成空条目。
-6. **元数据补全（对标 Update Details）**
+6. **元数据补全（对标 Update Details）**　✅ 已完成
    Crossref + arXiv 查，查不到再退到 `/catalog` 搜。
    这块在旧项目里踩过大坑：**标题模糊匹配阈值 0.72 完全不可信**
    （"Object detection" vs "Lifelong Object Detection" 相似度 0.78，全是错配），
    必须提到 **0.90** 且短标题要关掉子串包含判断。宁可查不到也不要写错。
-7. **查重与合并**
+7. **查重与合并**　✅ 已完成
    本地按 DOI / 标题+年份 / filehash 分组给出候选集，
    人工逐字段确认后合并（保留一条 → 迁移文件夹 → 其余入回收站）。
    1.19.8 的合并是有字段级冲突预览和 Undo 的，值得照做。
-8. **导入 BibTeX / RIS / EndNote XML**
+8. **导入 BibTeX / RIS / EndNote XML**　✅ 已完成
    现在只有导出，没有导入，换库或迁移时会卡住。
 9. **全文检索**
    pdf.js 出 text layer，本地建倒排索引。库大，索引要能增量更新并落盘复用。
-10. **PDF 文本选区高亮**
+10. **PDF 文本选区高亮**　✅ 已完成
     替换现在的矩形拖框，接 text layer 拿真实选区，顺带能复制文本。
 
 ### P2 — 打磨
 
 11. **连续滚动 + 相邻页预取**（现在翻页有等待）
-12. **标签、笔记、星级 / 已读状态**
-13. **多选与批量操作**（批量改文件夹、批量删）
-14. **增量同步**：`/deleted_documents` + 时间戳，现在每次全量拉，库大了很慢
+12. **标签、笔记、星级 / 已读状态**　✅ 标签 / 星级 / 已读已完成（笔记拆到第 25 条）
+13. **多选与批量操作**（批量改文件夹、批量删）　✅ 已完成
+14. **增量同步**　✅ 已完成：只用 `GET /documents?modified_since=`。
+    **`/deleted_documents` 是 404**，删除没有增量通道，只能靠「全量」按钮，
+    UI 里也写明了这一点。实测无改动时 3 秒，一小时前的增量 93 秒。
 15. **列定制与保存视图**
 16. **撤销栈**（至少覆盖合并与删除）
 17. **安装包签名**，消除 SmartScreen 警告
@@ -227,13 +254,13 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 
 | 竞品能力 | Zotero 7 | Mendeley RM | NG | 说明 |
 | --- | :-: | :-: | :-: | --- |
-| 按标识符添加条目 | ✅ | ⚠️ | ❌ | `GET /catalog?doi=` 可用，成本极低 |
-| PDF 目录 / 大纲 | ✅ | ❌ | ❌ | `pdf.getOutline()` 现成的 |
-| 适配宽度 / 整页缩放 | ✅ | ✅ | ❌ | 只有百分比缩放 |
+| 按标识符添加条目 | ✅ | ⚠️ | ✅ | `GET /catalog?doi=` 可用，成本极低 |
+| PDF 目录 / 大纲 | ✅ | ❌ | ✅ | `pdf.getOutline()` 现成的 |
+| 适配宽度 / 整页缩放 | ✅ | ✅ | ✅ | 只有百分比缩放 |
 | 标注侧栏（本篇/跨篇列表） | ✅ | ✅（Notebook） | ❌ | 现在只能靠翻页找高亮 |
-| 导出 EndNote XML | ✅ | ✅ | ❌ | 只有 BibTeX / RIS |
-| 标签 | ✅ | ⚠️ | ❌ | API `tags` 可读写 |
-| 星级 / 已读 | ❌ | ❌ | ❌ | API `starred` / `read` 可写 |
+| 导出 EndNote XML | ✅ | ✅ | ✅ | 只有 BibTeX / RIS |
+| 标签 | ✅ | ⚠️ | ✅ | API `tags` 可读写 |
+| 星级 / 已读 | ❌ | ❌ | ✅ | API `starred` / `read` 可写 |
 | 保存的搜索（智能文件夹） | ✅ | ❌ | ❌ | — |
 | 快捷键 / 键盘导航 | ✅ | ⚠️ | ⚠️ | 只有 Ctrl+F 和字号 |
 | 文献级笔记 | ✅ | ✅ | ❌ | **`/notes` 不存在**，只能本地存 |
@@ -246,15 +273,15 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 
 ### 9.2 补进路线图（接在上面的编号后面）
 
-19. **按标识符添加条目**（P1）
+19. **按标识符添加条目**（P1）　✅ 已完成
     `GET /catalog?doi=...` 拿到 Mendeley 自己的编目记录，再 `POST /documents`。
     注意 **`?arxiv=` 参数不可靠**——实测 `1706.03762` 返回的是一篇无关的海报，
     arXiv id 要走 `export.arxiv.org` 那条路。
-20. **PDF 目录（大纲）侧栏**（P2）：`pdf.getOutline()`，点条目跳页。
-21. **缩放模式**：适配宽度 / 适配整页，和现有百分比并存。
+20. **PDF 目录（大纲）侧栏**（P2）　✅ 已完成：`pdf.getOutline()`，点条目跳页。
+21. **缩放模式**　✅ 已完成：适配宽度 / 适配整页，和现有百分比并存。
 22. **标注侧栏**（P2）：列出本篇全部标注，点一条跳到对应页并选中。
-23. **导出 EndNote XML**（P2）：补齐导入侧已有的第三种格式。
-24. **标签 / 星级 / 已读**（P2，原 12 拆开）
+23. **导出 EndNote XML**（P2）　✅ 已完成：补齐导入侧已有的第三种格式。
+24. **标签 / 星级 / 已读**（P2，原 12 拆开）　✅ 已完成
     `tags` 可读写、`starred` / `read` 是文献自带字段，都能直接上云。
 25. **文献级笔记**（P2）：**`/notes` 端点不存在**，只能落本地
     （`<userData>/library/notes.json`）并在 UI 里说明不会同步。
