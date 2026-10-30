@@ -115,6 +115,13 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
     subset 嵌入字体的字符串是字形索引而不是 Unicode，抽出来的是字体表和数字。
     全文检索只能用 pdf.js（渲染层里有），代价是要建一个几十 MB 的索引，
     索引哪些页、要不要落盘，是做之前要拍的决定。
+14. **文献自带 `tags` / `starred` / `read` 字段且可写**，标签、星级、已读不用另找地方存。
+    **`POST /notes` 与 `GET /notes` 都是 404（"No service found"）**，所以文献级笔记
+    只能落本地，UI 上要写清楚它不会同步。
+15. **`GET /catalog?doi=` 可用，`?arxiv=` 不可靠**：实测 `arxiv=1706.03762`
+    返回的是一篇无关的海报。arXiv id 一律走 `export.arxiv.org`。
+16. **`GET /documents?modified_since=` 可用**，增量同步有戏；
+    但 **`/deleted_documents` 是 404**，删了什么只能靠全量对账发现。
 
 ## 6. 环境与打包的坑
 
@@ -142,17 +149,19 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 | 文件夹：重命名 / 移动 / 删除 / 嵌套 | ✅ | ✅ | `PATCH` / `DELETE /folders/{id}`、`parent_id` |
 | 云端同步 | ✅ | ⚠️ | 每次全量；缺增量 |
 | PDF 阅读 | ✅ | ✅ | 单页渲染，无连续滚动 |
-| PDF 高亮标注 | ✅ | ⚠️ | 可删除 / 改色 / 加笔记；矩形框而非文本选区 |
+| PDF 高亮标注 | ✅ | ✅ | 文本选区高亮，可删除 / 改色 / 加笔记 |
 | 标注同步到云端 | ✅ | ✅ | 坐标须按 PDF 点换算，见第 6 节 |
 | 云端 PDF 下载到本地 | ✅ | ✅ | `GET /files/{id}` 是 303 到 S3 预签名地址 |
 | 导入文献（拖 PDF / BibTeX / RIS / EndNote） | ✅ | ✅ | 拖 PDF、BibTeX、RIS、EndNote XML |
 | Update Details（补全元数据） | ✅ | ✅ | `/metadata` 未实现，走 Crossref + arXiv，见第 5 节 |
 | 查重与合并 | ✅ | ✅ | 合并只补齐缺失字段，落败者进回收站 |
-| 回收站 / 删除 / 恢复 | ✅ | ❌ | API 有 `/trash`、`POST /documents/{id}/trash` |
+| 回收站 / 删除 / 恢复 | ✅ | ✅ | `DELETE /trash/{id}` 才是彻底删除 |
 | 导出 BibTeX / RIS | ✅ | ✅ | 缺 EndNote XML |
 | 库内检索（`/search/documents`） | ✅ | ⚠️ | 现在是本地过滤，没走 API，也没做高阶筛选 |
-| 全文检索（搜 PDF 正文） | ✅ | ❌ | 需要文本层 + 本地索引，见第 5 节第 12 条 |
-| 标签 / 笔记 / 星级 / 已读 | ✅ | ❌ | — |
+| 全文检索（搜 PDF 正文） | ✅ | ❌ | 必须走 pdf.js，见第 5 节第 13 条 |
+| 标签（tags） | ✅ | ❌ | API 的 `tags` 字段可读写，库里目前一条都没有 |
+| 星级 / 已读 | ✅ | ❌ | 文献自带 `starred` / `read` 字段，直接可写 |
+| 文献级笔记 | ✅ | ❌ | **`/notes` 端点不存在（404）**，只能存本地 |
 | Word / LibreOffice 引用插件 | ✅ | ❌ | CSL + 插件体系，量级不同，见第 9 节 |
 | 引用样式格式化（复制格式化引文） | ✅ | ❌ | 需引入 citeproc |
 | 分组协作（Groups） | ⚠️ | ❌ | 1.19.8 已移除建组入口；API `/groups` 标 deprecated |
@@ -208,7 +217,61 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 17. **安装包签名**，消除 SmartScreen 警告
 18. **深浅色切换**（现在只有深色）
 
-## 9. 明确不做（以及为什么）
+## 9. 竞品对照：还缺什么
+
+2026 年这个位置上真正该看的是 **Zotero 7**（离线优先、开源、插件生态）、
+**Mendeley Reference Manager**（云端优先、PDF 阅读器最好、有 AI）和
+**EndNote / Papers**（付费、机构场景）。对照下来，NG 的差距集中在"读"和"组织"两侧。
+
+### 9.1 值得补的（按性价比排序）
+
+| 竞品能力 | Zotero 7 | Mendeley RM | NG | 说明 |
+| --- | :-: | :-: | :-: | --- |
+| 按标识符添加条目 | ✅ | ⚠️ | ❌ | `GET /catalog?doi=` 可用，成本极低 |
+| PDF 目录 / 大纲 | ✅ | ❌ | ❌ | `pdf.getOutline()` 现成的 |
+| 适配宽度 / 整页缩放 | ✅ | ✅ | ❌ | 只有百分比缩放 |
+| 标注侧栏（本篇/跨篇列表） | ✅ | ✅（Notebook） | ❌ | 现在只能靠翻页找高亮 |
+| 导出 EndNote XML | ✅ | ✅ | ❌ | 只有 BibTeX / RIS |
+| 标签 | ✅ | ⚠️ | ❌ | API `tags` 可读写 |
+| 星级 / 已读 | ❌ | ❌ | ❌ | API `starred` / `read` 可写 |
+| 保存的搜索（智能文件夹） | ✅ | ❌ | ❌ | — |
+| 快捷键 / 键盘导航 | ✅ | ⚠️ | ⚠️ | 只有 Ctrl+F 和字号 |
+| 文献级笔记 | ✅ | ✅ | ❌ | **`/notes` 不存在**，只能本地存 |
+| 自定义文件重命名规则 | ✅ | ❌ | ❌ | 现在固定 `作者 - 年份 - 标题` |
+| 全文检索 | ✅ | ✅ | ❌ | Zotero 7 起不再依赖 pdftotext |
+| 连续滚动 | ✅ | ✅ | ❌ | — |
+| 附件预览 / 多附件 | ✅ | ❌ | ❌ | Mendeley 一条只有一个主文件 |
+| 下划线 / 墨水 / 文本标注 | ✅ | ✅ | ❌ | 云端只认 highlight / sticky_note |
+| 引用弹窗（悬停看参考文献） | ✅ | ❌ | ❌ | 锦上添花 |
+
+### 9.2 补进路线图（接在上面的编号后面）
+
+19. **按标识符添加条目**（P1）
+    `GET /catalog?doi=...` 拿到 Mendeley 自己的编目记录，再 `POST /documents`。
+    注意 **`?arxiv=` 参数不可靠**——实测 `1706.03762` 返回的是一篇无关的海报，
+    arXiv id 要走 `export.arxiv.org` 那条路。
+20. **PDF 目录（大纲）侧栏**（P2）：`pdf.getOutline()`，点条目跳页。
+21. **缩放模式**：适配宽度 / 适配整页，和现有百分比并存。
+22. **标注侧栏**（P2）：列出本篇全部标注，点一条跳到对应页并选中。
+23. **导出 EndNote XML**（P2）：补齐导入侧已有的第三种格式。
+24. **标签 / 星级 / 已读**（P2，原 12 拆开）
+    `tags` 可读写、`starred` / `read` 是文献自带字段，都能直接上云。
+25. **文献级笔记**（P2）：**`/notes` 端点不存在**，只能落本地
+    （`<userData>/library/notes.json`）并在 UI 里说明不会同步。
+26. **保存的搜索**（P2）：把当前查询条件存成虚拟文件夹。
+27. **自定义文件重命名**（P3）：模板化重命名已下载的 PDF。
+
+### 9.3 差距可以接受，先不做
+
+- **下划线 / 墨水 / 文本标注**：云端 `/annotations` 只认 `highlight` 与 `sticky_note`，
+  硬做会变成"本地能画、云端丢一半"，不如只做高亮做扎实。
+- **多附件 / 快照 / EPUB**：Mendeley 一条就一个主文件，EPUB 不在产品定位里。
+- **附件预览**：要渲染缩略图，收益低于连续滚动。
+- **浏览器扩展抓取**：用"按标识符添加"+"拖 PDF"覆盖了大部分场景。
+- **AI 摘要 / 问答**：Mendeley 的卖点，但 NG 的定位是本地快、离线可用，
+  接 LLM 会把"不联网也能用"这个最大的优点搭进去。
+
+## 10. 明确不做（以及为什么）
 
 写下来是为了避免后来人热心补回来：
 
@@ -219,7 +282,7 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 - **相关文献推荐、站内文献检索（Literature Search）**：1.19.8 已移除，且依赖已下线的社交图谱。
 - **个人主页、关注者等社交功能**：同上，随 Mendeley 产品线一起下线了。
 
-## 10. 仓库历史注意事项
+## 11. 仓库历史注意事项
 
 - 远端 `https://github.com/shenyunhang/Mendeley-NG`，分支 `main`。
 - **历史被重写过一次**（用 `git filter-repo` 清除首提交里硬编码的个人路径），
@@ -231,7 +294,7 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
   临时不推用 `GIT_AUTO_PUSH=0 git commit ...`。
 - 提交前务必确认没有 `token.json` / `.env` / 硬编码个人路径入库。已在 `.gitignore` 中拦截。
 
-## 11. 数据与凭据放哪
+## 12. 数据与凭据放哪
 
 | 内容 | 位置 |
 | --- | --- |
