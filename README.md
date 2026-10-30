@@ -12,6 +12,9 @@ Mendeley 云端库。
 
 ## 安装与运行
 
+不想自己构建的话，直接下 [Releases](https://github.com/shenyunhang/Mendeley-NG/releases)
+里的 `Mendeley-NG-*-Setup.exe`；装好后应用内点**检查更新**就能拉新版、自动安装重启。
+
 ```bash
 npm install
 npm run build      # 产出 out/
@@ -106,11 +109,32 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 浏览 | 三栏：文件夹树 / 文献列表 / 详情或 PDF。列表是虚拟滚动，几千行也不卡 |
 | 搜索 | Ctrl+F，覆盖标题、作者、发表处、citation key、DOI |
 | 排序 | 点列头切换升降序 |
+| 文件夹 | 嵌套树：新建、重命名、删除、拖到别的文件夹改父级、拖回顶层 |
+| 归文件夹 | 把文献行拖到左侧文件夹即可加入；详情面板可勾选移出 |
 | 读 PDF | pdf.js，按 `devicePixelRatio` 出后备缓冲，高 DPI 下不虚 |
+| 高亮 | 选中文字即高亮，可改色、加笔记、删除 |
+| 标注同步 | 高亮推到 Mendeley `/annotations`，也能把云端的拉回来 |
+| 补 PDF | 云端有附件但本地没有的，一键下载到本地 PDF 目录 |
+| 导入 PDF | 把 PDF 拖进窗口就建条目，元数据交给服务端从文件里抽 |
+| 导入书目 | BibTeX / RIS / EndNote XML，先预览再导入，已有的标为重复 |
 | 改元数据 | 右侧详情面板直接编辑，PATCH 回 Mendeley 云端 |
-| 归文件夹 | 把行拖到左侧文件夹即可加入；详情面板可勾选移出 |
+| 补全元数据 | 查 Crossref 与 arXiv，列出候选让你挑，不自动覆盖 |
+| 查重合并 | 按 DOI / arXiv id / 标题找重复；合并只补缺失字段 |
+| 回收站 | 移入回收站、恢复、彻底删除 |
 | 导出 | BibTeX / RIS，可只导出当前筛选结果或单条 |
+| 检查更新 | 一键从 GitHub Releases 拉新版、下载、安装并重启 |
 | 字号 | 工具栏 A−/A+，或 Ctrl+− / Ctrl+=。整站 rem，一个旋钮全跟着变 |
+
+两处值得单独说的设计取舍：
+
+- **补全元数据宁缺勿错**。标题相似度阈值 0.90，短标题还额外关掉"子串包含"的
+  兜底。"Object detection" 对 "Lifelong Object Detection" 得分 0.78，是两篇不同的
+  文章，必须拒掉；查不到顶多是少补几个字段，查错了会污染引用。
+- **合并只补缺失字段，落败的进回收站而不是删掉**。合并是不可逆操作里最容易
+  手滑的，让它可恢复比让它快更重要。
+
+还没做的：全文检索（搜 PDF 正文）、连续滚动、标签与星级、多选批量操作、
+增量同步、撤销栈。原因和优先级都在 [HANDOFF.md](HANDOFF.md) 第 8 节。
 
 ## 结构
 
@@ -118,14 +142,24 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 electron/main/mendeley.ts   Mendeley REST 客户端
 electron/main/store.ts      本地缓存：文献、文件夹、标注、配置
 electron/main/pdfindex.ts   把 "作者 - 年份 - 标题.pdf" 匹配回文献
-electron/main/index.ts      主进程，IPC，mendeley:// 协议
+electron/main/lookup.ts     Crossref / arXiv 元数据查询
+electron/main/updater.ts    electron-updater 自更新
+electron/main/index.ts      主进程，IPC，mendeley:// 协议，--smoke 自检
 electron/preload/index.ts   contextBridge，只暴露白名单方法
-src/                        renderer：React + 虚拟滚动 + pdf.js
+src/                        renderer：React + 虚拟滚动 + pdf.js 文本层
+src/lib/dupes.ts            查重分组与保留哪一条的取舍
+src/lib/import.ts           BibTeX / RIS / EndNote XML 解析
+src/lib/pdfmeta.ts          从 PDF 前两页抽 DOI / arXiv id
 shared/types.ts             三端共享的类型
+shared/text.ts              标题归一化与相似度（查源与查重共用）
 scripts/start.mjs           启动器
 scripts/get-token.mjs       OAuth 授权码流程，产出 token.json
 scripts/check-api.mjs       API 冒烟测试（不启 GUI）
 ```
+
+几个约定：类型不要三处各写一份，改 `shared/`；所有尺寸用 rem，字号旋钮才有效；
+主进程产物必须是 CJS，package.json 里不能有 `"type": "module"`；
+`contextIsolation: true`，renderer 拿不到 node，所有能力走 `window.api`。
 
 ## 发布
 
@@ -172,10 +206,14 @@ npm run smoke              # 全流程：拉库 → 渲染窗口 → 点第一�
 npm run smoke -- --no-sync # 用本地缓存，跳过同步
 ```
 
-`--smoke` 会跑完整同步、开一个隐藏窗口、等渲染完成后用 `capturePage` 截图，
-存到系统临时目录 `mendeley-ng-smoke.png` / `mendeley-ng-smoke-pdf.png`。
-日志里会打出 `scaleFactor`、`devicePixelRatio`、canvas 的后备尺寸与 CSS 尺寸
-（后者应该是前者的 `1/dpr`），这是验证高 DPI 是否真的生效的唯一可靠办法。
+`--smoke` 会跑完整同步、开一个隐藏窗口、点第一行有 PDF 的文献、等渲染完成后用
+`capturePage` 截图，存到系统临时目录 `mendeley-ng-smoke.png` /
+`mendeley-ng-smoke-pdf.png`。日志里会打出 `scaleFactor`、`devicePixelRatio`、
+canvas 的后备尺寸与 CSS 尺寸（后者应该是前者的 `1/dpr`），这是验证高 DPI 是否
+真的生效的唯一可靠办法。
+
+它还会造一次合成选区，验证文本层能选出文字并算出正确的矩形，然后把
+`annotations.json` **按文件快照**恢复回去——自检不能动真实数据。
 
 ## 踩过的坑
 
@@ -190,6 +228,17 @@ npm run smoke -- --no-sync # 用本地缓存，跳过同步
   重复调用会 500。
 - **本地库是 SQLCipher 加密的**，文件头不是 `SQLite format 3`，读不了，
   元数据只能走云端 API。1.19.8 自己存在库里的凭据同理取不出来。
+- **标注坐标是绝对 PDF 点，而 `top_left` 存的是 y 更小的那个点**，也就是视觉上的
+  **左下角**（PDF 用户空间原点在左下）。视觉顶部 = `pageHeight - max(y)`。
+  另外 `POST /annotations` 缺 `filehash` 会被静默降级成普通 note 并丢掉 positions。
+- **上传文件既不是 JSON 也不是 multipart**：`POST /documents` 带 PDF 裸字节 + 两个头
+  （`Content-Type: application/pdf`、`Content-Disposition: attachment; filename="..."`），
+  一次建条目并自动附件。multipart 会被拒，且报错是误导性的
+  "'Content-Disposition' header is required"。服务端还会自己从 PDF 抽元数据，
+  所以别用文件名回填标题，会把抽好的覆盖掉。
+- **`doi` / `arxiv` 写在顶层是无效的**（返回 200 但不落库），真字段是 `identifiers`。
+- **彻底删除要 `DELETE /trash/{id}`**；`DELETE /documents/{id}` 对已回收的条目是 404。
+- **`GET /files/{id}` 不返回字节**，是 303 到 S3 预签名地址，跳过去时别带 Authorization。
 - **主进程产物不能是 ESM**：package.json 里不要写 `"type": "module"`，
   否则 `require('electron')` 的 CJS 互操作会挂。
 - **`app.quit()` 不接受参数**，要带退出码用 `app.exit(code)`。
