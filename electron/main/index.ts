@@ -139,6 +139,14 @@ async function sync(full: boolean) {
 
 function createWindow() {
   win = new BrowserWindow({
+    /**
+     * The taskbar and the title bar take this.  `build/icon.ico` is what goes
+     * on the exe and the installer, but that directory is electron-builder's
+     * and is not copied into the app, so the window needs the copy under
+     * assets/.  `app.getAppPath()` is the project root unpacked and the asar
+     * packaged, which is why the one path works in both.
+     */
+    icon: path.join(app.getAppPath(), 'assets', 'icon.png'),
     width: 1500,
     height: 950,
     minWidth: 1000,
@@ -226,6 +234,22 @@ async function runSmoke() {
   win = w
   await w.loadFile(path.join(__dirname, '../renderer/index.html'))
   await new Promise((r) => setTimeout(r, 2500))
+  // The icon is what makes this a program rather than a window.  It is
+  // checked here because a missing file fails silently: electron-builder
+  // falls back to the Electron default and the installer still builds.
+  const iconOk = (() => {
+    const ico = path.join(app.getAppPath(), 'build', 'icon.ico')
+    const png = path.join(app.getAppPath(), 'assets', 'icon.png')
+    if (!fs.existsSync(ico) || !fs.existsSync(png)) return { ico: false, png: false }
+    const b = fs.readFileSync(ico)
+    // an ICO starts with a 6 byte directory: reserved, type 1, then a count
+    return {
+      ico: b.readUInt16LE(0) === 0 && b.readUInt16LE(2) === 1 && b.readUInt16LE(4) >= 7,
+      png: fs.statSync(png).size > 1000
+    }
+  })()
+  log('icon', iconOk)
+  expect('the app ships an icon', iconOk.ico && iconOk.png, iconOk)
   const info = await w.webContents.executeJavaScript(
     // typeof, not a call: a real prompt would block the run
     'JSON.stringify({dpr: devicePixelRatio, rows: document.querySelectorAll("table,.row,[data-row]").length,'
@@ -1222,10 +1246,16 @@ async function runSmoke() {
     + 'const inp=[...m.querySelectorAll("input")].find(i=>i.type!=="checkbox");'
     + 'return JSON.stringify({open:1,secs:[...m.querySelectorAll(".set-sec")].map(s=>s.textContent),'
     + 'pages:inp?inp.value:null,dir:(m.querySelector(".set-path")||{}).textContent||null,'
+    + 'mark:(()=>{const i=m.querySelector(".about-logo");return i?(i.src||"").slice(0,40):null})(),'
     + 'version:m.textContent.includes("Mendeley NG")})})()'
   )
   log('settings', setInfo)
   const si = JSON.parse(setInfo)
+  expect(
+    'the about section carries the mark',
+    typeof si.mark === 'string' && si.mark.startsWith('data:image/svg'),
+    si.mark
+  )
   expect('the settings panel opens', si.open === 1, si)
   expect(
     'it gathers every section in one place',

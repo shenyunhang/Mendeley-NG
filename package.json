@@ -13,7 +13,8 @@
     "build": "electron-vite build && node scripts/copy-worker.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "dist": "electron-vite build && electron-builder --win --x64",
-    "signcheck": "node scripts/signcheck.mjs"
+    "signcheck": "node scripts/signcheck.mjs",
+    "icon": "node scripts/make-icon.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.11"
@@ -36,6 +37,7 @@
   "build": {
     "appId": "com.shenyunhang.mendeleyng",
     "productName": "Mendeley NG",
+    "icon": "build/icon.ico",
     "win": {
       "target": "nsis",
       "artifactName": "Mendeley-NG-${version}-Setup.${ext}",
@@ -54,7 +56,8 @@
     },
     "files": [
       "out/**/*",
-      "package.json"
+      "package.json",
+      "assets/icon.png"
     ],
     "publish": {
       "provider": "github",

@@ -200,6 +200,23 @@ textarea:focus {
   color: var(--fg-dim);
   margin: 2px 0 2px 100px;
 }
+
+.about {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.about .set-note {
+  margin-left: 0;
+}
+
+/* the mark next to the version, at a size where the folded corner is still
+   legible rather than a smudge */
+.about-logo {
+  flex: 0 0 auto;
+  border-radius: 12%;
+}
 .batch-edit {
   min-width: 380px;
 }

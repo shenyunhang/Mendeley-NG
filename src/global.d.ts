@@ -98,3 +98,9 @@ declare global {
     api: Api
   }
 }
+
+/** Vite turns an imported asset into the URL it was emitted at. */
+declare module '*.svg' {
+  const src: string
+  export default src
+}

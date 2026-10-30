@@ -181,8 +181,21 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 - **electron-builder 写 exe 版本资源时（rcedit）在本机会报 "Unable to commit changes"**，
   用 `build.win.signAndEditExecutable: false` 绕过。只丢版本信息，不影响功能。
 - **打包默认会把 node_modules 塞进 asar**（含 pdfjs 拉来的 `@napi-rs/canvas`，几十 MB）。
-  `files` 已收紧为 `["out/**/*","package.json","!node_modules/**"]`。
+  `files` 已收紧为 `["out/**/*","package.json","assets/icon.png","!node_modules/**"]`。
   如果以后主进程真的需要运行时依赖，记得把它加回去，否则 packaged build 会炸。
+- **图标由 `npm run icon` 生成，产物直接进版本库**：`assets/logo.svg`（矢量源）、
+  `build/icon.ico`（exe / 任务栏 / 安装包）、`build/icon.png`（512）、
+  `assets/icon.png`（256，窗口自己用）。
+  **改图标要改 `scripts/make-icon.mjs` 里的形状表**，不要手改 svg——两者是同一份定义
+  生成的，手改会在下次跑脚本时被覆盖。
+  光栅化是脚本自己做的 4 倍超采样 + 面积平均：**不要改成用 Electron 渲染 SVG**，
+  那需要一个窗口，而这个环境里带窗口的 Electron 进程会被直接杀掉。
+  另外 `build/` 是 electron-builder 默认的 buildResources 目录，**不会被打进 app**，
+  所以窗口图标用的是 `assets/icon.png` 那份副本。
+  **已知的代价**：改 exe 资源要靠 rcedit，而它在本机必失败（`signAndEditExecutable: false`
+  就是为了绕开它），所以 **exe 文件本身在资源管理器里仍是 Electron 默认图标**；
+  窗口 / 任务栏 / 安装包 / 开始菜单快捷方式用的都是我们的图标。
+  哪天 rcedit 能用（或换 CI 环境）再把这个开关打开。
 
 ## 7. 功能对照：1.19.8 有什么，NG 现在有什么
 

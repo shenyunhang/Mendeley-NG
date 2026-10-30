@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FtStatus } from '../../shared/types'
 import { DEFAULT_FT_PAGES, DEFAULT_PDF_TEMPLATE } from '../../shared/types'
+import logoUrl from '../../assets/logo.svg'
 
 interface Props {
   theme: 'dark' | 'light'
@@ -145,7 +146,15 @@ export default function Settings({
         </div>
 
         <div className="set-sec">关于</div>
-        <div className="set-note">Mendeley NG {version}</div>
+        <div className="about">
+          <img className="about-logo" src={logoUrl} alt="" width={56} height={56} />
+          <div>
+            <div>Mendeley NG {version}</div>
+            <div className="set-note">
+              Mendeley Desktop 1.19.8 的替代品，本地优先，高 DPI 原生正常。
+            </div>
+          </div>
+        </div>
 
         <div className="modal-acts">
           <button className="primary" onClick={onClose}>
