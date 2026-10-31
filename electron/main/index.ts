@@ -388,6 +388,54 @@ async function runSmoke() {
     setupShown
   )
 
+  // An empty table has to say why.  The usual case is a term that is in the
+  // paper but not in its title or abstract, and the answer is in the same
+  // toolbar — which is exactly the thing nobody was told.
+  await w.webContents.executeJavaScript(
+    '(()=>{const i=document.querySelector(".toolbar input");'
+    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+    + 'set.call(i,"zzqqxxnotathing");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  const emptyInfo = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({rows:document.querySelectorAll("div.row").length,'
+      + 'text:(document.querySelector(".empty")||{}).textContent||null,'
+      + 'clear:[...document.querySelectorAll(".empty button")].map(b=>b.textContent)})'
+    )
+  )
+  log('empty table', emptyInfo)
+  expect(
+    'an empty table names what was searched',
+    /zzqqxxnotathing/.test(emptyInfo.text ?? ''),
+    emptyInfo
+  )
+  expect(
+    'an empty table points at full-text search',
+    emptyInfo.rows === 0 && /书目字段/.test(emptyInfo.text ?? ''),
+    emptyInfo
+  )
+  expect(
+    'an empty table offers a way back',
+    (emptyInfo.clear ?? []).some((t: string) => /清空/.test(t)),
+    emptyInfo
+  )
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".empty button")]'
+    + '.find(x=>x.textContent.includes("清空"));if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  const restored = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({rows:document.querySelectorAll("div.row").length,'
+      + 'q:(document.querySelector(".toolbar input")||{}).value||null})'
+    )
+  )
+  log('after clearing', restored)
+  // `!q` rather than `q === ''`: the value is read through `|| null`, which
+  // turns an empty search box into null
+  expect('clearing brings the library back', restored.rows > 0 && !restored.q, restored)
+
   // shift-click selection, checked without any of the batch actions that
   // would write to the library
   log(
@@ -752,7 +800,10 @@ async function runSmoke() {
     '(()=>{const b=[...document.querySelectorAll(".row-menu-item")]'
     + '.find(x=>x.textContent.trim()==="复制标题");if(!b)return 0;b.click();return 1})()'
   )
-  await new Promise((r) => setTimeout(r, 600))
+  // 900 rather than 600: the write goes through an IPC round trip and under
+  // load the read wins the race, which fails this check for a reason that has
+  // nothing to do with the menu
+  await new Promise((r) => setTimeout(r, 900))
   const titleCopied = await w.webContents.executeJavaScript('window.api.readClipboard()')
   log('copied title', JSON.stringify(titleCopied))
   expect(

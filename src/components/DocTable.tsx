@@ -27,6 +27,13 @@ interface Props {
   fontSize: number
   /** which columns to show, in order */
   cols: ColKey[]
+  /**
+   * What to show when there is nothing to list.  Passed in rather than
+   * decided here because the table only knows that `docs` is empty, not
+   * why: an empty library and a filter that excluded everything are the
+   * same thing from down here and opposite things to the reader.
+   */
+  empty?: React.ReactNode
 }
 
 export default function DocTable({
@@ -39,7 +46,8 @@ export default function DocTable({
   onContextMenu,
   multi,
   fontSize,
-  cols
+  cols,
+  empty
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
 
@@ -125,7 +133,7 @@ export default function DocTable({
 
       <div className="table-wrap" ref={parentRef}>
         {!docs.length ? (
-          <div className="empty">没有匹配的文献</div>
+          (empty ?? <div className="empty">没有匹配的文献</div>)
         ) : (
           <div style={{ height: v.getTotalSize(), position: 'relative' }}>
             {v.getVirtualItems().map((vi) => {

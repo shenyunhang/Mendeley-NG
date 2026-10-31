@@ -645,6 +645,61 @@ export default function App() {
     return filtered
   }, [multi, selected, filtered, docs])
 
+  /** Drop every condition that is narrowing the list, so an empty table is
+   *  not a dead end. */
+  const clearFilters = useCallback(() => {
+    setQuery('')
+    setFolderId(null)
+    setActiveSearch(null)
+    setOnlyStarred(false)
+  }, [])
+
+  /**
+   * What the empty table says.  "没有匹配的文献" covered an empty library, a
+   * filter that excluded everything and a search that hit nothing, which are
+   * three different situations and — for the last two — have three different
+   * ways out.
+   */
+  const emptyState = useMemo(() => {
+    if (!docs.length) {
+      return (
+        <div className="empty">
+          <p>库里还没有文献。</p>
+          <p className="sub">同步云端会把你 Mendeley 上那份拉下来，也可以直接把 PDF 拖进来。</p>
+        </div>
+      )
+    }
+    const bits: string[] = []
+    if (query.trim()) bits.push(`「${query.trim()}」`)
+    if (folderId) {
+      const f = folders.find((x) => x.id === folderId)
+      if (f) bits.push(`文件夹「${f.name}」`)
+    }
+    if (onlyStarred) bits.push('星标')
+    return (
+      <div className="empty">
+        <p>{bits.length ? `${bits.join(' · ')} 之下没有文献` : '没有匹配的文献'}</p>
+        {/*
+          The most common of these is a term that is in the paper but not in
+          its title or abstract, and the answer is in the same toolbar.  Saying
+          so is worth more than the count of what did not match.
+        */}
+        {query.trim() && !ftMode ? (
+          <p className="sub">
+            搜的是书目字段：标题、作者、期刊、摘要、标签和你写的笔记。
+            要搜 PDF 正文，点工具栏的「全文」
+            {ftStat && ftStat.indexed === 0 ? '（要先建一次索引）' : ''}。
+          </p>
+        ) : null}
+        {bits.length ? (
+          <button style={{ marginTop: 10 }} onClick={clearFilters}>
+            清空这些条件
+          </button>
+        ) : null}
+      </div>
+    )
+  }, [docs.length, query, folderId, folders, onlyStarred, ftMode, ftStat, clearFilters])
+
   const [batchMsg, setBatchMsg] = useState<string | null>(null)
 
   /** Most recent last, capped: an undo stack that grows without bound is a
@@ -1749,6 +1804,7 @@ export default function App() {
             }
             multi={multi}
             selectedId={selId}
+            empty={emptyState}
             onContextMenu={(d, e) => {
               e.preventDefault()
               setMenu({ x: e.clientX, y: e.clientY, docId: d.id })

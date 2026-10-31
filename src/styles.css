@@ -946,6 +946,18 @@ td .no-pdf {
   font-size: 0.867rem;
   text-align: center;
 }
+/* an empty table is a question, not a statement: what is being shown is that
+   nothing matched, and the useful part is what to do about it */
+.empty p {
+  margin: 0 0 6px;
+}
+.empty .sub {
+  max-width: 34em;
+  margin: 0 auto;
+  font-size: 0.8rem;
+  line-height: 1.7;
+  opacity: 0.85;
+}
 .err {
   display: flex;
   align-items: flex-start;
