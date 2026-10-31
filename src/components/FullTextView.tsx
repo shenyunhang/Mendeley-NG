@@ -119,12 +119,44 @@ export default function FullTextView({
         </div>
       )}
 
-      {!status?.indexed && !building && (
+      {/*
+        Three different reasons a search over the text can come up empty, and
+        they are not interchangeable: there may be nothing to read yet, the
+        reading may not have been done, or it may have been done for only
+        some of the library — which is the one that looks like "the search
+        cannot find it" rather than "it was never indexed".
+      */}
+      {!building && status && !status.total ? (
         <div className="empty">
-          还没有索引。点「建索引」读取本地 PDF 的正文，大约每篇 90 毫秒，
-          几千篇要几分钟——中途可以停，下次会接着读。
+          <p>没有可索引的 PDF。</p>
+          <p className="sub">
+            库里还没有带本地 PDF 的文献。设好 PDF 目录、把文件同步或下载下来之后，
+            正文才有东西可读。
+          </p>
         </div>
-      )}
+      ) : !status?.indexed && !building ? (
+        <div className="empty">
+          <p>还没有索引。</p>
+          <p className="sub">
+            建索引会读一遍本地 PDF 的正文，大约每篇 90 毫秒，几千篇要几分钟——中途
+            可以停，下次会接着读。只取每篇的前 {status?.pages ?? 3} 页：标题、作者、
+            摘要和引言开头，也就是要找的词通常在的地方。
+          </p>
+          {status?.total ? (
+            <button style={{ marginTop: 10 }} onClick={() => onBuild(false)}>
+              建索引（{status.total} 篇）
+            </button>
+          ) : null}
+        </div>
+      ) : status && status.indexed < status.total && !building ? (
+        <div className="setup-hint">
+          <span>
+            还有 {status.total - status.indexed} 篇没有索引，它们不在这次的搜索范围内——
+            找不到的词可能就在其中。
+          </span>
+          <button onClick={() => onBuild(false)}>继续索引</button>
+        </div>
+      ) : null}
 
       {status?.indexed ? (
         <div className="ft-list">

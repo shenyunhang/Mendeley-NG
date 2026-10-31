@@ -1295,6 +1295,23 @@ async function runSmoke() {
   )
   log('ft status', ftStat0)
   expect('full text starts unindexed', ftStat0.indexed === 0 && ftStat0.total > 0, ftStat0)
+  // "0 / 5648" and a button called 建索引 in the header is a riddle: the
+  // panel has to say that reading every paper is what stands between the
+  // search and any results, and how long that takes.
+  const ftEmpty = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({text:(document.querySelector(".pane-mid .empty")||{}).textContent||null,'
+      + 'btns:[...document.querySelectorAll(".pane-mid .empty button")]'
+      + '.map(b=>b.textContent)})'
+    )
+  )
+  log('ft before building', ftEmpty)
+  expect(
+    'an unindexed library offers to build the index',
+    /还没有索引/.test(ftEmpty.text ?? '') &&
+      (ftEmpty.btns ?? []).some((t: string) => /建索引/.test(t)),
+    ftEmpty
+  )
   await w.webContents.executeJavaScript(
     '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
     + '.find(x=>x.textContent.trim()==="建索引");if(!b)return 0;b.click();return 1})()'
