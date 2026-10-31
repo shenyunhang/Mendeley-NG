@@ -1,6 +1,6 @@
 {
   "name": "mendeley-ng",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "A high-DPI-native replacement for Mendeley Desktop 1.19.8",
   "main": "out/main/index.js",
   "author": "shenyunhang",
