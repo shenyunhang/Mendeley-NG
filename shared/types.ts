@@ -172,6 +172,16 @@ export interface AppConfig {
   /** Sort the reader last asked for.  A key that is no longer a sort key is
    *  dropped on the way back in, so the arrow always lands on a real column. */
   sort?: { key: string; dir: 1 | -1 }
+  /** Where the window was left.  Kept as a rectangle plus a flag rather than
+   *  as the rectangle a maximised window reports, which is the whole screen
+   *  and leaves nothing to come back to. */
+  window?: {
+    x: number
+    y: number
+    width: number
+    height: number
+    maximized?: boolean
+  }
 }
 
 export const DEFAULT_FT_PAGES = 3

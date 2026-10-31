@@ -147,7 +147,60 @@ async function sync(full: boolean) {
   return { docs, folders }
 }
 
+/**
+ * Where the window was left, or `null` when there is nothing worth restoring.
+ *
+ * A saved rectangle is refused unless a display still contains a usable part
+ * of it: windows are remembered across the very event that makes them wrong
+ * — a monitor unplugged, a laptop undocked — and a window restored where
+ * nobody can reach it is worse than one at the default, because the reader
+ * has no way to know what happened.
+ */
+function savedBounds(): Electron.Rectangle | null {
+  const b = loadConfig().window
+  if (!b || !Number.isFinite(b.width) || !Number.isFinite(b.height)) return null
+  const w = { x: b.x, y: b.y, width: b.width, height: b.height }
+  const enough = 64
+  return screen.getAllDisplays().some((d) => {
+    const a = d.bounds
+    return (
+      Math.min(w.x + w.width, a.x + a.width) - Math.max(w.x, a.x) >= enough &&
+      Math.min(w.y + w.height, a.y + a.height) - Math.max(w.y, a.y) >= enough
+    )
+  })
+    ? w
+    : null
+}
+
+/**
+ * Called when the window closes.  `close` and not `blur`, which also fires
+ * when another application takes focus and would record a size the reader
+ * only meant for a moment.
+ *
+ * Maximised is stored beside the rectangle instead of as the rectangle: what
+ * a maximised window reports is the screen, and restoring that would open a
+ * window that fills the display with no memory of the size that was chosen.
+ */
+function rememberBounds(w: BrowserWindow) {
+  const cfg = loadConfig()
+  if (w.isMaximized()) {
+    cfg.window = { ...(cfg.window ?? w.getBounds()), maximized: true }
+  } else {
+    cfg.window = { ...w.getBounds(), maximized: false }
+  }
+  saveConfig(cfg)
+}
+
+/** Both halves of remembering the window, in the order the window needs them:
+ *  come back maximised if that is how it was left, and write where it is when
+ *  it goes away. */
+function attachWindowMemory(w: BrowserWindow) {
+  if (loadConfig().window?.maximized) w.maximize()
+  w.on('close', () => rememberBounds(w))
+}
+
 function createWindow() {
+  const bounds = savedBounds()
   win = new BrowserWindow({
     /**
      * The taskbar and the title bar take this.  `build/icon.ico` is what goes
@@ -157,8 +210,7 @@ function createWindow() {
      * packaged, which is why the one path works in both.
      */
     icon: path.join(app.getAppPath(), 'assets', 'icon.png'),
-    width: 1500,
-    height: 950,
+    ...(bounds ?? { width: 1500, height: 950 }),
     minWidth: 1000,
     minHeight: 650,
     // no zoomFactor and no DPI overrides on purpose: Chromium already renders
@@ -172,6 +224,7 @@ function createWindow() {
       sandbox: false
     }
   })
+  attachWindowMemory(win)
   win.once('ready-to-show', () => win?.show())
   win.on('closed', () => {
     win = null
@@ -2647,6 +2700,85 @@ async function runSmoke() {
   // the run left the throwaway index holding only those four; put it back the
   // way the next run expects to find it
   ftClear()
+
+  // The window opening at the size it was last left at, in the place it was
+  // last left, is the difference between an app that knows it was used before
+  // and one that has to be arranged every morning.  Both halves are checked
+  // here against a throwaway window: the close writes, and what is written is
+  // only offered back while a display still contains it.
+  const win0 = loadConfig().window ?? null
+  const w2 = new BrowserWindow({ width: 1200, height: 800, show: false })
+  w2.setBounds({ x: 120, y: 80, width: 1200, height: 800 })
+  rememberBounds(w2)
+  const boundsWrote = loadConfig().window
+  log('bounds remembered', boundsWrote)
+  expect(
+    'closing writes where the window was',
+    boundsWrote?.x === 120 &&
+      boundsWrote?.y === 80 &&
+      boundsWrote?.width === 1200 &&
+      boundsWrote?.height === 800,
+    boundsWrote
+  )
+  expect('it is offered back on the next start', savedBounds()?.width === 1200, savedBounds())
+  // a rectangle no display contains is refused: this is what happens when a
+  // monitor is unplugged between two runs
+  saveConfig({
+    ...loadConfig(),
+    window: { x: -40_000, y: -40_000, width: 1200, height: 800, maximized: false }
+  })
+  expect('a rectangle outside every display is refused', savedBounds() === null, savedBounds())
+  // maximising must not overwrite the size that was chosen, or coming back
+  // from maximised has nowhere to go
+  w2.maximize()
+  rememberBounds(w2)
+  const maxed = loadConfig().window
+  log('bounds maximised', maxed)
+  expect('maximising is remembered as a flag', maxed?.maximized === true, maxed)
+  expect(
+    'maximising leaves the chosen size alone',
+    maxed?.width === 1200 && maxed?.height === 800,
+    maxed
+  )
+  // and the writing has to be wired to the window actually going away, not
+  // merely possible: this is the same call the real window gets
+  // the flag decides whether the next start comes back maximised, so it is
+  // cleared before the wiring is exercised: a maximised close keeps the
+  // rectangle instead of writing one, which is what the check above is for
+  saveConfig({
+    ...loadConfig(),
+    // deliberately different from where the window is about to be put: if
+    // nothing is written on close, the value read afterwards is this one and
+    // the check fails, which is the only way to know the wiring is what is
+    // being tested and not a value this run happened to leave behind
+    window: { x: 400, y: 300, width: 1100, height: 700, maximized: false }
+  })
+  w2.unmaximize()
+  // coming back from maximised restores the old rectangle, and it does not
+  // finish before the next line runs: setting bounds on top of a restore that
+  // is still in flight is silently undone
+  await new Promise((r) => setTimeout(r, 500))
+  w2.setBounds({ x: 200, y: 150, width: 1300, height: 900 })
+  await new Promise((r) => setTimeout(r, 300))
+  attachWindowMemory(w2)
+  w2.close()
+  await new Promise((r) => setTimeout(r, 600))
+  const onClose = loadConfig().window
+  log('bounds on close', onClose)
+  expect(
+    'the write is wired to the window closing',
+    onClose?.x === 200 &&
+      onClose?.y === 150 &&
+      onClose?.width === 1300 &&
+      onClose?.height === 900 &&
+      onClose?.maximized === false,
+    onClose
+  )
+  expect('what is written is what comes back', savedBounds()?.width === 1300, savedBounds())
+  const cfgw = loadConfig()
+  if (win0) cfgw.window = win0
+  else delete cfgw.window
+  saveConfig(cfgw)
 
   // A dropped PDF used to be read off disk twice — once to harvest its
   // identifiers, once again to upload it — because pdf.js detaches the buffer
