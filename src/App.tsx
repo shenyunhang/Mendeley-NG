@@ -998,50 +998,73 @@ export default function App() {
     })
   }
 
-  const batchFolder = async (folderId: string) => {
-    const list = multi.length > 1 ? docs.filter((d) => multi.includes(d.id)) : []
-    if (!list.length) return
-    const todo = list.filter((d) => !(d.folder_uuids ?? []).includes(folderId))
+  /**
+   * Put papers into a folder, or take them out of one.
+   *
+   * One routine for both directions and for all three ways of starting it —
+   * the batch menu, the row menu and dropping a selection onto a folder —
+   * so that all of them report what happened and can be undone.  Doing it
+   * three times is how one of them ends up silent.
+   */
+  const folderBatch = async (list: Doc[], folderId: string, op: 'add' | 'remove') => {
+    const inside = (d: Doc) => (d.folder_uuids ?? []).includes(folderId)
+    const todo = list.filter((d) => (op === 'add' ? !inside(d) : inside(d)))
     if (!todo.length) {
-      setBatchMsg('这些文献已经在这个文件夹里')
+      setBatchMsg(op === 'add' ? '这些文献已经在这个文件夹里' : '这些文献不在这个文件夹里')
       setTimeout(() => setBatchMsg(null), 2500)
       return
     }
+    const verb = op === 'add' ? '加入' : '移出'
     const { ok: n, failed } = await runBatch(
       todo,
       (d) => d.title || d.id,
       async (d) => {
-        await window.api.addToFolder(folderId, d.id)
+        if (op === 'add') await window.api.addToFolder(folderId, d.id)
+        else await window.api.removeFromFolder(folderId, d.id)
       },
-      (done, total) => setBatchMsg(`正在加入文件夹 ${done}/${total}…`)
+      (done, total) => setBatchMsg(`正在${verb}文件夹 ${done}/${total}…`)
     )
+    // only what actually landed, so a paper that failed is not recorded as
+    // moved and then shown as undoable
+    const moved = todo.filter((d) => !failed.includes(d.title || d.id)).map((d) => d.id)
     setLib((l) =>
       l
         ? {
             ...l,
             docs: l.docs.map((d) =>
-              multi.includes(d.id) && !(d.folder_uuids ?? []).includes(folderId)
-                ? { ...d, folder_uuids: [...(d.folder_uuids ?? []), folderId] }
+              moved.includes(d.id)
+                ? {
+                    ...d,
+                    folder_uuids:
+                      op === 'add'
+                        ? [...(d.folder_uuids ?? []), folderId]
+                        : (d.folder_uuids ?? []).filter((f) => f !== folderId)
+                  }
                 : d
             )
           }
         : l
     )
-    reportBatch('已加入文件夹', n, failed)
+    reportBatch(`已${verb}文件夹`, n, failed)
     if (n) {
-      // only the ones that actually landed can be undone
-      const added = todo
-        .filter((d) => !failed.includes(d.title || d.id))
-        .map((d) => d.id)
-      pushUndo(`把 ${n} 条加入文件夹`, async () => {
-        for (const id of added) await window.api.removeFromFolder(folderId, id).catch(() => {})
+      pushUndo(`把 ${n} 条${verb}文件夹`, async () => {
+        for (const id of moved) {
+          if (op === 'add') await window.api.removeFromFolder(folderId, id).catch(() => {})
+          else await window.api.addToFolder(folderId, id).catch(() => {})
+        }
         setLib((l) =>
           l
             ? {
                 ...l,
                 docs: l.docs.map((d) =>
-                  added.includes(d.id)
-                    ? { ...d, folder_uuids: (d.folder_uuids ?? []).filter((f) => f !== folderId) }
+                  moved.includes(d.id)
+                    ? {
+                        ...d,
+                        folder_uuids:
+                          op === 'add'
+                            ? (d.folder_uuids ?? []).filter((f) => f !== folderId)
+                            : [...(d.folder_uuids ?? []), folderId]
+                      }
                     : d
                 )
               }
@@ -1049,6 +1072,29 @@ export default function App() {
         )
       })
     }
+  }
+
+  const batchFolder = (folderId: string) =>
+    folderBatch(
+      docs.filter((d) => multi.includes(d.id)),
+      folderId,
+      'add'
+    )
+
+  /**
+   * The folder being looked at, if any.  "Take these out of here" is only a
+   * meaningful request while there is a here, so every entry point that offers
+   * it is keyed off this rather than off a folder chosen from a list.
+   */
+  const currentFolder = folderId ? folders.find((f) => f.id === folderId) ?? null : null
+
+  const batchUnfolder = () => {
+    if (!currentFolder) return
+    void folderBatch(
+      docs.filter((d) => multi.includes(d.id)),
+      currentFolder.id,
+      'remove'
+    )
   }
 
   const batchTrash = () => trashDocs(docs.filter((d) => multi.includes(d.id)))
@@ -1276,6 +1322,20 @@ export default function App() {
         title: list[0]?.localPdf ?? '这篇没有本地 PDF',
         run: () => void window.api.openPdfExternally(list[0]!.localPdf!)
       },
+      // taking a paper out of a folder is only offered while a folder is being
+      // looked at, and only when at least one of the targets is actually in it;
+      // the paper itself is never touched, so this needs no confirmation
+      ...(currentFolder
+        ? [
+            { sep: true },
+            {
+              label: `移出「${currentFolder.name}」${tail}`,
+              disabled: !list.some((d) => (d.folder_uuids ?? []).includes(currentFolder.id)),
+              title: '从这个文件夹里去掉，文献本身保留',
+              run: () => void folderBatch(list, currentFolder.id, 'remove')
+            }
+          ]
+        : []),
       { sep: true },
       {
         label: `移入回收站${tail}`,
@@ -1342,6 +1402,13 @@ export default function App() {
       className={'app' + (dropping ? ' dropping' : '')}
       onDragOver={(e) => {
         e.preventDefault()
+        // Only a drag that is carrying files is a request to import.  A
+        // document being dragged out of the table carries no files, and
+        // telling the reader "松手即导入 PDF" for that is what made dragging
+        // a paper into a folder look unsupported.  `files` is empty until the
+        // drop lands, so `types` is the only thing readable all the way
+        // through the drag.
+        if (!Array.from(e.dataTransfer.types).includes('Files')) return
         setDropping(true)
       }}
       onDragLeave={(e) => {
@@ -1664,21 +1731,7 @@ export default function App() {
               setFolderId(id)
               setActiveSearch(null)
             }}
-            onDrop={async (fid, did) => {
-              await window.api.addToFolder(fid, did)
-              setLib((l) =>
-                l
-                  ? {
-                      ...l,
-                      docs: l.docs.map((d) =>
-                        d.id === did
-                          ? { ...d, folder_uuids: [...(d.folder_uuids ?? []), fid] }
-                          : d
-                      )
-                    }
-                  : l
-              )
-            }}
+            onDrop={(fid, ids) => folderBatch(docs.filter((d) => ids.includes(d.id)), fid, 'add')}
             onRename={async (fid, name) => {
               const f = await window.api.patchFolder(fid, { name })
               setFolders((fs) => fs.map((x) => (x.id === fid ? f : x)))
@@ -1959,6 +2012,14 @@ export default function App() {
                   </option>
                 ))}
               </select>
+              {currentFolder && (
+                <button
+                  onClick={batchUnfolder}
+                  title={`把选中的文献从「${currentFolder.name}」里去掉，文献本身保留`}
+                >
+                  移出「{currentFolder.name}」
+                </button>
+              )}
               <button className="danger" onClick={batchTrash}>
                 移入回收站
               </button>

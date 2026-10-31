@@ -371,6 +371,154 @@ async function runSmoke() {
     folderOrder
   )
 
+  // Folders: putting a selection into one and taking it back out.  Nothing is
+  // applied — writing folder membership to the real account is not a smoke
+  // run's business — so what is proved here is the wiring: what travels with
+  // the drag, that the import veil keeps out of its way, and that both
+  // directions are on offer once a folder is being looked at.  It is the
+  // wiring that was missing, not the API call.
+  const clickAll = () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const f=[...document.querySelectorAll(".folder-row")]'
+      + '.find(e=>((e.querySelector(".name")||{}).textContent||"").includes("全部文献"));'
+      + 'if(f)f.click();return 1})()'
+    )
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  await clickAll()
+  await wait(400)
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")];'
+    + 'if(r.length<3)return 0;r[0].click();'
+    + 'r[1].dispatchEvent(new MouseEvent("click",{bubbles:true,ctrlKey:true}));return 1})()'
+  )
+  await wait(400)
+  const dragPayload = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const r=[...document.querySelectorAll("div.row")];if(r.length<3)return "{}";'
+      + 'const fire=(el)=>{const dt=new DataTransfer();'
+      + 'el.dispatchEvent(new DragEvent("dragstart",{bubbles:true,cancelable:true,dataTransfer:dt}));'
+      + 'let ids=[];try{ids=JSON.parse(dt.getData("text/doc-ids")||"[]")}catch(e){ids=[]}'
+      + 'return {n:ids.length,one:dt.getData("text/doc-id")||null,'
+      + 'carries:[...dt.types].includes("text/doc-ids")}};'
+      + 'const sel=fire(r[0]);const lone=fire(r[2]);'
+      + 'return JSON.stringify({selected:sel.n,one:sel.one?1:0,carries:sel.carries,lone:lone.n})})()'
+    )
+  )
+  log('drag payload', dragPayload)
+  expect(
+    'dragging a selected row carries the whole selection',
+    dragPayload.selected === 2,
+    dragPayload
+  )
+  expect('the single-document key is still written', dragPayload.one === 1, dragPayload)
+  expect('the payload is typed so a drop target can tell', dragPayload.carries === true, dragPayload)
+  expect('a row outside the selection travels alone', dragPayload.lone === 1, dragPayload)
+
+  // The veil says "松手即导入 PDF".  Shown while the reader is dragging papers
+  // out of the table, it says the opposite of what is about to happen, which
+  // is how a supported gesture comes to look unsupported.
+  const veil = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        'JSON.stringify({veil:document.querySelectorAll(".drop-veil").length,'
+        + 'marked:(document.querySelector(".app")||{}).className.includes("dropping")})'
+      )
+    )
+  await w.webContents.executeJavaScript(
+    '(()=>{const dt=new DataTransfer();dt.setData("text/doc-ids",JSON.stringify(["a","b"]));'
+    + 'document.querySelector(".app").dispatchEvent(new DragEvent("dragover",'
+    + '{bubbles:true,cancelable:true,dataTransfer:dt}));return 1})()'
+  )
+  await wait(300)
+  const veilDocs = await veil()
+  log('veil while dragging papers', veilDocs)
+  expect(
+    'dragging papers out of the table does not offer to import PDFs',
+    veilDocs.veil === 0 && veilDocs.marked === false,
+    veilDocs
+  )
+  await w.webContents.executeJavaScript(
+    '(()=>{const dt=new DataTransfer();'
+    + 'dt.items.add(new File(["x"],"a.pdf",{type:"application/pdf"}));'
+    + 'document.querySelector(".app").dispatchEvent(new DragEvent("dragover",'
+    + '{bubbles:true,cancelable:true,dataTransfer:dt}));return 1})()'
+  )
+  await wait(300)
+  const veilFiles = await veil()
+  log('veil while dragging files', veilFiles)
+  expect('dragging real files still offers to import PDFs', veilFiles.veil === 1, veilFiles)
+  await w.webContents.executeJavaScript(
+    '(()=>{document.querySelector(".app").dispatchEvent(new DragEvent("dragleave",'
+    + '{bubbles:true,relatedTarget:null}));return 1})()'
+  )
+  await wait(300)
+  expect('leaving the window puts the veil away', (await veil()).veil === 0, veilFiles)
+
+  // "移出" is only a meaningful request while there is a somewhere to be moved
+  // out of, so it is offered per folder rather than as a global command.  The
+  // first folder that actually has papers in it is used, because a folder with
+  // none has no row to right click.
+  const folderNames: string[] = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify([...document.querySelectorAll(".folder-row")]'
+      + '.map(e=>(e.querySelector(".name")||{}).textContent||""))'
+    )
+  )
+  let outFolder = ''
+  let outRows = 0
+  for (const nm of folderNames.slice(0, 15)) {
+    if (!nm || nm.includes('全部文献')) continue
+    await w.webContents.executeJavaScript(
+      '(()=>{const f=[...document.querySelectorAll(".folder-row")]'
+      + '.find(e=>((e.querySelector(".name")||{}).textContent||"")==='
+      + JSON.stringify(nm) + ');if(f)f.click();return 1})()'
+    )
+    await wait(400)
+    const st = JSON.parse(
+      await w.webContents.executeJavaScript(
+        'JSON.stringify({rows:document.querySelectorAll("div.row").length,'
+        + 'bar:[...document.querySelectorAll(".batch-bar button")].map(b=>b.textContent.trim())})'
+      )
+    )
+    if (st.rows >= 1 && (st.bar ?? []).some((b: string) => b.startsWith('移出「'))) {
+      outFolder = nm
+      outRows = st.rows
+      break
+    }
+  }
+  log('folder with papers', { outFolder, outRows })
+  expect('a folder offers to take the selection out of itself', !!outFolder, {
+    outFolder,
+    outRows
+  })
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")];if(!r.length)return 0;'
+    + 'r[0].dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,clientX:200,clientY:200}));'
+    + 'return 1})()'
+  )
+  await wait(400)
+  const outMenu = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify([...document.querySelectorAll(".row-menu .row-menu-item")]'
+      + '.map(b=>({t:b.textContent.trim(),off:b.disabled})))'
+    )
+  )
+  log('row menu in a folder', outMenu.length, outMenu.slice(0, 2))
+  const outItem = (outMenu as { t: string }[]).find((m) => m.t.startsWith('移出「'))
+  expect(
+    'the row menu offers to take a paper out of the folder',
+    !!outItem && outItem.t.includes(outFolder),
+    { outItem, outFolder }
+  )
+  // back where the run started: the library as a whole, nothing selected
+  await w.webContents.executeJavaScript(
+    '(()=>{window.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));'
+    + 'const b=[...document.querySelectorAll(".batch-bar button")]'
+    + '.find(x=>x.textContent.trim()==="取消选择");if(b)b.click();return 1})()'
+  )
+  await clickAll()
+  await wait(400)
+
   // The first-run guide is for an empty library on a machine with no token.
   // Somebody with a cached library and an expired token is not a first run,
   // and putting the guide in front of them would be worse than whatever the
@@ -575,10 +723,9 @@ async function runSmoke() {
   await new Promise((r) => setTimeout(r, 300))
 
   // The file naming template.  Only its preview is exercised: actually
-  // renaming moves files on disk, so confirm is stubbed to refuse and the
-  // template is put back afterwards.
+  // renaming moves files on disk, so the confirmation is answered with 取消
+  // and the template is put back afterwards.
   const tpl0 = cfg0.pdfNameTemplate
-  await w.webContents.executeJavaScript('(()=>{window.confirm=()=>false;return 1})()')
   log(
     'click 命名',
     await w.webContents.executeJavaScript(
@@ -607,10 +754,25 @@ async function runSmoke() {
     + '.find(x=>x.textContent.trim()==="确定");if(b)b.click();return 1})()'
   )
   await new Promise((r) => setTimeout(r, 800))
+  // the naming dialog hands over to the confirmation; refusing it is what
+  // keeps the run from moving files on the reader's disk.  It has to be
+  // dismissed either way, or the veil stops everything that follows.
+  const tplConfirm = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({modal:!!document.querySelector(".confirm-modal"),'
+      + 'text:(document.querySelector(".confirm-modal")||{}).textContent||null})'
+    )
+  )
+  log('naming asks before renaming', tplConfirm)
+  expect('renaming files on disk asks first', tplConfirm.modal === true, tplConfirm)
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".modal-acts button")]'
+    + '.find(x=>x.textContent.trim()==="取消");if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
   await w.webContents.executeJavaScript(
     `(async()=>{await window.api.setConfig({`
-    + `pdfNameTemplate:${JSON.stringify(tpl0 ?? '{authors} - {year} - {title}')}});`
-    + `delete window.confirm;return 1})()`
+    + `pdfNameTemplate:${JSON.stringify(tpl0 ?? '{authors} - {year} - {title}')}});return 1})()`
   )
 
   const shot = async (name: string) => {
@@ -1235,6 +1397,46 @@ async function runSmoke() {
   })
   await setNotesFilter('')
   await new Promise((r) => setTimeout(r, 400))
+  // An annotation is the one thing here with no way back: there is no trash
+  // for it and the cloud copy goes with it.  Deleting one has to ask, the
+  // question has to say that, and saying no has to leave it alone.
+  const annBefore = await w.webContents.executeJavaScript(
+    '(async()=>(await window.api.loadAnnotations()).length)()'
+  )
+  const clickedDel = await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".notes-row button")]'
+    + '.find(x=>x.textContent.trim()==="删除");if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 600))
+  const delAsk = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({modal:!!document.querySelector(".confirm-modal"),'
+      + 'text:(document.querySelector(".confirm-modal")||{}).textContent||null,'
+      + 'focus:(document.activeElement||{}).textContent||null})'
+    )
+  )
+  log('deleting an annotation', { clickedDel, delAsk })
+  expect('deleting an annotation asks first', clickedDel === 1 && delAsk.modal === true, delAsk)
+  expect(
+    'the confirmation says there is no way back',
+    /不可恢复/.test(delAsk.text ?? ''),
+    delAsk
+  )
+  // the cursor starts on the safe answer, so a stray Enter does not delete
+  expect('the safe button is the one focused', (delAsk.focus ?? '') === '取消', delAsk)
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".modal-acts button")]'
+    + '.find(x=>x.textContent.trim()==="取消");if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 700))
+  const annAfter = await w.webContents.executeJavaScript(
+    '(async()=>(await window.api.loadAnnotations()).length)()'
+  )
+  log('annotations after cancelling', { annBefore, annAfter })
+  expect('cancelling leaves the annotation alone', annBefore === annAfter, {
+    annBefore,
+    annAfter
+  })
   // clicking one has to leave the list and open that paper at that page
   await w.webContents.executeJavaScript(
     '(()=>{const r=document.querySelector(".notes-row");if(!r)return 0;r.click();return 1})()'

@@ -14,12 +14,32 @@ interface Props {
   onSelectSearch?: (s: SavedSearch) => void
   onDeleteSearch?: (id: string) => void
   onSelect: (id: string | null) => void
-  /** a document dropped onto a folder */
-  onDrop?: (folderId: string, docId: string) => void
+  /** documents dropped onto a folder.  A list, because what travels is the
+   *  selection and not the row the drag started on. */
+  onDrop?: (folderId: string, docIds: string[]) => void
   onRename?: (id: string, name: string) => void
   onDelete?: (id: string) => void
   /** a folder dropped onto another folder becomes its child */
   onMove?: (id: string, parentId: string | null) => void
+}
+
+/**
+ * The documents a drag is carrying.  Several travel as one JSON list because
+ * the gesture means the selection, not the row it started on; a single one is
+ * still written under the old key, which older drop targets read.
+ */
+function draggedDocs(dt: DataTransfer): string[] {
+  const many = dt.getData('text/doc-ids')
+  if (many) {
+    try {
+      const ids: unknown = JSON.parse(many)
+      if (Array.isArray(ids)) return ids.filter((x): x is string => typeof x === 'string')
+    } catch {
+      /* not our payload, or truncated; fall back to the single id */
+    }
+  }
+  const one = dt.getData('text/doc-id')
+  return one ? [one] : []
 }
 
 export default function FolderTree({
@@ -103,7 +123,9 @@ export default function FolderTree({
                 (dragging ? ' drag' : '')
               }
               style={{ paddingLeft: 8 + depth * 14 }}
-              title={f.name}
+              // the gesture has no other affordance, and a reader who does not
+              // know it is there will not discover it by accident
+              title={`${f.name} · 可以把文献拖到这里`}
               onClick={() => onSelect(f.id)}
               draggable={editing !== f.id}
               onDragStart={(e) => {
@@ -119,10 +141,10 @@ export default function FolderTree({
               onDrop={(e) => {
                 e.preventDefault()
                 setDragOver(null)
-                const docId = e.dataTransfer.getData('text/doc-id')
+                const ids = draggedDocs(e.dataTransfer)
                 const folderId = e.dataTransfer.getData('text/folder-id')
-                if (docId) {
-                  onDrop?.(f.id, docId)
+                if (ids.length) {
+                  onDrop?.(f.id, ids)
                 } else if (folderId && folderId !== f.id) {
                   // a folder cannot become a child of its own descendant
                   if (!isSelfOrDescendant(tree, folderId, f.id)) onMove?.(folderId, f.id)

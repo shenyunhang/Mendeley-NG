@@ -146,9 +146,19 @@ export default function DocTable({
                     'row' + (selectedId === d.id ? ' sel' : '') + (picked ? ' multi' : '')
                   }
                   draggable
-                  onDragStart={(e) =>
+                  onDragStart={(e) => {
+                    // What travels is the selection, not this row: dragging one
+                    // of ten selected papers and getting one paper in the
+                    // folder is the sort of thing that makes the whole gesture
+                    // look broken.  A row that is not part of the selection
+                    // travels on its own.
+                    const ids = picked && multi.length > 1 ? multi : [d.id]
+                    e.dataTransfer.setData('text/doc-ids', JSON.stringify(ids))
+                    // kept so that a drop target written for one document
+                    // still works
                     e.dataTransfer.setData('text/doc-id', d.id)
-                  }
+                    e.dataTransfer.effectAllowed = 'copy'
+                  }}
                   onClick={(e) =>
                     onSelect(d, vi.index, { shift: e.shiftKey, add: e.ctrlKey || e.metaKey })
                   }
