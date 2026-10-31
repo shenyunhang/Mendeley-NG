@@ -12,7 +12,11 @@ export async function extractIds(
   data: ArrayBuffer
 ): Promise<{ doi?: string; arxiv?: string; title?: string }> {
   try {
-    const pdf = await pdfjs.getDocument({ data }).promise
+    // pdf.js takes ownership of the buffer it is handed and detaches it while
+    // moving it into the worker.  Handing over a copy keeps the caller's bytes
+    // usable, which is what lets one read of a dropped file feed both this
+    // step and the upload that follows it.
+    const pdf = await pdfjs.getDocument({ data: data.slice(0) }).promise
     let text = ''
     for (let i = 1; i <= Math.min(2, pdf.numPages); i++) {
       const page = await pdf.getPage(i)

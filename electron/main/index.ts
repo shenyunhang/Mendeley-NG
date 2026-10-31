@@ -2569,6 +2569,54 @@ async function runSmoke() {
   // way the next run expects to find it
   ftClear()
 
+  // A dropped PDF used to be read off disk twice — once to harvest its
+  // identifiers, once again to upload it — because pdf.js detaches the buffer
+  // it is handed and a second read looked like the only way to get intact
+  // bytes.  For a large paper that doubled the only real cost of an import.
+  // The upload is stubbed for the duration: a real one would create a
+  // document in the reader's own library.  Nothing after this point needs the
+  // real handler, and the process exits when the run does.
+  const importedCalls: { name: string; len: number }[] = []
+  ipcMain.removeHandler('doc:importPdf')
+  ipcMain.handle(
+    'doc:importPdf',
+    async (_e, name: string, bytes: ArrayBuffer) => {
+      importedCalls.push({ name, len: bytes.byteLength })
+      return {
+        id: 'smoke-imported',
+        title: 'Smoke Imported Paper',
+        year: 2026,
+        authors: [],
+        folder_uuids: []
+      } as Doc
+    }
+  )
+  await w.webContents.executeJavaScript(
+    '(()=>{window.__ab=0;if(!window.__abDone){'
+    + 'const o=File.prototype.arrayBuffer;'
+    + 'File.prototype.arrayBuffer=function(){window.__ab++;return o.call(this)};'
+    + 'window.__abDone=1}'
+    + 'const dt=new DataTransfer();'
+    + 'dt.items.add(new File([new Uint8Array(4096)],"smoke-drop.pdf",'
+    + '{type:"application/pdf"}));'
+    + 'document.querySelector(".app").dispatchEvent(new DragEvent("drop",'
+    + '{bubbles:true,cancelable:true,dataTransfer:dt}));return 1})()'
+  )
+  // two processes and a pdf.js worker stand between the drop and the upload;
+  // poll for the arrival rather than betting on a delay
+  for (let i = 0; i < 80 && !importedCalls.length; i++) {
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  const readCount = await w.webContents.executeJavaScript('window.__ab')
+  log('drop reads', { reads: readCount, calls: importedCalls })
+  expect('a dropped PDF is read off disk once', readCount === 1, readCount)
+  expect('the import still happens', importedCalls.length === 1, importedCalls)
+  expect(
+    'the bytes that reach the upload are whole',
+    importedCalls[0]?.len === 4096,
+    importedCalls[0]
+  )
+
   if (fails.length) {
     log('FAILED CHECKS', fails.join(' | '))
     app.exit(1)

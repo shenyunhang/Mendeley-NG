@@ -1466,8 +1466,13 @@ export default function App() {
       const f = files[i]
       setImportMsg(`导入 ${i + 1}/${files.length}：${f.name}`)
       try {
-        const ids = await extractIds(await f.arrayBuffer())
-        const doc = await window.api.importPdf(f.name, await f.arrayBuffer(), ids)
+        // One read feeds both steps.  Reading the file twice was the whole
+        // cost of the import for a large PDF, and it only looked necessary
+        // because pdf.js detaches the buffer it is given — pdfmeta now hands
+        // pdf.js a copy, so the bytes survive to be uploaded.
+        const buf = await f.arrayBuffer()
+        const ids = await extractIds(buf)
+        const doc = await window.api.importPdf(f.name, buf, ids)
         setLib((l) => (l ? { ...l, docs: [...l.docs, doc] } : l))
       } catch (err) {
         setErr(`导入「${f.name}」失败：${String(err)}`)
