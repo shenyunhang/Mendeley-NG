@@ -313,6 +313,7 @@ async function extract(file: string, n: number): Promise<Got> {
     for (let i = 1; i <= count; i++) {
       const p = await d.getPage(i)
       const tc = await p.getTextContent()
+      let page = ''
       for (const it of tc.items as unknown as { str?: string }[]) {
         const s = it.str
         if (!s) continue
@@ -325,9 +326,15 @@ async function extract(file: string, n: number): Promise<Got> {
         // compound such as "state-of-the-art" stays inside one run, and a
         // continuation starting with a capital is left alone, so names split
         // across lines keep their hyphen.
-        if (out.endsWith('- ') && /^[a-z]/.test(s)) out = out.slice(0, -2) + s + ' '
-        else out += s + ' '
+        if (page.endsWith('- ') && /^[a-z]/.test(s)) page = page.slice(0, -2) + s + ' '
+        else page += s + ' '
       }
+      // Lower-cased here, not at write time.  The entry table counts offsets
+      // in code units of the text as stored, and a handful of characters are
+      // longer once they have been lower-cased — U+0130 becomes i plus a
+      // combining dot.  Measuring one text and writing another is how a whole
+      // index ends up describing text that is not quite there.
+      out += page.toLowerCase()
       bounds.push(out.length)
       p.cleanup()
     }
@@ -494,7 +501,7 @@ export async function ftBuild(
           }
           continue
         }
-        const buf = Buffer.from(g.text.toLowerCase(), 'utf8')
+        const buf = Buffer.from(g.text, 'utf8')
         // written at an explicit position rather than appended: append always
         // goes to the end of the file, and the byte anchor has just been
         // brought back to the end of the recorded text, which are not the
@@ -584,7 +591,7 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
       }
       const g = await extract(d.localPdf as string, pages)
       if (!g.text.trim()) continue
-      const buf = Buffer.from(g.text.toLowerCase(), 'utf8')
+      const buf = Buffer.from(g.text, 'utf8')
       fs.writeSync(out, buf, 0, buf.length, byteAt)
       m.entries[d.id] = {
         start: at,
