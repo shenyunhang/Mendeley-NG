@@ -1115,6 +1115,81 @@ button.danger:hover:not(:disabled) {
   background: var(--panel-head);
   font-size: 0.8rem;
 }
+/* ---------- first run ---------- */
+.setup-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--msg-bg);
+  font-size: 0.867rem;
+  line-height: 1.6;
+}
+.setup-hint span {
+  flex: 1;
+  min-width: 0;
+}
+.setup-hint button {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+}
+.setup {
+  flex: 1;
+  overflow: auto;
+  padding: 28px 34px;
+  max-width: 62em;
+}
+.setup h2 {
+  margin: 0 0 10px;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+.setup .lede {
+  margin: 0 0 18px;
+  color: var(--fg-dim);
+  line-height: 1.7;
+  font-size: 0.933rem;
+}
+.setup .steps {
+  margin: 0 0 22px;
+  padding-left: 1.4em;
+  line-height: 1.85;
+  font-size: 0.933rem;
+}
+.setup .steps li {
+  margin-bottom: 10px;
+}
+/* the commands have to be selectable, so they are not buttons and they do not
+   inherit the UI font scale that would reflow them */
+.setup code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  color: var(--fg);
+  font-family: ui-monospace, Consolas, 'Courier New', monospace;
+  font-size: 0.867rem;
+  overflow-wrap: anywhere;
+}
+.setup .steps b {
+  font-weight: 600;
+}
+.setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.setup .foot {
+  margin: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--sep);
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+  line-height: 1.75;
+}
+
 .cand-box {
   flex: 0 0 auto;
   max-height: 40%;

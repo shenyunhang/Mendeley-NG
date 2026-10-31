@@ -371,6 +371,23 @@ async function runSmoke() {
     folderOrder
   )
 
+  // The first-run guide is for an empty library on a machine with no token.
+  // Somebody with a cached library and an expired token is not a first run,
+  // and putting the guide in front of them would be worse than whatever the
+  // token was for — so its absence is what is checked.
+  const setupShown = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({setup:document.querySelectorAll(".setup").length,'
+      + 'rows:document.querySelectorAll("div.row").length})'
+    )
+  )
+  log('first run guide', setupShown)
+  expect(
+    'the guide stays out of the way once there is a library',
+    setupShown.setup === 0 && setupShown.rows > 0,
+    setupShown
+  )
+
   // shift-click selection, checked without any of the batch actions that
   // would write to the library
   log(

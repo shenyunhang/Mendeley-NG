@@ -35,6 +35,7 @@ import RowMenu, { type RowMenuItem } from './components/RowMenu'
 import NotesView from './components/NotesView'
 import BatchEdit, { type BatchOp } from './components/BatchEdit'
 import Settings from './components/Settings'
+import SetupGuide from './components/SetupGuide'
 import Splitter from './components/Splitter'
 import { extractIds } from './lib/pdfmeta'
 import { toBibtex, toEndnoteXml, toRis } from './lib/export'
@@ -145,6 +146,13 @@ export default function App() {
     onOk: (v: string) => void
   } | null>(null)
   const [pdfDir, setPdfDir] = useState('')
+  /**
+   * Whether a token has been found yet, or `null` while that is still being
+   * asked.  Null is not the same as false: answering "no token" before the
+   * question has come back would flash the guide at everyone on startup.
+   */
+  const [hasToken, setHasToken] = useState<boolean | null>(null)
+  const [setupDone, setSetupDone] = useState(false)
   const [fontSize, setFontSize] = useState(15)
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const [cols, setCols] = useState<ColKey[]>(() => normaliseCols(undefined))
@@ -202,6 +210,7 @@ export default function App() {
       }
     })
     window.api.appVersion().then(setVersion).catch(() => {})
+    window.api.hasToken().then(setHasToken).catch(() => setHasToken(false))
     window.api.getConfig().then((c) => {
       setPdfDir(c.pdfDir)
       setSaved(c.savedSearches ?? [])
@@ -382,6 +391,27 @@ export default function App() {
     for (const d of docs) m.set(d.id, hay(d, noteMap[d.id]))
     return m
   }, [docs, noteMap])
+
+  /**
+   * What has to happen before there is anything to look at, or null when
+   * there is.  Only one thing is ever named, because being told about three
+   * missing pieces at once is not an instruction.
+   *
+   * It is null while the token question is still in flight: answering before
+   * that would flash the guide at everyone whose token is in fact sitting
+   * right where the app looks for it.
+   *
+   * A library on disk settles the matter on its own — somebody with 5000
+   * cached papers and an expired token is not a first run, and blocking them
+   * behind a guide to get one would be worse than whatever the token was
+   * for.  The token is only asked for when there is nothing else to show.
+   */
+  const setup = useMemo(() => {
+    if (setupDone || hasToken === null || lib === null) return null
+    if (docs.length) return null
+    if (!hasToken) return 'token' as const
+    return 'sync' as const
+  }, [setupDone, hasToken, lib, docs.length])
 
   const tree = useMemo(() => buildTree(folders), [folders])
 
@@ -1603,6 +1633,20 @@ export default function App() {
               })
             }}
           />
+        ) : setup ? (
+          <SetupGuide
+            step={setup}
+            busy={busy}
+            onImportToken={async () => {
+              const r = await window.api.importToken()
+              if (r?.ok) {
+                setHasToken(true)
+                await doSync()
+              } else if (r) setErr('导入 token 失败：' + (r.error ?? '未选择文件'))
+            }}
+            onSync={() => void doSync(false)}
+            onDismiss={() => setSetupDone(true)}
+          />
         ) : trash ? (
           <TrashView
             docs={trash}
@@ -1638,6 +1682,22 @@ export default function App() {
               命名
             </button>
           </div>
+          {/*
+            Not a guide and not a banner: a library without a PDF directory
+            half works, and the half that is missing — downloading, and the
+            full-text index, which can only read files on disk — is the half
+            this app exists for.  It was one line of grey text in the pane
+            header, which is how it stayed unset.
+          */}
+          {!pdfDir && (
+            <div className="setup-hint">
+              <span>
+                还没设 PDF 目录。下载的 PDF 没有地方放，全文检索也只能读磁盘上的文件——
+                这两件事都还不能用。
+              </span>
+              <button onClick={() => void pickDir()}>选择目录</button>
+            </div>
+          )}
           {multi.length > 1 && (
             <div className="batch-bar">
               <span>已选 {multi.length} 条</span>
