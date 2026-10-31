@@ -22,7 +22,7 @@ import ConfirmDialog from './components/ConfirmDialog'
 import DocTable from './components/DocTable'
 import ColumnPicker from './components/ColumnPicker'
 import FullTextView from './components/FullTextView'
-import { normaliseCols, type ColKey, type SortKey } from './lib/columns'
+import { migrateCols, normaliseCols, type ColKey, type SortKey } from './lib/columns'
 import {
   CITE_STYLES,
   DEFAULT_CITE_STYLE,
@@ -177,7 +177,7 @@ export default function App() {
   const [setupDone, setSetupDone] = useState(false)
   const [fontSize, setFontSize] = useState(15)
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
-  const [cols, setCols] = useState<ColKey[]>(() => normaliseCols(undefined))
+  const [cols, setCols] = useState<ColKey[]>(() => migrateCols(undefined))
   // widths the reader has dragged to; empty until something is dragged, so a
   // column that was never touched keeps the track its definition gives it
   const [colWidths, setColWidths] = useState<Record<string, number>>({})
@@ -240,7 +240,7 @@ export default function App() {
       setPdfDir(c.pdfDir)
       setSaved(c.savedSearches ?? [])
       setViews(c.views ?? [])
-      setCols(normaliseCols(c.cols))
+      setCols(migrateCols(c.cols))
       if (c.colWidths) setColWidths(c.colWidths)
       if (c.pdfNameTemplate) setNameTemplate(c.pdfNameTemplate)
       if (isCiteStyle(c.citeStyle)) setCiteStyle(c.citeStyle)

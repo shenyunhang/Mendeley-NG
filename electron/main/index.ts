@@ -970,6 +970,70 @@ async function runSmoke() {
   )
   await new Promise((r) => setTimeout(r, 300))
 
+  // 添加时间 is part of the default layout now, and a layout that was never
+  // customised follows the default instead of staying on the one it was first
+  // written with.  The migration is checked by writing the previous default
+  // into the config and reloading: the header has to come back with the new
+  // column in it, and a layout somebody arranged has to be left alone.
+  const headKeys = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        'JSON.stringify([...document.querySelectorAll(".col-head > div")]'
+        + '.map(d=>d.dataset.col))'
+      )
+    )
+  const OLD_DEFAULT = ['star', 'pdf', 'authors', 'title', 'year', 'source', 'citation_key']
+  const atStart = await headKeys()
+  const setColsAndReload = async (cols: string[] | null) => {
+    // written straight to the config rather than through setConfig, which can
+    // only merge: a layout the user never had would come back as a null
+    const cfg = loadConfig()
+    if (cols) cfg.cols = cols
+    else delete cfg.cols
+    saveConfig(cfg)
+    await w.loadFile(path.join(__dirname, '../renderer/index.html'))
+    await new Promise((r) => setTimeout(r, 2500))
+  }
+  await setColsAndReload(OLD_DEFAULT)
+  const migrated = await headKeys()
+  log('columns after migration', migrated)
+  expect(
+    'a layout that was never customised picks up 添加时间',
+    migrated.includes('created') && migrated.length === OLD_DEFAULT.length + 1,
+    migrated
+  )
+  // and one the reader arranged themselves is left exactly as it was
+  const mine = ['star', 'title', 'created', 'year']
+  await setColsAndReload(mine)
+  const kept = await headKeys()
+  log('columns after a custom layout', kept)
+  expect(
+    'a layout somebody arranged is left alone',
+    JSON.stringify(kept) === JSON.stringify(['star', 'title', 'year', 'created']),
+    { kept, mine }
+  )
+  // back to whatever the reader had, which for most is the default itself
+  await setColsAndReload(cfg0.cols ?? null)
+  const colsRestored = await headKeys()
+  log('columns colsRestored', colsRestored)
+  expect(
+    'the run leaves the column layout as it found it',
+    JSON.stringify(colsRestored) === JSON.stringify(atStart),
+    { colsRestored, atStart }
+  )
+  const firstAdded = await w.webContents.executeJavaScript(
+    '(()=>{const i=[...document.querySelectorAll(".col-head > div")]'
+    + '.findIndex(d=>d.dataset.col==="created");if(i<0)return "none";'
+    + 'const r=document.querySelector("div.row");if(!r)return "norow";'
+    + 'return (r.children[i]?.textContent||"").trim()})()'
+  )
+  log('first 添加时间 cell', firstAdded)
+  expect(
+    '添加时间 reads as a date, not a timestamp',
+    /^\d{4}-\d{2}-\d{2}$/.test(String(firstAdded)),
+    firstAdded
+  )
+
   // The file naming template.  Only its preview is exercised: actually
   // renaming moves files on disk, so the confirmation is answered with 取消
   // and the template is put back afterwards.

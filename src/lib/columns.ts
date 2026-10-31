@@ -77,8 +77,23 @@ export const COLUMNS: ColumnDef[] = [
 
 export const COL_BY_KEY = new Map(COLUMNS.map((c) => [c.key, c]))
 
-/** What a fresh install shows; Mendeley's own default, roughly. */
+/** What a fresh install shows; Mendeley's own default, roughly.  When is the
+ *  one question the other seven cannot answer — a library is read in the order
+ *  it was built, not in the order it was published. */
 export const DEFAULT_COLS: ColKey[] = [
+  'star',
+  'pdf',
+  'authors',
+  'title',
+  'year',
+  'source',
+  'citation_key',
+  'created'
+]
+
+/** The default before `created` joined it.  Kept only so that a layout which
+ *  still matches it can be told apart from one somebody arranged themselves. */
+const PREV_DEFAULT_COLS: ColKey[] = [
   'star',
   'pdf',
   'authors',
@@ -97,6 +112,23 @@ export function normaliseCols(cols: string[] | undefined): ColKey[] {
     if (cols.includes(c.key)) seen.add(c.key)
   }
   return seen.size ? [...seen] : [...DEFAULT_COLS]
+}
+
+/**
+ * Carry a layout that was never customised over to the current default.
+ *
+ * Adding a column to the default does nothing for anybody whose `cols` was
+ * written the first time the app started: it still names the old seven, and
+ * the new column never appears.  So a layout that is exactly the previous
+ * default follows the new one, and anything else is left alone — quietly
+ * adding back a column somebody took out is worse than not adding it.
+ */
+export function migrateCols(cols: string[] | undefined): ColKey[] {
+  const cur = normaliseCols(cols)
+  if (!cols?.length) return cur
+  const prev = normaliseCols(PREV_DEFAULT_COLS)
+  const same = cur.length === prev.length && cur.every((k, i) => k === prev[i])
+  return same ? [...DEFAULT_COLS] : cur
 }
 
 /** Narrowest a column with no floor of its own can be dragged. */

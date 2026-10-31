@@ -325,7 +325,13 @@ textarea:focus {
   background: var(--bg-2);
 }
 .pane-mid {
-  flex: 1 1 auto;
+  /* basis 0, not auto: an `auto` basis sizes the pane to its content, and the
+     content here is a table whose columns have widths of their own.  Every
+     column added, or any column dragged wider, then inflates the pane and
+     steals width back from the tree — which is the opposite of what dragging
+     the tree to a width is for.  With a zero basis the pane takes what is
+     left over and the table scrolls sideways instead. */
+  flex: 1 1 0;
   min-width: 260px;
 }
 .pane-right {
