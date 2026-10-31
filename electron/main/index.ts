@@ -703,16 +703,25 @@ async function runSmoke() {
       + 'const set=Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype,"value").set;'
       + `set.call(s,"${v}");s.dispatchEvent(new Event("change",{bubbles:true}));return 1})()`
     )
-  log('click 复制引文', await clickCite())
-  await new Promise((r) => setTimeout(r, 800))
-  const cited = await w.webContents.executeJavaScript('window.api.readClipboard()')
+  // The clipboard write is an IPC round trip, and under load a fixed wait
+  // loses the race — the check then fails for a reason that has nothing to
+  // do with citations.  Empty it first, then wait for it to fill.
+  const copyCiteAndRead = async () => {
+    await w.webContents.executeJavaScript('window.api.copyText("")')
+    await clickCite()
+    for (let i = 0; i < 20; i++) {
+      const v = await w.webContents.executeJavaScript('window.api.readClipboard()')
+      if (String(v ?? '').length) return v
+      await new Promise((r) => setTimeout(r, 150))
+    }
+    return ''
+  }
+  const cited = await copyCiteAndRead()
   log('citation', JSON.stringify(cited))
   expect('copying a citation reaches the clipboard', /\(20\d\d\)|\(n\.d\.\)/.test(cited), cited)
   log('cite style -> numeric', await setStyle('numeric'))
   await new Promise((r) => setTimeout(r, 400))
-  await clickCite()
-  await new Promise((r) => setTimeout(r, 800))
-  const citedNumeric = await w.webContents.executeJavaScript('window.api.readClipboard()')
+  const citedNumeric = await copyCiteAndRead()
   log('citation numeric', JSON.stringify(citedNumeric))
   expect('the cite style changes what is copied', citedNumeric === '[1]', {
     cited,
@@ -816,40 +825,6 @@ async function runSmoke() {
     `window.api.copyText(${JSON.stringify(String(clipBefore ?? ''))})`
   )
 
-  // A paper with no file on disk used to be a single line saying so.  There
-  // is always something to do about it — download it, or bring your own —
-  // and which one applies depends on whether the cloud has a copy.
-  await w.webContents.executeJavaScript(
-    '(()=>{const r=[...document.querySelectorAll("div.row")]'
-    + '.filter(e=>e.querySelector(".pdf-dot.no-pdf"));'
-    + 'if(!r.length)return 0;r[0].click();return 1})()'
-  )
-  await new Promise((r) => setTimeout(r, 300))
-  await w.webContents.executeJavaScript(
-    '(()=>{const b=[...document.querySelectorAll(".pane-right .pane-head button")]'
-    + '.find(x=>x.textContent.trim()==="PDF");if(!b)return 0;b.click();return 1})()'
-  )
-  await new Promise((r) => setTimeout(r, 400))
-  const noPdfPane = JSON.parse(
-    await w.webContents.executeJavaScript(
-      'JSON.stringify({text:(document.querySelector(".pane-right .empty")||{}).textContent||null})'
-    )
-  )
-  log('paper with no pdf', noPdfPane)
-  expect(
-    'a paper with no file says how to get one',
-    /本地 PDF/.test(noPdfPane.text ?? '') && /下载|拖进窗口/.test(noPdfPane.text ?? ''),
-    noPdfPane
-  )
-  // put the selection back on a paper that has a file.  Everything after this
-  // measures the reader, and a reader with nothing to read throws.
-  await w.webContents.executeJavaScript(
-    '(()=>{const r=[...document.querySelectorAll("div.row")]'
-    + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
-    + 'if(!r.length)return 0;r[0].click();return 1})()'
-  )
-  await new Promise((r) => setTimeout(r, 500))
-
   // Keyboard navigation.  Two things have to hold: the arrows walk the list
   // when the table has the keyboard, and they do not hijack the search box,
   // where ↑↓ belong to the text being typed.
@@ -888,6 +863,20 @@ async function runSmoke() {
   await w.webContents.executeJavaScript(
     '(()=>{const i=document.querySelector(\'input[placeholder^="搜索"]\');if(i)i.blur();return 1})()'
   )
+
+  // Continuous scrolling is a remembered setting, not a per-document one, so
+  // it lives in the config.  A run interrupted part-way leaves it switched
+  // on, and the click further down then switches it off instead of on — every
+  // check after it measures a reader that is not in the mode it is testing,
+  // and fails for a reason that has nothing to do with the reader.  So it is
+  // cleared before the reader is measured, not only restored afterwards.
+  await w.webContents.executeJavaScript(
+    '(async()=>{await window.api.setConfig({pdfContinuous:false});'
+    + 'const b=[...document.querySelectorAll(".pdf-bar button")]'
+    + '.find(x=>x.textContent.trim().startsWith("连续"));'
+    + 'if(b&&document.querySelector(".pdf-cont"))b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 600))
 
   // zoom is the one thing a screenshot cannot prove: check that "fit width"
   // really fills the pane and that "fit page" then fits the height too
@@ -1279,6 +1268,35 @@ async function runSmoke() {
       + 'return JSON.stringify({keys:Object.keys(n).length})})()'
     )
   )
+  // A paper with no file on disk used to be a single line saying so.  There
+  // is always something to do about it — download it, or bring your own —
+  // and which one applies depends on whether the cloud has a copy.
+  //
+  // This runs after everything that measures the reader, because it has to
+  // select a paper that has no PDF in order to look at the empty pane.
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")]'
+    + '.filter(e=>e.querySelector(".pdf-dot.no-pdf"));'
+    + 'if(!r.length)return 0;r[0].click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".pane-right .pane-head button")]'
+    + '.find(x=>x.textContent.trim()==="PDF");if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  const noPdfPane = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({text:(document.querySelector(".pane-right .empty")||{}).textContent||null})'
+    )
+  )
+  log('paper with no pdf', noPdfPane)
+  expect(
+    'a paper with no file says how to get one',
+    /本地 PDF/.test(noPdfPane.text ?? '') && /下载|拖进窗口/.test(noPdfPane.text ?? ''),
+    noPdfPane
+  )
+
   // Full-text search, over the throwaway index the launcher keeps in
   // .ft-smoke/ so that neither the real index nor four minutes of PDF reading
   // are involved.  It runs last because it takes over the middle pane.
