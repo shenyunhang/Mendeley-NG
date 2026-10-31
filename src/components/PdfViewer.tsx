@@ -1485,13 +1485,36 @@ export default function PdfViewer({
     }
   }
 
+  /**
+   * No file on disk.  Which of the three ways out applies depends on whether
+   * Mendeley has a copy, and on whether the failure to fetch it was about
+   * the token — so the reason is looked at rather than printed.
+   */
   if (!doc.localPdf) {
+    const noToken = /NO_TOKEN/.test(msg ?? '')
     return (
       <div className="empty">
-        <div>这篇没有本地 PDF（云端标记：{doc.file_attached ? '有文件' : '无文件'}）</div>
-        {doc.file_attached && (
+        <p>这篇还没有本地 PDF。</p>
+        <p className="sub">
+          {doc.file_attached
+            ? 'Mendeley 云端有这篇的附件，可以直接下载。'
+            : 'Mendeley 云端没有这篇的附件——那就得自己找一份。把 PDF 拖进窗口，'
+              + '会按里面读到的 DOI / arXiv id 挂到这条上。'}
+        </p>
+        {doc.file_attached && !noToken && (
           <button style={{ marginTop: 10 }} onClick={download} disabled={busy}>
             {busy ? '下载中…' : '从云端下载 PDF'}
+          </button>
+        )}
+        {noToken && (
+          <button
+            style={{ marginTop: 10 }}
+            onClick={async () => {
+              const r = await window.api.importToken()
+              if (r?.ok) setMsg(null)
+            }}
+          >
+            导入 token 后再下载
           </button>
         )}
         {msg && <div className="pdf-msg">{msg}</div>}

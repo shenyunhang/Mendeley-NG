@@ -816,6 +816,40 @@ async function runSmoke() {
     `window.api.copyText(${JSON.stringify(String(clipBefore ?? ''))})`
   )
 
+  // A paper with no file on disk used to be a single line saying so.  There
+  // is always something to do about it — download it, or bring your own —
+  // and which one applies depends on whether the cloud has a copy.
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")]'
+    + '.filter(e=>e.querySelector(".pdf-dot.no-pdf"));'
+    + 'if(!r.length)return 0;r[0].click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".pane-right .pane-head button")]'
+    + '.find(x=>x.textContent.trim()==="PDF");if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  const noPdfPane = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({text:(document.querySelector(".pane-right .empty")||{}).textContent||null})'
+    )
+  )
+  log('paper with no pdf', noPdfPane)
+  expect(
+    'a paper with no file says how to get one',
+    /本地 PDF/.test(noPdfPane.text ?? '') && /下载|拖进窗口/.test(noPdfPane.text ?? ''),
+    noPdfPane
+  )
+  // put the selection back on a paper that has a file.  Everything after this
+  // measures the reader, and a reader with nothing to read throws.
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")]'
+    + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+    + 'if(!r.length)return 0;r[0].click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 500))
+
   // Keyboard navigation.  Two things have to hold: the arrows walk the list
   // when the table has the keyboard, and they do not hijack the search box,
   // where ↑↓ belong to the text being typed.
