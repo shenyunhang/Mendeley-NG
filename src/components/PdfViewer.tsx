@@ -852,6 +852,45 @@ export default function PdfViewer({
     el.scrollTo({ top })
   }
 
+  /**
+   * Turn to a page, in either mode.  In continuous mode the column has to be
+   * scrolled as well, or the page box and the view disagree about where the
+   * reader is.
+   */
+  const goPage = (n: number) => {
+    const want = Math.min(Math.max(1, n), numPages || 1)
+    setPage(want)
+    if (continuous) scrollToPage(want)
+  }
+
+  /**
+   * Paging from the keyboard.  The pane is focusable and claims these keys
+   * while it has focus, and it stops them there: the same keys move the
+   * table's selection, and one press moving both would be worse than either
+   * on its own.  Arrow keys are left to the browser in continuous mode,
+   * where what they do — scroll a little — is what is being asked for.
+   *
+   * The page box is an input and keeps its own keys, which is also why the
+   * target is checked rather than the pane being assumed to have focus.
+   */
+  const onPaneKey = (e: React.KeyboardEvent) => {
+    const t = e.target as HTMLElement | null
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+    let want: number | null = null
+    if (e.key === 'Home') want = 1
+    else if (e.key === 'End') want = numPages || 1
+    else if (e.key === 'PageDown' || e.key === ' ' || e.key === 'ArrowRight') {
+      want = pageRef.current + (e.key === ' ' && e.shiftKey ? -1 : 1)
+    } else if (e.key === 'PageUp') want = pageRef.current - 1
+    else if (!continuous && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      want = pageRef.current + (e.key === 'ArrowDown' ? 1 : -1)
+    }
+    if (want == null) return
+    e.preventDefault()
+    e.stopPropagation()
+    goPage(want)
+  }
+
   /** Keep the page box in step with whatever the user has scrolled to. */
   const onContScroll = () => {
     const el = contRef.current
@@ -1574,14 +1613,10 @@ export default function PdfViewer({
   if (err) return <div className="err">PDF 打开失败：{err}</div>
 
   return (
-    <div className="pdf-pane" ref={paneRef}>
+    <div className="pdf-pane" ref={paneRef} tabIndex={0} onKeyDown={onPaneKey}>
       <div className="pdf-bar">
         <button
-          onClick={() => {
-            const n = Math.max(1, page - 1)
-            setPage(n)
-            if (continuous) scrollToPage(n)
-          }}
+          onClick={() => goPage(page - 1)}
           disabled={page <= 1}
         >
           ←
@@ -1592,20 +1627,14 @@ export default function PdfViewer({
           onChange={(e) => {
             const n = parseInt(e.target.value, 10)
             if (!Number.isFinite(n)) return
-            const p = Math.min(Math.max(1, n), numPages || 1)
-            setPage(p)
-            if (continuous) scrollToPage(p)
+            goPage(n)
           }}
         />
         <span>
           / {numPages || '…'}
         </span>
         <button
-          onClick={() => {
-            const n = Math.min(numPages, page + 1)
-            setPage(n)
-            if (continuous) scrollToPage(n)
-          }}
+          onClick={() => goPage(page + 1)}
           disabled={page >= numPages}
         >
           →

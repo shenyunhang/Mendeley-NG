@@ -145,7 +145,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 文件夹 | 嵌套树：新建、重命名、删除、拖到别的文件夹改父级、拖回顶层 |
 | 归文件夹 | 把文献行拖到左侧文件夹即可加入；详情面板可勾选移出 |
 | 全文检索 | 「全文」模式下搜 PDF 正文，命中按篇分组、显示页码与上下文，点一条直接翻到那页 |
-| 读 PDF | pdf.js，按 `devicePixelRatio` 出后备缓冲，高 DPI 下不虚 |
+| 读 PDF | pdf.js，按 `devicePixelRatio` 出后备缓冲，高 DPI 下不虚；点进阅读区后 PageUp/PageDown/空格/←→/Home/End 翻页 |
 | 篇内查找 | Ctrl+F 或「查找」在当前 PDF 里找词，命中处标橙、显示 n/N，回车跳下一个 |
 | 复制引文 | 工具栏「复制引文」或 Ctrl+Shift+C，六种样式（作者（年份）/ 全作者 / 编号 / 完整条目 / BibTeX key / BibTeX 条目） |
 | 连续滚动 | 「连续」把所有页排成一列滚着读；单页模式下预取相邻页，翻页不等 |

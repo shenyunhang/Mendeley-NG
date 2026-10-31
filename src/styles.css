@@ -567,6 +567,16 @@ td .no-pdf {
   flex: 1;
   min-height: 0;
 }
+/* The pane is focusable so it can take the paging keys, and it says so only
+   when focus arrived from the keyboard: a frame that lights up on every click
+   in the page looks like the PDF is broken. */
+.pdf-pane:focus {
+  outline: none;
+}
+.pdf-pane:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
 .pdf-bar {
   display: flex;
   align-items: center;

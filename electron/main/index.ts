@@ -1455,6 +1455,95 @@ async function runSmoke() {
   )
   await shot('smoke-pdf')
 
+  // Turning pages from the keyboard.  What is proved is not only that the
+  // keys work, but that they belong to the reader while it has focus: the
+  // same keys walk the table's selection, and one press moving both the page
+  // and the selected paper would be worse than either alone.
+  const paneKey = (key: string, shift = false) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const p=document.querySelector(".pdf-pane");if(!p)return 0;`
+      + `p.dispatchEvent(new KeyboardEvent("keydown",{key:${JSON.stringify(key)},`
+      + `shiftKey:${shift},bubbles:true,cancelable:true}));return 1})()`
+    )
+  const pageNow = async () =>
+    Number(
+      await w.webContents.executeJavaScript(
+        '(()=>{const i=document.querySelector(".pdf-bar input");return i?i.value:null})()'
+      )
+    )
+  const selText = () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const r=document.querySelector("div.row.sel");'
+      + 'return r?r.innerText.replace(/\\n/g," ").slice(0,60):null})()'
+    )
+  // a paper in the middle of the list, so that a key the table also handles
+  // has somewhere to move to and staying put means something
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")]'
+    + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+    + 'if(!r.length)return 0;r[Math.min(r.length-1,Math.floor(r.length/2))].click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 5000))
+  const paneFocusable = await w.webContents.executeJavaScript(
+    '(()=>{const p=document.querySelector(".pdf-pane");return p?p.tabIndex:-1})()'
+  )
+  expect('the reader can hold focus for the keys', paneFocusable === 0, paneFocusable)
+  const numPages = Number(
+    await w.webContents.executeJavaScript(
+      '(()=>{const s=(document.querySelector(".pdf-bar span")||{}).textContent||"";'
+      + 'const m=s.match(/(\\d+)/);return m?m[1]:0})()'
+    )
+  )
+  log('pages in the open paper', numPages)
+  expect('the paper has more than one page to turn', numPages >= 2, numPages)
+  const selBefore = await selText()
+  // start from page one: a paper that is reopened opens where it was left,
+  // and a run that starts on the last page has nowhere to turn to
+  await paneKey('Home')
+  await new Promise((r) => setTimeout(r, 800))
+  const at0 = await pageNow()
+  await paneKey('PageDown')
+  await new Promise((r) => setTimeout(r, 600))
+  const at1 = await pageNow()
+  log('PageDown', { at0, at1 })
+  expect('PageDown turns a page', at1 === at0 + 1, { at0, at1 })
+  await paneKey(' ')
+  await new Promise((r) => setTimeout(r, 600))
+  const at2 = await pageNow()
+  log('space', { at1, at2 })
+  expect('space turns a page', at2 === at1 + 1, { at1, at2 })
+  await paneKey('PageUp')
+  await new Promise((r) => setTimeout(r, 600))
+  const at3 = await pageNow()
+  log('PageUp', { at2, at3 })
+  expect('PageUp goes back', at3 === at2 - 1, { at2, at3 })
+  await paneKey('End')
+  await new Promise((r) => setTimeout(r, 800))
+  const atEnd = await pageNow()
+  log('End', atEnd)
+  expect('End goes to the last page', atEnd === numPages, { atEnd, numPages })
+  await paneKey('Home')
+  await new Promise((r) => setTimeout(r, 800))
+  const atHome = await pageNow()
+  const selAfter = await selText()
+  log('Home', { atHome, selBefore, selAfter })
+  expect('Home goes to the first page', atHome === 1, atHome)
+  // the table must not also have walked: Home and End are its own keys for
+  // jumping to the first and last paper
+  expect('a key the reader claims does not move the table too', selAfter === selBefore, {
+    selBefore,
+    selAfter
+  })
+  // back to the top of the list and to a paper that was already open: what
+  // follows looks at the rows near the top, and a run that leaves the table
+  // scrolled into the middle quietly changes which rows those are
+  await w.webContents.executeJavaScript(
+    '(()=>{const s=document.querySelector(".table-wrap");if(s)s.scrollTop=0;'
+    + 'const r=[...document.querySelectorAll("div.row")]'
+    + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));if(r.length)r[0].click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 1500))
+
   // Reading position.  A library this size is never read in one sitting, so
   // reopening a paper has to land where it was left rather than on page one.
   // Checked by leaving a paper on page 3, opening another, and coming back.
@@ -1576,7 +1665,10 @@ async function runSmoke() {
     + 'r[0].dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,'
     + 'clientX:Math.round(b.left+40),clientY:Math.round(b.top+8)}));return 1})()'
   )
-  await new Promise((r) => setTimeout(r, 400))
+  // asked for rather than waited out: the reader is a PDF being painted in the
+  // background, and a fixed sleep that is enough on an idle machine is not
+  // enough while one is being decoded
+  await waitFor('(()=>document.querySelectorAll(".row-menu-item").length?"yes":"no")()', 4000)
   const noPdf = await w.webContents.executeJavaScript(
     '(()=>{const b=[...document.querySelectorAll(".row-menu-item")];'
     + 'return JSON.stringify({n:b.length,reveal:(b.find(x=>x.textContent.trim()==="在文件夹中显示")||{}).disabled})})()'
@@ -1607,16 +1699,36 @@ async function runSmoke() {
   // clipboard and nothing else, so a smoke run can prove the wiring without
   // editing the library.  The clipboard is emptied first, so a value left over
   // from earlier in the run cannot make the check pass on its own.
+  // The menu is opened again rather than reused: it closes on any click
+  // outside it, and which menu is still standing at this point has been
+  // watched to depend on how busy the renderer is with the PDF it is
+  // painting.  Waited for, because the same load decides how long it takes.
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")]'
+    + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+    + 'if(!r.length)return 0;const b=r[0].getBoundingClientRect();'
+    + 'r[0].dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,'
+    + 'clientX:Math.round(b.left+40),clientY:Math.round(b.top+8)}));return 1})()'
+  )
+  await waitFor(
+    '(()=>[...document.querySelectorAll(".row-menu-item")]'
+    + '.some(x=>x.textContent.trim()==="复制标题")?"yes":"no")()',
+    4000
+  )
   await w.webContents.executeJavaScript('window.api.copyText("")')
   await w.webContents.executeJavaScript(
     '(()=>{const b=[...document.querySelectorAll(".row-menu-item")]'
     + '.find(x=>x.textContent.trim()==="复制标题");if(!b)return 0;b.click();return 1})()'
   )
-  // 900 rather than 600: the write goes through an IPC round trip and under
-  // load the read wins the race, which fails this check for a reason that has
-  // nothing to do with the menu
-  await new Promise((r) => setTimeout(r, 900))
-  const titleCopied = await w.webContents.executeJavaScript('window.api.readClipboard()')
+  // The write goes through an IPC round trip, and under load a fixed sleep
+  // — 600, then 900 — has been watched losing the race, which fails this
+  // check for a reason that has nothing to do with the menu.  Asked until it
+  // answers instead.
+  let titleCopied = ''
+  for (let i = 0; i < 25 && !titleCopied; i++) {
+    await new Promise((r) => setTimeout(r, 200))
+    titleCopied = await w.webContents.executeJavaScript('window.api.readClipboard()')
+  }
   log('copied title', JSON.stringify(titleCopied))
   expect(
     'a row menu item runs',
