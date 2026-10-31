@@ -78,7 +78,9 @@ export interface Api {
     size?: number
     error?: string
   }>
-  checkUpdate: () => Promise<{
+  /** `quiet` suppresses the "no update" and error notices, for the check the
+   *  app makes on its own at startup. */
+  checkUpdate: (quiet?: boolean) => Promise<{
     version?: string | null
     available?: boolean
     unsupported?: boolean
