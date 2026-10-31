@@ -136,11 +136,19 @@ export default function FullTextView({
         </div>
       ) : !status?.indexed && !building ? (
         <div className="empty">
-          <p>还没有索引。</p>
+          {/* An update that changes how the index is stored loses the old one,
+              and "还没有索引" is not what happened.  Saying so is the
+              difference between a reader who rebuilds and one who thinks the
+              six minutes they spent were thrown away. */}
+          <p>{status?.legacy ? '索引要重建一次。' : '还没有索引。'}</p>
           <p className="sub">
-            建索引会读一遍本地 PDF 的正文，大约每篇 90 毫秒，几千篇要几分钟——中途
-            可以停，下次会接着读。只取每篇的前 {status?.pages ?? 3} 页：标题、作者、
-            摘要和引言开头，也就是要找的词通常在的地方。
+            {status?.legacy
+              ? '这次更新换了索引的存法：偏移量现在带一个字节锚点，建索引中途退出后下次才能接着建，'
+                + '而不用从头再来。旧索引读不了，重建一遍就好。'
+              : '建索引会读一遍本地 PDF 的正文，大约每篇 90 毫秒，几千篇要几分钟——中途'
+                + '可以停，下次会接着读。'}
+            {' '}只取每篇的前 {status?.pages ?? 3} 页：标题、作者、摘要和引言开头，
+            也就是要找的词通常在的地方。
           </p>
           {status?.total ? (
             <button style={{ marginTop: 10 }} onClick={() => onBuild(false)}>

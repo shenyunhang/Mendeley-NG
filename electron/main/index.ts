@@ -1300,6 +1300,16 @@ async function runSmoke() {
   // Full-text search, over the throwaway index the launcher keeps in
   // .ft-smoke/ so that neither the real index nor four minutes of PDF reading
   // are involved.  It runs last because it takes over the middle pane.
+  //
+  // The index on disk starts out written by an older version of the app, on
+  // purpose: an update that changes how the index is stored cannot read it,
+  // and "还没有索引" is not what happened — the reader already paid for that
+  // build.  Written before anything asks for a status, because the entry
+  // table is read once and kept.
+  fs.writeFileSync(
+    path.join(process.env.MENDELEY_FT_DIR || dataDir(), 'fulltext.json'),
+    JSON.stringify({ version: 1, pages: 3, entries: {} })
+  )
   log(
     'click 全文',
     await w.webContents.executeJavaScript(
@@ -1313,6 +1323,38 @@ async function runSmoke() {
   )
   log('ft status', ftStat0)
   expect('full text starts unindexed', ftStat0.indexed === 0 && ftStat0.total > 0, ftStat0)
+  expect(
+    'an index from an older version is not silently dropped',
+    ftStat0.legacy === true,
+    ftStat0
+  )
+  const ftLegacy = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({text:(document.querySelector(".pane-mid .empty")||{}).textContent||null})'
+    )
+  )
+  log('ft with an index from an older version', ftLegacy)
+  expect(
+    'the panel says the build has to be done again',
+    /重建/.test(ftLegacy.text ?? ''),
+    ftLegacy
+  )
+  // Cleared so the rest of the run starts from an index that really is empty.
+  // The panel reads the status out of React state, so leaving the pane and
+  // coming back is what makes it ask for a fresh one — clearing it in the
+  // main process alone leaves the old words on screen.
+  await w.webContents.executeJavaScript('(async()=>await window.api.ftClear())()')
+  await new Promise((r) => setTimeout(r, 200))
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
+    + '.find(x=>x.textContent.trim()==="返回列表");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+    + '.find(x=>x.textContent.trim()==="全文");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 600))
   // "0 / 5648" and a button called 建索引 in the header is a riddle: the
   // panel has to say that reading every paper is what stands between the
   // search and any results, and how long that takes.

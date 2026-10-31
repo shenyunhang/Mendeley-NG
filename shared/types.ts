@@ -189,6 +189,12 @@ export interface FtStatus {
    * something the reader can act on.
    */
   skipped?: { name: string; why: string }[]
+  /**
+   * True when an index exists on disk but was written by a different version
+   * of the app and cannot be read.  Without it an update looks like it threw
+   * away a build the reader already paid for.
+   */
+  legacy?: boolean
 }
 
 /** One place where the query appears in one document. */

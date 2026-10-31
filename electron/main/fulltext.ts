@@ -173,8 +173,20 @@ export function initFullText(baseDir: string) {
 const metaFile = () => path.join(dir, 'fulltext.json')
 const dataFile = () => path.join(dir, 'fulltext.dat')
 
+/**
+ * An index was found on disk but thrown away because a different version of
+ * the app wrote it.
+ *
+ * Worth saying out loud rather than leaving the panel on "还没有索引":
+ * from the outside an upgrade that quietly voids a six-minute build looks
+ * like the build was lost, and the reader has no way to tell that from
+ * never having done it.
+ */
+let legacy = false
+
 function loadMeta(): Meta {
   if (meta) return meta
+  legacy = false
   try {
     const m = JSON.parse(fs.readFileSync(metaFile(), 'utf8')) as Meta
     // an index built with a different page budget does not describe the same
@@ -185,6 +197,10 @@ function loadMeta(): Meta {
       meta = m
       return meta
     }
+    // A page budget that changed is the reader's own doing and the panel
+    // already says why; an index written by an older version is not, and is
+    // the one that needs explaining.
+    if (m?.version) legacy = true
   } catch {
     /* no index yet */
   }
@@ -248,7 +264,8 @@ export function ftStatus(docs: Doc[]): FtStatus {
     pages: pages,
     bytes,
     current: progress.current,
-    skipped: skipped.slice()
+    skipped: skipped.slice(),
+    legacy
   }
 }
 
@@ -373,6 +390,9 @@ export async function ftBuild(
   building = true
   cancelled = false
   skipped = []
+  // whatever was on disk is being replaced from here on, so the note about
+  // it being out of date has served its turn
+  legacy = false
   const m = loadMeta()
   if (rebuild) {
     meta = { version: 2, pages: pages, bytes: 0, entries: {} }
@@ -593,6 +613,7 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
 export function ftClear() {
   meta = { version: 2, pages: pages, bytes: 0, entries: {} }
   skipped = []
+  legacy = false
   blob = null
   try {
     fs.writeFileSync(dataFile(), '')
