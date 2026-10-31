@@ -59,6 +59,7 @@ npm run typecheck   # main/preload 与 renderer 双侧检查
 npm run dist        # 打包 NSIS 安装包
 npm run smoke       # 端到端自检，出两张截图
 npm run smoke -- --no-sync   # 用本地缓存，跳过同步
+npm run demo        # 造一份虚构的库，截取 README 里的四张图
 ```
 
 **首次使用需要 token**，没有内置 client credential，每人都要注册自己的应用。
@@ -74,12 +75,18 @@ npm run smoke -- --no-sync   # 用本地缓存，跳过同步
 electron/main/mendeley.ts   Mendeley REST 客户端（UA、content-type、401 重试都在这）
 electron/main/store.ts      本地缓存：文献 / 文件夹 / 标注 / 配置
 electron/main/pdfindex.ts   把 "作者 - 年份 - 标题.pdf" 匹配回云端条目
-electron/main/index.ts      主进程、IPC、mendeley:// 协议、--smoke 自检
+electron/main/index.ts      主进程、IPC、mendeley:// 协议、--smoke 自检、--demo 截图
 electron/preload/index.ts   contextBridge，只暴露白名单方法
 src/                        renderer
 shared/types.ts             main / preload / renderer 三端共享类型
-scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs、hooks/
+scripts/                    start.mjs 启动器、demo.mjs 假库与截图、get-token.mjs、check-api.mjs、hooks/
+docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
 ```
+
+`--demo` 与 `--smoke` 同源但方向相反：自检要真实数据才测得准，**截图要假数据才敢公开**。
+`scripts/demo.mjs` 造 18 篇虚构文献（含它自己拼出来的 PDF）、写进 `.demo/`，
+再用 `--user-data-dir=.demo` 启动，所以缓存、配置、全文索引全关在 `.demo/` 里；
+主进程此时 `library:sync` 直接返回本地缓存、`hasToken` 恒为真，**既不联网也不碰真实库**。
 
 几个约定：
 
@@ -714,6 +721,10 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
   新 clone 后需 `cp scripts/hooks/post-commit .git/hooks/post-commit && chmod +x ...`。
   临时不推用 `GIT_AUTO_PUSH=0 git commit ...`。
 - 提交前务必确认没有 `token.json` / `.env` / 硬编码个人路径入库。已在 `.gitignore` 中拦截。
+- **README 的截图必须来自虚构的库，不许对着真实库拍照**。真实库里有在读什么、
+  笔记原文和磁盘路径，贴进公开仓库就是泄露。`npm run demo` 生成的四张图
+  （`docs/screenshots/`）是唯一允许进仓库的截图来源；`smoke.png` / `smoke-pdf.png`
+  是自检产物，已被 `.gitignore` 拦住，也不要手动加进去。
 
 ## 12. 数据与凭据放哪
 

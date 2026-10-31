@@ -10,6 +10,34 @@ Mendeley 云端库。
 改注册表强制 `DPIUNAWARE` 又会换来整窗模糊。Chromium 则是按系统 scale factor
 缩放 CSS 像素的，天然就是清晰的，不需要任何 DPI 补丁。
 
+## 界面
+
+下面四张图都截自一份**虚构的库**：标题、作者、DOI、甚至 PDF 本身，都是
+`scripts/demo.mjs` 生成出来的，不是任何人的真实文献——截图不该把谁在读什么
+贴到公共仓库里。它也不会读到你自己的库：整个演示跑在 `.demo/` 这个独立的
+`--user-data-dir` 里，同步被拒掉，索引也建在那里。
+
+想重新生成就跑 `npm run demo`（会覆盖 `docs/screenshots/` 下的四张图）。
+
+**文献列表与详情**——左边文件夹树、中间虚拟滚动的列表、右边元数据面板：
+作者、发表处、citation key、DOI、标签、只存本地的笔记，以及文件夹勾选。
+
+![文献列表与详情面板](docs/screenshots/01-library-dark.png)
+
+**读 PDF**——pdf.js 按 `devicePixelRatio` 出后备缓冲，高 DPI 下不虚；
+高亮落在正文上，目录与标注分别在侧栏。
+
+![PDF 阅读与标注](docs/screenshots/02-reader-dark.png)
+
+**全文检索**——搜的是 PDF 正文而不是书目字段。命中按篇分组，带页码和上下文，
+点一条直接翻到那一页。
+
+![全文检索](docs/screenshots/03-fulltext-dark.png)
+
+**浅色主题**——同一份库，工具栏 ☾ / ☀ 切换，原生滚动条与表单也跟着变。
+
+![浅色主题](docs/screenshots/04-library-light.png)
+
 ## 安装与运行
 
 不想自己构建的话，直接下 [Releases](https://github.com/shenyunhang/Mendeley-NG/releases)
@@ -268,6 +296,15 @@ canvas 的后备尺寸与 CSS 尺寸（后者应该是前者的 `1/dpr`），这
 
 它还会造一次合成选区，验证文本层能选出文字并算出正确的矩形，然后把
 `annotations.json` **按文件快照**恢复回去——自检不能动真实数据。
+
+```bash
+npm run demo   # 造一份虚构的库，截取 README 里的四张图
+```
+
+`--demo` 与自检同源，但方向相反：自检要真实数据才测得准，截图要假数据才敢公开。
+它用 `--user-data-dir=.demo` 把缓存、配置和全文索引都关在 `.demo/` 里，
+`library:sync` 直接返回本地缓存、不联网，索引是当场建的（十八份两页的 PDF，
+几秒钟）。
 
 ## 踩过的坑
 

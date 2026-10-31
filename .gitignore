@@ -19,3 +19,6 @@ Thumbs.db
 
 # throwaway full-text index used by the smoke run
 .ft-smoke/
+
+# invented library and screenshots-in-progress for `npm run demo`
+.demo/

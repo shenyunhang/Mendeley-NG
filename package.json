@@ -10,6 +10,7 @@
     "dev": "electron-vite dev",
     "start": "node scripts/start.mjs",
     "smoke": "node scripts/start.mjs --smoke",
+    "demo": "node scripts/demo.mjs",
     "build": "electron-vite build && node scripts/copy-worker.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "dist": "electron-vite build && electron-builder --win --x64",
