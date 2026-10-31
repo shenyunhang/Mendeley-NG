@@ -143,6 +143,84 @@ textarea:focus {
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
+  /* one row, always.  A bar that wraps pushes the library down a row every
+     time the window narrows a little, and the table underneath is the thing
+     being read */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+/* Nothing on the bar is allowed to be squeezed.  A button narrow enough to
+   fit wraps its own label onto two lines — "检查" over "更新" — which reads
+   worse than a wide button and is harder to hit.  The bar scrolls instead,
+   and the commands that are not needed every time live under a menu.
+   Every child, not just the buttons: a button inside a wrapper is squeezed by
+   the wrapper being squeezed, which the rule for buttons alone misses. */
+.toolbar > * {
+  flex: 0 0 auto;
+}
+.toolbar > .grow {
+  flex: 1 1 auto;
+}
+/* the status line is the one thing that may give: it is prose of unpredictable
+   length and it truncates with an ellipsis rather than pushing the row */
+.toolbar > .status {
+  flex: 0 1 auto;
+}
+/* and the search box is the other: its width was an arbitrary number, and a
+   box that narrows to 170px is still a search box.  Giving way here is what
+   keeps the buttons at the far end — font size, theme — reachable without
+   scrolling the bar. */
+.toolbar > .search {
+  flex: 1 1 260px;
+  min-width: 170px;
+  max-width: 340px;
+}
+.toolbar button,
+.toolbar select {
+  white-space: nowrap;
+}
+.menu-btn {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.menu-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  min-width: 132px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  gap: 2px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  padding: 5px 10px;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.menu-item:hover:not(:disabled) {
+  background: var(--accent-dim);
+}
+.menu-item:disabled {
+  color: var(--fg-dim);
+  cursor: default;
+}
+.menu-item.danger {
+  color: var(--danger-fg);
 }
 .toolbar .grow {
   flex: 1;

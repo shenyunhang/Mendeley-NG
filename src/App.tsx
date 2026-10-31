@@ -22,6 +22,7 @@ import ConfirmDialog from './components/ConfirmDialog'
 import DocTable from './components/DocTable'
 import ColumnPicker from './components/ColumnPicker'
 import FilterMenu from './components/FilterMenu'
+import MenuButton from './components/MenuButton'
 import FullTextView from './components/FullTextView'
 import {
   DEFAULT_SORT,
@@ -1603,15 +1604,16 @@ export default function App() {
         >
           全量
         </button>
-        <button onClick={exportBib} disabled={!filtered.length}>
-          导出 BibTeX
-        </button>
-        <button onClick={exportRis} disabled={!filtered.length}>
-          导出 RIS
-        </button>
-        <button onClick={exportEndnote} disabled={!filtered.length}>
-          导出 EndNote
-        </button>
+        <MenuButton
+          label="导出"
+          title="把当前筛选结果写成 BibTeX / RIS / EndNote XML"
+          disabled={!filtered.length}
+          items={[
+            { label: 'BibTeX', run: exportBib },
+            { label: 'RIS', run: exportRis },
+            { label: 'EndNote XML', run: exportEndnote }
+          ]}
+        />
         <span className="cite-box">
           <button
             onClick={() => copyCitation(target)}
@@ -1637,35 +1639,8 @@ export default function App() {
             ))}
           </select>
         </span>
-        <button
-          onClick={async () => {
-            const r = await window.api.importToken()
-            if (r?.ok) await doSync()
-            else if (r) setErr('导入 token 失败：' + (r.error ?? '未选择文件'))
-          }}
-          title="选择 get-token 生成的 token.json"
-        >
-          导入 token
-        </button>
-        <button
-          className={upd?.phase === 'available' ? 'primary' : ''}
-          disabled={!!upd && ['checking', 'downloading', 'downloaded'].includes(upd.phase)}
-          onClick={async () => {
-            // one click does the whole thing: check, download, install, relaunch.
-            // download only makes sense when there is actually a newer version;
-            // calling it anyway is what produced "Please check update first"
-            const r = await window.api.checkUpdate()
-            if (r?.unsupported || r?.error || !r?.available) return
-            await window.api.downloadUpdate()
-          }}
-          title="从 GitHub Releases 拉取最新版本并自动安装重启"
-        >
-          {upd?.phase === 'downloading'
-            ? `下载中 ${upd.percent ?? 0}%`
-            : upd?.phase === 'available'
-              ? `更新到 ${upd.version}`
-              : '检查更新'}
-        </button>
+
+
         <button
           onClick={async () => {
             const files = await window.api.openRefFiles()
@@ -1683,38 +1658,61 @@ export default function App() {
         >
           按标识符添加
         </button>
-        <button
-          onClick={() => setDupes(findDuplicates(docs))}
-          disabled={!docs.length}
-          title="按 DOI / arXiv id / 标题找重复条目"
-        >
-          查重
-        </button>
-        <button
-          onClick={() => void openNotes()}
-          title="列出全部标注，跨所有文献，点一条直接翻到那一页"
-        >
-          全部标注
-        </button>
         <button onClick={() => setSettings(true)} title="主题、字号、PDF 目录、命名模板、全文索引">
           设置
         </button>
-        <button
-          onClick={async () => {
-            const list = await window.api.listTrash()
-            setTrash(list)
-          }}
-          title="浏览回收站并恢复"
-        >
-          回收站
-        </button>
-        <button
-          onClick={saveSearch}
-          disabled={!query.trim() && !folderId && !filters.length}
-          title="把当前的文件夹 + 搜索词 + 星标筛选存成一个虚拟文件夹"
-        >
-          保存搜索
-        </button>
+        <MenuButton
+          label="更多"
+          primary={upd?.phase === 'available'}
+          title="不常用的命令：导入 token、检查更新、查重、全部标注、回收站、保存搜索"
+          items={[
+            {
+              label: '导入 token',
+              title: '选择 get-token 生成的 token.json',
+              run: () => {
+                void window.api.importToken().then((r) => {
+                  if (r?.ok) return doSync()
+                  if (r) setErr('导入 token 失败：' + (r.error ?? '未选择文件'))
+                })
+              }
+            },
+            {
+              label: upd?.phase === 'available' ? `更新到 ${upd.version}` : '检查更新',
+              disabled: !!upd && ['checking', 'downloading', 'downloaded'].includes(upd.phase),
+              title: '从 GitHub Releases 拉取最新版本并自动安装重启',
+              run: () => {
+                void window.api.checkUpdate().then((r) => {
+                  if (r?.unsupported || r?.error || !r?.available) return
+                  void window.api.downloadUpdate()
+                })
+              }
+            },
+            {
+              label: '查重',
+              disabled: !docs.length,
+              title: '按 DOI / arXiv id / 标题找重复条目',
+              run: () => setDupes(findDuplicates(docs))
+            },
+            {
+              label: '全部标注',
+              title: '列出全部标注，跨所有文献，点一条直接翻到那一页',
+              run: () => void openNotes()
+            },
+            {
+              label: '回收站',
+              title: '浏览回收站并恢复',
+              run: () => {
+                void window.api.listTrash().then(setTrash)
+              }
+            },
+            {
+              label: '保存搜索',
+              disabled: !query.trim() && !folderId && !filters.length,
+              title: '把当前的文件夹 + 搜索词 + 筛选存成一个虚拟文件夹',
+              run: saveSearch
+            }
+          ]}
+        />
         <button
           onClick={doUndo}
           disabled={!undo.length}
@@ -1724,7 +1722,7 @@ export default function App() {
               : '没有可撤销的操作'
           }
         >
-          撤销{undo.length ? `（${undo[undo.length - 1].label}）` : ''}
+          撤销
         </button>
         <div style={{ position: 'relative', display: 'inline-flex' }}>
           <button
@@ -1765,8 +1763,8 @@ export default function App() {
           )}
         </div>
         <input
+          className="search"
           ref={searchRef}
-          style={{ width: 320 }}
           placeholder={
             ftMode
               ? '搜索 PDF 正文（只索引每篇前几页）  (Ctrl+F)'
@@ -2208,9 +2206,15 @@ export default function App() {
               <button className="danger" onClick={batchTrash}>
                 移入回收站
               </button>
-              <button onClick={exportBib}>导出 BibTeX</button>
-              <button onClick={exportRis}>导出 RIS</button>
-              <button onClick={exportEndnote}>导出 EndNote</button>
+              <MenuButton
+                label="导出"
+                title="把选中的这些写成 BibTeX / RIS / EndNote XML"
+                items={[
+                  { label: 'BibTeX', run: exportBib },
+                  { label: 'RIS', run: exportRis },
+                  { label: 'EndNote XML', run: exportEndnote }
+                ]}
+              />
               <button onClick={() => copyCitation(docs.filter((d) => multi.includes(d.id)))}>
                 复制引文
               </button>

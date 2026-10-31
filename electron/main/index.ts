@@ -405,6 +405,21 @@ async function runSmoke() {
     log(ok ? 'PASS' : 'FAIL', name, detail)
     if (!ok) fails.push(`${name}: ${String(detail)}`)
   }
+  // Commands that are not needed every time live under a menu on the bar now,
+  // so reaching one is two clicks.  The menu closes when the pointer leaves,
+  // which a dispatched click never does, so nothing here has to close it.
+  const openMenu = (label: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const b=[...document.querySelectorAll(".toolbar button")]`
+      + `.find(x=>x.textContent.trim().startsWith(${JSON.stringify(label)}));`
+      + `if(!b)return 0;b.click();return 1})()`
+    )
+  const clickMenu = (item: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const b=[...document.querySelectorAll(".menu-pop .menu-item")]`
+      + `.find(x=>x.textContent.trim()===${JSON.stringify(item)});`
+      + `if(!b||b.disabled)return 0;b.click();return 1})()`
+    )
   w.webContents.on('console-message', (_e, _l, msg) => { if (/error|Error/.test(msg)) errs.push(msg) })
   w.webContents.on('did-fail-load', (_e, code, desc) => errs.push('did-fail-load ' + code + ' ' + desc))
   win = w
@@ -433,6 +448,55 @@ async function runSmoke() {
   )
   log('renderer', info)
   if (errs.length) log('renderer errors', errs.slice(0, 10).join(' | '))
+
+  // The bar is one row and every label on it is on one line.  A button
+  // squeezed narrow enough wraps its own text — "检查" over "更新" — which
+  // is harder to read at a glance than a wide button, and it is what made the
+  // bar look broken.  Both halves are measured rather than eyeballed: how many
+  // rows the buttons sit on, and how many line boxes each label occupies.
+  const barInfo = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const bar=document.querySelector(".toolbar");'
+      + 'const bs=[...bar.querySelectorAll("button")].filter(b=>b.offsetParent!==null);'
+      // compared by centre, not top: the bar centres its children, so buttons
+      // of different heights sit at different tops on the same row
+      + 'const rows=new Set(bs.map(b=>{const r=b.getBoundingClientRect();'
+      + 'return Math.round(r.top+r.height/2)}));'
+      + 'const two=[];'
+      + 'for(const b of bs){const r=document.createRange();r.selectNodeContents(b);'
+      // a label is two text nodes once it carries an arrow, and each node is
+      // its own rectangle on the same line: what counts is how many lines
+      + 'const lines=new Set([...r.getClientRects()].map(x=>Math.round(x.top)));'
+      + 'if(lines.size>1)two.push(b.textContent.trim())}'
+      + 'const wide=[...bar.children].map(c=>({t:(c.textContent||"").trim().slice(0,10),'
+      + 'w:Math.round(c.getBoundingClientRect().width)}));'
+      + 'return JSON.stringify({n:bs.length,rows:rows.size,two,wide,'
+      + 'overflow:bar.scrollWidth-bar.clientWidth})})()'
+    )
+  )
+  log('toolbar', barInfo)
+  expect('the bar is one row of buttons', barInfo.rows === 1, barInfo)
+  expect('no button wraps its own label', barInfo.two.length === 0, barInfo.two)
+  // fitting matters as much as not wrapping: a bar that has to be scrolled to
+  // reach the font size or the theme hides the two things at its far end
+  expect('the bar fits without being scrolled', barInfo.overflow <= 0, barInfo.overflow)
+  // and what was removed to make room is still reachable
+  await openMenu('更多')
+  await new Promise((r) => setTimeout(r, 300))
+  const moreItems = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify([...document.querySelectorAll(".menu-pop .menu-item")]'
+      + '.map(x=>x.textContent.trim()))'
+    )
+  )
+  log('under 更多', moreItems)
+  expect(
+    'the commands that left the bar are still there',
+    ['导入 token', '查重', '全部标注', '回收站', '保存搜索'].every((x) =>
+      moreItems.includes(x)
+    ),
+    moreItems
+  )
 
   // The filters answer the four questions the table can already show but
   // could not isolate: what have I not read, what have I no file for, what is
@@ -537,14 +601,9 @@ async function runSmoke() {
     + 'i.dispatchEvent(new Event("input",{bubbles:true}));return "ok"})()'
   )
   await new Promise((r) => setTimeout(r, 500))
-  log(
-    'click 保存搜索',
-    await w.webContents.executeJavaScript(
-      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
-      + '.find(x=>x.textContent.trim()==="保存搜索");if(!b)return "missing";'
-      + 'if(b.disabled)return "disabled";b.click();return "ok"})()'
-    )
-  )
+  await openMenu('更多')
+  await new Promise((r) => setTimeout(r, 300))
+  log('click 保存搜索', await clickMenu('保存搜索'))
   await new Promise((r) => setTimeout(r, 300))
   log(
     'ask dialog',
@@ -1442,13 +1501,12 @@ async function runSmoke() {
     askLog.push({ defaultPath: o?.defaultPath, ext: o?.filters?.[0]?.extensions?.[0] })
     return cancelNext ? { canceled: true, filePath: '' } : { canceled: false, filePath: savedTo }
   }
-  const clickExport = (label: string) =>
-    w.webContents.executeJavaScript(
-      `(()=>{const b=[...document.querySelectorAll('button')]`
-      + `.find(x=>x.textContent.trim()===${JSON.stringify(label)});if(!b||b.disabled)return 0;`
-      + `b.click();return 1})()`
-    )
-  expect('an export button is reachable', (await clickExport('导出 BibTeX')) === 1, 'button')
+  const clickExport = async () => {
+    await openMenu('导出')
+    await new Promise((r) => setTimeout(r, 300))
+    return clickMenu('BibTeX')
+  }
+  expect('an export button is reachable', (await clickExport()) === 1, 'button')
   // the round trip is two processes long; wait for the file rather than
   // guessing how long the dialog and the write take
   let wrote = ''
@@ -1470,7 +1528,7 @@ async function runSmoke() {
     loadConfig().exportDir
   )
   cancelNext = true
-  await clickExport('导出 BibTeX')
+  await clickExport()
   await new Promise((r) => setTimeout(r, 900))
   const afterCancel = JSON.parse(
     await w.webContents.executeJavaScript(
@@ -2171,13 +2229,9 @@ async function runSmoke() {
   // The cross-document annotation list.  It runs here, after a highlight has
   // been made, so there is something to list; and it only reads, because
   // deleting one of the user's real annotations is not a smoke run's business.
-  log(
-    'click 全部标注',
-    await w.webContents.executeJavaScript(
-      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
-      + '.find(x=>x.textContent.trim()==="全部标注");if(!b)return "missing";b.click();return "ok"})()'
-    )
-  )
+  await openMenu('更多')
+  await new Promise((r) => setTimeout(r, 300))
+  log('click 全部标注', await clickMenu('全部标注'))
   await new Promise((r) => setTimeout(r, 700))
   const notesInfo = async () =>
     JSON.parse(
