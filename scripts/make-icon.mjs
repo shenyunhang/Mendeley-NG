@@ -23,42 +23,39 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 /* ---------------------------------------------------------------- the mark */
 
 /**
- * A page with a folded corner on a tile.
+ * One strip of paper, folded twice, into an N.
  *
- * The tile runs the app's own accent, #5aa8ff to #0b62d6, so the icon and
- * the UI agree about what colour this program is.  The page is what the
- * program is about, and it is deliberately the only other shape: at 16 px a
- * mark with more than one idea in it turns to mud.
+ * The mark is the program's initial and the program's subject at the same
+ * time: the strip is continuous, so the N is not a letter laid on top of a
+ * document, it is a document that happens to be folded that way.  You read
+ * the letter first and the paper second, which is the whole point of it.
+ *
+ * Nothing else shares the tile.  At 16 px a mark carrying two ideas turns
+ * to mud, and a page, a fold and three lines of text — which is what was
+ * here before — is four.
+ *
+ * The one exception is the strip's own underside: the same strip shifted
+ * down and right and washed dark, which is there to give the paper
+ * thickness, not to say anything of its own.
+ *
+ * The tile runs from the light-theme accent to the dark-theme accent, so
+ * the icon and the UI agree about what colour this program is.
  */
-const TILE = { from: [0x5a, 0xa8, 0xff], to: [0x0b, 0x62, 0xd6], r: 112 }
-const PAGE = '#f6fafe'
-const FOLD = '#b7d1f3'
-const TITLE = '#0b62d6'
-const BODY = '#9dc2f4'
+const TILE = { from: [0x4a, 0x9e, 0xff], to: [0x0b, 0x62, 0xd6], r: 112 }
+const SHEET = '#f5faff'
+/** The middle leg, turned away from the light, a shade off the two uprights. */
+const TURNED = '#d9e8fb'
+const UNDER = { dx: 16, dy: 20, ink: [0x04, 0x26, 0x59], mix: 0.5 }
 
-/** [x0, y0, x1, y1, cornerRadius] in the 512 viewBox. */
-const LINES = [
-  [156, 236, 300, 262, 13, TITLE],
-  [156, 292, 352, 312, 10, BODY],
-  [156, 340, 326, 360, 10, BODY]
+/** Centreline of the strip: up the left, down the diagonal, up the right. */
+const FOLD = [
+  [168, 384],
+  [168, 128],
+  [344, 384],
+  [344, 128]
 ]
-
-/** The page, with the top-right corner folded down. */
-const PAGE_PATH = [
-  [138, 104],
-  [296, 104],
-  [392, 200],
-  [392, 390],
-  [374, 408],
-  [138, 408],
-  [120, 390],
-  [120, 122]
-]
-const FOLD_PATH = [
-  [296, 104],
-  [392, 200],
-  [296, 200]
-]
+/** Half the width of the strip. */
+const HALF = 36
 
 /* -------------------------------------------------------------- rasterising */
 
@@ -67,6 +64,49 @@ const hex = (h) => [
   parseInt(h.slice(3, 5), 16),
   parseInt(h.slice(5, 7), 16)
 ]
+
+const toHex = (c) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('')
+
+const shift = (pts, dx, dy) => pts.map(([x, y]) => [x + dx, y + dy])
+
+const unit = ([x, y]) => {
+  const l = Math.hypot(x, y)
+  return [x / l, y / l]
+}
+
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1]]
+
+/**
+ * Where a strip creases when it is folded at `at`: the crease runs across the
+ * strip along d_out - d_in, and `n` is the normal pointing at the leg after
+ * the fold.  Take a square corner as the check — a strip travelling up that
+ * leaves travelling right creases along the diagonal, which is what a ribbon
+ * bent round a corner actually does.
+ */
+const crease = (before, at, after) => {
+  const din = unit(sub(at, before))
+  const dout = unit(sub(after, at))
+  const along = unit([dout[0] - din[0], dout[1] - din[1]])
+  return { n: [along[1], -along[0]], at }
+}
+
+/** Keep the half of `poly` that a crease leaves on the far side of. */
+const clipHalf = (poly, { n, at }) => {
+  const side = (p) => (p[0] - at[0]) * n[0] + (p[1] - at[1]) * n[1]
+  const out = []
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]
+    const b = poly[(i + 1) % poly.length]
+    const da = side(a)
+    const db = side(b)
+    if (da >= 0) out.push(a)
+    if (da >= 0 !== db >= 0) {
+      const t = da / (da - db)
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t])
+    }
+  }
+  return out
+}
 
 const inRoundRect = (x, y, x0, y0, x1, y1, r) => {
   if (x < x0 || x > x1 || y < y0 || y > y1) return false
@@ -88,11 +128,64 @@ const inPolygon = (pts, x, y) => {
 }
 
 /**
+ * Distance from a point to a segment, and so: is the point within h of the
+ * polyline.  That is exactly what an SVG stroke of width 2h with round caps
+ * and round joins covers, which is why the vector and the rasters agree
+ * without either of them knowing about the other's idea of a stroke.
+ */
+const distToSegment = (x, y, ax, ay, bx, by) => {
+  const dx = bx - ax
+  const dy = by - ay
+  const l2 = dx * dx + dy * dy
+  let t = l2 === 0 ? 0 : ((x - ax) * dx + (y - ay) * dy) / l2
+  t = t < 0 ? 0 : t > 1 ? 1 : t
+  const qx = ax + t * dx - x
+  const qy = ay + t * dy - y
+  return Math.sqrt(qx * qx + qy * qy)
+}
+
+const inStroke = (pts, x, y, h) => {
+  for (let i = 1; i < pts.length; i++) {
+    if (distToSegment(x, y, pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]) <= h) return true
+  }
+  return false
+}
+
+/**
  * Four samples per pixel each way, then an exact area average down.  For an
  * integer factor that is the correct filter, not an approximation of one, so
  * the small sizes come out clean without a resampling library.
  */
 const SS = 4
+
+const FOLD_UNDER = shift(FOLD, UNDER.dx, UNDER.dy)
+
+/**
+ * The middle leg on its own.  Stroked as a pill it reaches exactly to the two
+ * creases and no further — a pill of the same width is a subset of the strip
+ * it was cut from — so recolouring it shades the turned part of the paper
+ * without touching the two uprights.
+ */
+const FOLD_MIDDLE = [FOLD[1], FOLD[2]]
+
+/**
+ * The two creases as a polygon: the whole canvas cut down to the wedge between
+ * them, which is the part of the strip that lies past both folds.  The
+ * rasters test against it and the SVG clips to it, so the shade stops on a
+ * straight line across the strip rather than on the round cap's curve.
+ */
+const TURN = clipHalf(
+  clipHalf(
+    [
+      [-64, -64],
+      [576, -64],
+      [576, 576],
+      [-64, 576]
+    ],
+    crease(FOLD[0], FOLD[1], FOLD[2])
+  ),
+  crease(FOLD[1], FOLD[2], FOLD[3])
+)
 
 function raster(n) {
   const r = n * SS
@@ -110,11 +203,16 @@ function raster(n) {
         tile.from[1] + (tile.to[1] - tile.from[1]) * t,
         tile.from[2] + (tile.to[2] - tile.from[2]) * t
       ]
-      if (inPolygon(PAGE_PATH, x, y)) c = hex(PAGE)
-      if (inPolygon(FOLD_PATH, x, y)) c = hex(FOLD)
-      for (const [x0, y0, x1, y1, rr, col] of LINES) {
-        if (inRoundRect(x, y, x0, y0, x1, y1, rr)) c = hex(col)
+      if (inStroke(FOLD_UNDER, x, y, HALF)) {
+        const m = UNDER.mix
+        c = [
+          c[0] * (1 - m) + UNDER.ink[0] * m,
+          c[1] * (1 - m) + UNDER.ink[1] * m,
+          c[2] * (1 - m) + UNDER.ink[2] * m
+        ]
       }
+      if (inStroke(FOLD, x, y, HALF)) c = hex(SHEET)
+      if (inStroke(FOLD_MIDDLE, x, y, HALF) && inPolygon(TURN, x, y)) c = hex(TURNED)
       big[o] = c[0]
       big[o + 1] = c[1]
       big[o + 2] = c[2]
@@ -224,21 +322,29 @@ const buildIco = (entries) => {
 
 /* ------------------------------------------------------------------- output */
 
+const pathD = (pts) => pts.map(([x, y], i) => (i ? 'L' : 'M') + x + ' ' + y).join('')
+
+/** Round caps and round joins, so the path covers what inStroke() covers. */
+const stroke = (pts, col, opacity) =>
+  `<path d="${pathD(pts)}" fill="none" stroke="${col}"` +
+  (opacity === undefined ? '' : ` stroke-opacity="${opacity}"`) +
+  ` stroke-width="${HALF * 2}" stroke-linecap="round" stroke-linejoin="round" />`
+
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Mendeley NG">
   <!-- generated by scripts/make-icon.mjs; edit the shapes there, not here -->
   <defs>
     <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5aa8ff" />
-      <stop offset="1" stop-color="#0b62d6" />
+      <stop offset="0" stop-color="${toHex(TILE.from)}" />
+      <stop offset="1" stop-color="${toHex(TILE.to)}" />
     </linearGradient>
   </defs>
+  <clipPath id="turn">
+    <polygon points="${TURN.map(([x, y]) => x.toFixed(2) + ',' + y.toFixed(2)).join(' ')}" />
+  </clipPath>
   <rect width="512" height="512" rx="${TILE.r}" fill="url(#tile)" />
-  <path d="M138 104H296L392 200V390Q392 408 374 408H138Q120 408 120 390V122Q120 104 138 104Z" fill="${PAGE}" />
-  <path d="M296 104L392 200H296Z" fill="${FOLD}" />
-${LINES.map(
-  ([x0, y0, x1, y1, r, col]) =>
-    `  <rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" rx="${r}" fill="${col}" />`
-).join('\n')}
+  ${stroke(FOLD_UNDER, toHex(UNDER.ink), UNDER.mix)}
+  ${stroke(FOLD, SHEET)}
+  <g clip-path="url(#turn)">${stroke(FOLD_MIDDLE, TURNED)}</g>
 </svg>
 `
 
