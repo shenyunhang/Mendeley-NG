@@ -40,6 +40,9 @@ let send: (s: UpdateState) => void = () => {}
  * process instead of trusting the renderer to call things in the right order.
  */
 let updateAvailable = false
+/** Whether the check in flight is one the app started rather than the reader.
+ *  The events fire outside the invoke, so they need to know whose they are. */
+let quietRun = false
 
 function installHandlers() {
   autoUpdater.autoDownload = false
@@ -54,7 +57,10 @@ function installHandlers() {
 
   autoUpdater.on('update-not-available', () => {
     updateAvailable = false
-    send({ phase: 'not-available' })
+    // "已是最新版本" is a fine answer to a press of the button and noise when
+    // nobody asked
+    if (quietRun) send({ phase: 'idle' })
+    else send({ phase: 'not-available' })
   })
 
   autoUpdater.on('download-progress', (p: ProgressInfo) => {
@@ -66,6 +72,10 @@ function installHandlers() {
   })
 
   autoUpdater.on('error', (e: Error) => {
+    if (quietRun) {
+      send({ phase: 'idle' })
+      return
+    }
     send({ phase: 'error', message: e?.message ?? String(e) })
   })
 }
@@ -74,21 +84,43 @@ export function initUpdater(emit: (s: UpdateState) => void) {
   send = emit
   installHandlers()
 
-  ipcMain.handle('updater:check', async () => {
+  /**
+   * `quiet` is the check the app makes on its own at startup rather than the
+   * one the reader asked for.
+   *
+   * Nothing looked for an update unless the button was pressed, so a build sat
+   * at whatever version it was installed at while the releases page filled up
+   * behind it: four releases went out unread, and a reader met the old
+   * behaviour and reported it as a bug.  A check nobody asked for also has no
+   * business failing out loud — starting up offline should not leave
+   * "更新失败" sitting in the toolbar all session.
+   */
+  ipcMain.handle('updater:check', async (_e, quiet?: boolean) => {
+    const idle = () => send({ phase: 'idle' as const })
     if (!app.isPackaged) {
+      if (quiet) {
+        idle()
+        return { unsupported: true }
+      }
       send({ phase: 'unsupported', message: '开发模式不支持更新（需打包安装后的版本）' })
       return { unsupported: true }
     }
     try {
       updateAvailable = false
+      quietRun = !!quiet
       const r = await autoUpdater.checkForUpdates()
+      const available = r?.isUpdateAvailable ?? false
+      if (quiet && !available) idle()
       return {
         version: r?.updateInfo?.version ?? null,
-        available: r?.isUpdateAvailable ?? false
+        available
       }
     } catch (e) {
-      send({ phase: 'error', message: String(e) })
+      if (quiet) idle()
+      else send({ phase: 'error', message: String(e) })
       return { error: String(e) }
+    } finally {
+      quietRun = false
     }
   })
 

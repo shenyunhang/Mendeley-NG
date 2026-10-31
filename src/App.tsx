@@ -258,6 +258,25 @@ export default function App() {
     return () => clearTimeout(t)
   }, [upd?.phase])
 
+  // Look for an update without being asked.  Nothing did this before, so the
+  // app stayed at whatever version it was installed at while releases piled
+  // up behind it: four of them went out unread, and a reader running a two
+  // week old build met behaviour that had already been changed and reported
+  // it as a bug.  Only the check is automatic — downloading and restarting
+  // still wait for the press, because a relaunch nobody asked for is worse
+  // than a version behind.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      window.api
+        .checkUpdate(true)
+        .then((r) => {
+          if (!r?.available) setUpd(null)
+        })
+        .catch(() => setUpd(null))
+    }, 4000)
+    return () => clearTimeout(t)
+  }, [])
+
   const fontRef = useRef(15)
   const bumpFont = useCallback((d: number) => {
     const next = Math.min(24, Math.max(11, fontRef.current + d))
@@ -1331,6 +1350,7 @@ export default function App() {
           导入 token
         </button>
         <button
+          className={upd?.phase === 'available' ? 'primary' : ''}
           disabled={!!upd && ['checking', 'downloading', 'downloaded'].includes(upd.phase)}
           onClick={async () => {
             // one click does the whole thing: check, download, install, relaunch.
@@ -1342,8 +1362,11 @@ export default function App() {
           }}
           title="从 GitHub Releases 拉取最新版本并自动安装重启"
         >
-
-          {upd?.phase === 'downloading' ? `下载中 ${upd.percent ?? 0}%` : '检查更新'}
+          {upd?.phase === 'downloading'
+            ? `下载中 ${upd.percent ?? 0}%`
+            : upd?.phase === 'available'
+              ? `更新到 ${upd.version}`
+              : '检查更新'}
         </button>
         <button
           onClick={async () => {

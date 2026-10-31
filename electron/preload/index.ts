@@ -110,8 +110,10 @@ const api = {
       error?: string
     }>,
 
-  checkUpdate: () =>
-    ipcRenderer.invoke('updater:check') as Promise<{
+  /** `quiet` suppresses the answers nobody asked for: a check the app makes
+   *  on its own at startup says nothing unless there is something to say. */
+  checkUpdate: (quiet?: boolean) =>
+    ipcRenderer.invoke('updater:check', quiet) as Promise<{
       version?: string | null
       available?: boolean
       unsupported?: boolean
