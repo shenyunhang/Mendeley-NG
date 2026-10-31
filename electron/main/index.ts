@@ -519,6 +519,132 @@ async function runSmoke() {
   await clickAll()
   await wait(400)
 
+  // Column widths.  The drag is tracked on the window, which only starts
+  // listening after the press has been rendered, so a press, a move and a
+  // release are three separate steps with a wait between each.  A column that
+  // already has a saved width is left alone, so the run can put the one it
+  // used back exactly as it found it.
+  const head0 = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({cells:document.querySelectorAll(".col-head [data-col]").length,'
+      + 'grips:document.querySelectorAll(".col-head .col-grip").length})'
+    )
+  )
+  log('column header', head0)
+  expect(
+    'every column header has a width handle',
+    head0.cells > 3 && head0.grips === head0.cells,
+    head0
+  )
+  const widthCfg0 = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>{const c=await window.api.getConfig();'
+      + 'return JSON.stringify(c.colWidths||{})})()'
+    )
+  )
+  const colKey: string = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const ks=[...document.querySelectorAll(".col-head [data-col]")]'
+      + '.map(e=>e.getAttribute("data-col"));'
+      + 'const want=["title","authors","source"].filter(k=>ks.includes(k));'
+      + 'const free=ks.filter(k=>k!=="star"&&k!=="pdf"&&!' + JSON.stringify(Object.keys(widthCfg0))
+      + '.includes(k));'
+      + 'return JSON.stringify(want.find(k=>free.includes(k))||free[0]||ks[ks.length-1])})()'
+    )
+  )
+  log('column to drag', { colKey, widthCfg0 })
+  const cellInfo = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(()=>{const c=[...document.querySelectorAll(".col-head [data-col]")]'
+        + '.find(e=>e.getAttribute("data-col")===' + JSON.stringify(colKey) + ');'
+        + 'const wrap=document.querySelector(".table-wrap");'
+        + 'return JSON.stringify({w:c?Math.round(c.getBoundingClientRect().width):null,'
+        + 'scrollable:wrap?wrap.scrollWidth>wrap.clientWidth+1:false})})()'
+      )
+    )
+  const pressCol = async (dx: number) => {
+    const started = await w.webContents.executeJavaScript(
+      '(()=>{const c=[...document.querySelectorAll(".col-head [data-col]")]'
+      + '.find(e=>e.getAttribute("data-col")===' + JSON.stringify(colKey) + ');'
+      + 'const g=c&&c.querySelector(".col-grip");if(!g)return 0;'
+      + 'const r=g.getBoundingClientRect();'
+      + 'window.__cd={x:r.x+3,y:r.y+r.height/2};'
+      + 'g.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,button:0,'
+      + 'clientX:window.__cd.x,clientY:window.__cd.y}));return 1})()'
+    )
+    if (!started) return 0
+    await wait(200)
+    await w.webContents.executeJavaScript(
+      'window.dispatchEvent(new MouseEvent("mousemove",{bubbles:true,'
+      + 'clientX:window.__cd.x+' + dx + ',clientY:window.__cd.y}))'
+    )
+    await wait(200)
+    await w.webContents.executeJavaScript(
+      'window.dispatchEvent(new MouseEvent("mouseup",{bubbles:true}))'
+    )
+    await wait(200)
+    return 1
+  }
+  const colW0 = await cellInfo()
+  await pressCol(200)
+  const colW1 = await cellInfo()
+  log('column dragged', { colKey, colW0, colW1 })
+  expect('dragging a column header widens the column', colW1.w > colW0.w + 100, { colW0, colW1 })
+  // remembered after a wait, not during: a drag is a hundred frames and none
+  // of them is worth a write
+  await wait(700)
+  const widthCfg1 = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>{const c=await window.api.getConfig();'
+      + 'return JSON.stringify(c.colWidths||{})})()'
+    )
+  )
+  log('colWidths after', widthCfg1)
+  expect('the width is remembered once the drag stops', typeof widthCfg1[colKey] === 'number', widthCfg1)
+
+  // Widening past the pane is what makes the table scroll sideways, and the
+  // header is a second scroll box: if it does not follow, the labels and the
+  // values are no longer above each other.
+  await pressCol(900)
+  const wideCell = await cellInfo()
+  const headSync = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const wrap=document.querySelector(".table-wrap");'
+      + 'const head=document.querySelector(".col-head");'
+      + 'wrap.scrollLeft=60;wrap.dispatchEvent(new Event("scroll",{bubbles:true}));'
+      + 'return JSON.stringify({set:wrap.scrollLeft,head:head.scrollLeft,'
+      + 'scrollable:wrap.scrollWidth>wrap.clientWidth+1})})()'
+    )
+  )
+  log('header follows the rows', { wideCell, headSync })
+  expect('a column can be dragged wider than the pane', wideCell.scrollable === true, wideCell)
+  expect(
+    'the header follows the rows when the table is wider than the pane',
+    headSync.set === 60 && headSync.head === 60,
+    headSync
+  )
+
+  // back as it was found: the handle gives the column back to its default
+  // track, and the run leaves no width of its own behind
+  await w.webContents.executeJavaScript(
+    '(()=>{const c=[...document.querySelectorAll(".col-head [data-col]")]'
+    + '.find(e=>e.getAttribute("data-col")===' + JSON.stringify(colKey) + ');'
+    + 'const g=c&&c.querySelector(".col-grip");if(!g)return 0;'
+    + 'g.dispatchEvent(new MouseEvent("dblclick",{bubbles:true}));'
+    + 'const wrap=document.querySelector(".table-wrap");if(wrap)wrap.scrollLeft=0;'
+    + 'return 1})()'
+  )
+  await wait(700)
+  const widthCfg2 = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>{const c=await window.api.getConfig();'
+      + 'return JSON.stringify(c.colWidths||{})})()'
+    )
+  )
+  log('colWidths restored', widthCfg2)
+  expect('double clicking the handle hands the column back', widthCfg2[colKey] === undefined, widthCfg2)
+
   // The first-run guide is for an empty library on a machine with no token.
   // Somebody with a cached library and an expired token is not a first run,
   // and putting the guide in front of them would be worse than whatever the

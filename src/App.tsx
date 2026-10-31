@@ -178,6 +178,9 @@ export default function App() {
   const [fontSize, setFontSize] = useState(15)
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const [cols, setCols] = useState<ColKey[]>(() => normaliseCols(undefined))
+  // widths the reader has dragged to; empty until something is dragged, so a
+  // column that was never touched keeps the track its definition gives it
+  const [colWidths, setColWidths] = useState<Record<string, number>>({})
   const [views, setViews] = useState<SavedView[]>([])
   const [showCols, setShowCols] = useState(false)
   const [nameTemplate, setNameTemplate] = useState(DEFAULT_PDF_TEMPLATE)
@@ -238,6 +241,7 @@ export default function App() {
       setSaved(c.savedSearches ?? [])
       setViews(c.views ?? [])
       setCols(normaliseCols(c.cols))
+      if (c.colWidths) setColWidths(c.colWidths)
       if (c.pdfNameTemplate) setNameTemplate(c.pdfNameTemplate)
       if (isCiteStyle(c.citeStyle)) setCiteStyle(c.citeStyle)
       if (typeof c.ftPages === 'number' && c.ftPages > 0) setFtPages(c.ftPages)
@@ -590,6 +594,46 @@ export default function App() {
     setCols(next)
     window.api.setConfig({ cols: next })
   }
+
+  /**
+   * One column's width, or null to hand it back to its default track.
+   *
+   * Only the state is touched: the drag calls this once per frame and a frame
+   * is not a unit of anything worth writing down.
+   */
+  const setColWidth = useCallback((key: ColKey, w: number | null) => {
+    setColWidths((prev) => {
+      if (w == null) {
+        if (prev[key] == null) return prev
+        const next = { ...prev }
+        delete next[key]
+        return next
+      }
+      if (prev[key] === w) return prev
+      return { ...prev, [key]: w }
+    })
+  }, [])
+
+  /**
+   * Written once the dragging has stopped.
+   *
+   * Not from the drag's own mouse-up, which still holds the width from before
+   * the last move, and not on every frame, which would be a hundred writes to
+   * a file nobody asked to touch.  The pane widths are remembered the same way
+   * for the same two reasons.
+   */
+  const widthsTouched = useRef(false)
+  useEffect(() => {
+    // the first run is the mount, not a change
+    if (!widthsTouched.current) {
+      widthsTouched.current = true
+      return
+    }
+    const t = setTimeout(() => {
+      void window.api.setConfig({ colWidths })
+    }, 400)
+    return () => clearTimeout(t)
+  }, [colWidths])
 
   const saveView = () => {
     setAsk({
@@ -2044,6 +2088,8 @@ export default function App() {
             docs={filtered}
             fontSize={fontSize}
             cols={cols}
+            colWidths={colWidths}
+            onColWidth={setColWidth}
             sort={sort}
             onSort={(k) =>
               setSort((s) =>

@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Doc } from '../../shared/types'
 import {
   COL_BY_KEY,
+  clampColWidth,
   gridTemplate,
   type ColKey,
+  type ColumnDef,
   type SortKey
 } from '../lib/columns'
+import { useDragX } from '../lib/useDragX'
 
 interface Props {
   docs: Doc[]
@@ -27,6 +30,14 @@ interface Props {
   fontSize: number
   /** which columns to show, in order */
   cols: ColKey[]
+  /** Widths the reader has dragged to, in CSS px, keyed by column.  Only the
+   *  columns that were dragged are in here; the rest keep the track their
+   *  definition gives them. */
+  colWidths?: Record<string, number>
+  /** A width for one column, or null to hand it back to its default track.
+   *  Called as the drag goes, so there is one source of truth; the caller is
+   *  the one that decides when that is worth writing down. */
+  onColWidth?: (key: ColKey, width: number | null) => void
   /**
    * What to show when there is nothing to list.  Passed in rather than
    * decided here because the table only knows that `docs` is empty, not
@@ -47,9 +58,12 @@ export default function DocTable({
   multi,
   fontSize,
   cols,
+  colWidths,
+  onColWidth,
   empty
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
+  const headRef = useRef<HTMLDivElement>(null)
 
   // --row-h is expressed in rem, so ask the layout engine for the real height
   // instead of hard-coding 30 and drifting out of sync when the user rescales
@@ -93,18 +107,50 @@ export default function DocTable({
         .filter((c): c is NonNullable<typeof c> => Boolean(c)),
     [cols]
   )
-  const COLS = useMemo(() => gridTemplate(cols), [cols])
+  const COLS = useMemo(() => gridTemplate(cols, colWidths), [cols, colWidths])
+
+  // What a width drag starts from.  A column's default is a fraction, not a
+  // number of pixels, so the width has to be measured off the header rather
+  // than read out of the definition — otherwise the first move jumps.
+  const dragFrom = useRef<{ key: ColKey; x0: number; w0: number } | null>(null)
+  const [dragKey, setDragKey] = useState<ColKey | null>(null)
+  const { on: dragging, start } = useDragX((x) => {
+    const d = dragFrom.current
+    if (!d) return
+    const def = COL_BY_KEY.get(d.key)
+    if (def) onColWidth?.(d.key, clampColWidth(def, d.w0 + (x - d.x0)))
+  })
+  useEffect(() => {
+    if (!dragging) setDragKey(null)
+  }, [dragging])
+
+  const startColDrag = (e: React.MouseEvent, c: ColumnDef) => {
+    const cell = (e.currentTarget as HTMLElement).parentElement
+    dragFrom.current = {
+      key: c.key,
+      x0: e.clientX,
+      w0: cell?.getBoundingClientRect().width ?? 100
+    }
+    setDragKey(c.key)
+    start(e)
+  }
 
   return (
     <>
       <div
         className="col-head"
+        ref={headRef}
         style={{
           display: 'grid',
           gridTemplateColumns: COLS,
           background: 'var(--bg-2)',
           borderBottom: '1px solid var(--border)',
-          flex: '0 0 auto'
+          flex: '0 0 auto',
+          // the header and the rows are two scroll boxes; the one below drives
+          // this one, so a row dragged wider than the pane cannot leave the
+          // two out of step.  hidden rather than auto, because a scrollbar of
+          // its own is a second thing to aim at under a seven-pixel handle
+          overflow: 'hidden'
         }}
       >
         {defs.map((c) => (
@@ -113,25 +159,54 @@ export default function DocTable({
             data-col={c.key}
             onClick={() => c.sort && onSort(c.sort)}
             style={{
+              position: 'relative',
+              display: 'flex',
+              alignItems: 'center',
               padding: '6px 8px',
               fontSize: '0.8rem',
               fontWeight: 600,
               color: sort.key === c.sort ? 'var(--accent)' : 'var(--fg-dim)',
               cursor: c.sort ? 'pointer' : 'default',
               userSelect: 'none',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap'
+              overflow: 'hidden'
             }}
             title={c.sort ? `按${c.label || '此列'}排序` : undefined}
           >
-            {c.label}
-            {c.sort && sort.key === c.sort ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
+            <span
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {c.label}
+              {c.sort && sort.key === c.sort ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
+            </span>
+            <span
+              className={'col-grip' + (dragKey === c.key ? ' on' : '')}
+              title={`拖动改变「${c.label || '此列'}」的宽度，双击复位`}
+              onMouseDown={(e) => startColDrag(e, c)}
+              // a press on the handle is not a request to sort
+              onClick={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                onColWidth?.(c.key, null)
+              }}
+            />
           </div>
         ))}
       </div>
 
-      <div className="table-wrap" ref={parentRef}>
+      <div
+        className="table-wrap"
+        ref={parentRef}
+        onScroll={(e) => {
+          const h = headRef.current
+          if (h) h.scrollLeft = e.currentTarget.scrollLeft
+        }}
+      >
         {!docs.length ? (
           (empty ?? <div className="empty">没有匹配的文献</div>)
         ) : (

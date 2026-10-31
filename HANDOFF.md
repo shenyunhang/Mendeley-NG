@@ -651,6 +651,37 @@ scripts/                    start.mjs 启动器、get-token.mjs、check-api.mjs�
 - **84 移出和加入都要能撤销**：`pushUndo` 里把反向操作推回去，
   移出的撤销是重新加入，加入的撤销是移出。
 
+### 9.2j 第十一轮：列宽可以拖（2026-10-31「中间面板里支持拖动列的宽度」之后）
+
+| 编号 | 缺陷 | 后果 | 修法 |
+| --- | --- | --- | --- |
+| 85 | **列宽写死在 `COLUMNS[].track`** | 作者/标题/发表处只有 `fr` 比例，想看清一条长标题只能全屏；`year` 固定 56px，四位数也挤 | 列头右缘加拖动把手，宽度按列存进 config，双击该列复位 |
+| 86 | **列头与表体是两个滚动容器** | 平时看不出来；列宽一旦可拖，把某列拖宽就会出现横向滚动条，而列头不跟着滚——表头与内容从此错位 | 表体 `onScroll` 时把 `scrollLeft` 同步给列头，列头 `overflow: hidden` |
+| 87 | **拖动过程中写盘** | 一次拖动上百帧，等于上百次写 config 文件 | 拖动只改 React state，停手 400ms 后才落盘，与窗格宽度同一套路 |
+
+实现要点（这一轮要防的）：
+
+- **85 拖动必须在 `window` 上听 `mousemove`**：把手只有 7px 宽，鼠标一快就冲出去，
+  在把手上听会在冲出去那一刻断掉。这一条和窗格分隔条是同一个坑，所以抽成了
+  `src/lib/useDragX.ts`，两处共用，**不要各写一份**。
+- **85 每帧合并成一次：一帧内可能来好几个 pointer 事件，每个都触发一次重排**。
+- **85 起始宽度要量，不能从 `track` 里算**：默认是 `1.5fr`，拖动时按
+  `getBoundingClientRect().width` 取当前实际像素再加减，否则第一下就跳。
+- **85 存进去的值要 clamp**：`star`/`pdf` 两列本来就只有 24/26px，通用下限 48px
+  会把它们撑坏，所以下限按列给（`ColumnDef.min`）。
+- **86 至少留一列 `fr`**：全部拖成 px 之后总宽可能小于面板，会在右边留一条空白；
+  `gridTemplate` 在没有 `fr` 时补一条兜底。反过来总宽超了就横向滚——列头必须跟着滚。
+- **87 落盘要在 `useEffect` 里等 state 定下来**：在 `mouseup` 里写会写到一个
+  还没更新的闭包值上，等于白拖（窗格宽度那次就踩过，HANDOFF 9.2 编号 58）。
+
+顺带发现：**`npx tsc --noEmit` 什么都没检查**。根 `tsconfig.json` 是
+`"files": []` + `references`，跑它等于跑空。真正的入口是 **`npm run typecheck`**
+（`tsc -p tsconfig.node.json && tsc -p tsconfig.web.json`），它一跑就报出四个
+一直存在的错误：冒烟里 `sync`/`cfg0`/`cfg1` 与后文同名（TDZ），以及
+`src/global.d.ts` 里 `checkUpdate` 还写着零参——v0.1.20 给 preload 加了
+`quiet` 参数，渲染进程那侧的类型没跟着改。**改完代码一律 `npm run typecheck`，
+不要 `npx tsc --noEmit`。**
+
 ### 9.3 差距可以接受，先不做
 
 - **下划线 / 墨水 / 文本标注**：云端 `/annotations` 只认 `highlight` 与 `sticky_note`，

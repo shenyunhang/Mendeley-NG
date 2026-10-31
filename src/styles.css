@@ -379,6 +379,33 @@ body.resizing * {
 body.resizing {
   user-select: none;
 }
+/* The width handle on a column header.  Seven pixels for the same reason the
+   splitter is seven pixels: a one-pixel target is not a target.  The visible
+   line is drawn inset, so an untouched header still reads as a header. */
+.col-grip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+.col-grip::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  right: 3px;
+  width: 1px;
+  background: var(--border);
+}
+.col-grip:hover::before,
+.col-grip.on::before {
+  right: 1px;
+  width: 5px;
+  background: var(--accent);
+}
 .pane-head {
   padding: 6px 10px;
   font-size: 0.8rem;

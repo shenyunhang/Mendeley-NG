@@ -145,6 +145,10 @@ export interface AppConfig {
   pdfContinuous?: boolean
   /** Which columns the document table shows, in order. */
   cols?: string[]
+  /** Widths the reader has dragged the columns to, in CSS px, keyed by column.
+   *  Only the columns that were dragged appear; the rest keep the width their
+   *  definition gives them, which is what lets one column take the slack. */
+  colWidths?: Record<string, number>
   /** How to name downloaded PDFs.  Placeholders: title, year, authors,
    *  journal, key, type, doi. */
   pdfNameTemplate?: string
