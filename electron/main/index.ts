@@ -3105,6 +3105,59 @@ async function runSmoke() {
     importedCalls[0]
   )
 
+  // Clicking the icon twice used to start two copies: two windows on the same
+  // library, each with its own annotations and reading position in memory and
+  // writing them back over each other.  What is checked here is the decision
+  // to take the lock, that a second launch is wired to something, and what
+  // that something does — to a minimised window and to the one already open.
+  log('single instance', {
+    plain: wantsSingleInstance([]),
+    smoke: wantsSingleInstance(['--smoke']),
+    demo: wantsSingleInstance(['--demo']),
+    listeners: app.listenerCount('second-instance')
+  })
+  // the packaged app and nothing else: a run that locks itself out of the
+  // second copy is a run that cannot be told apart from the first
+  expect('a normal launch asks to be the only one', wantsSingleInstance([]) === true, 'plain')
+  expect(
+    'a smoke run does not fight the app that is open',
+    wantsSingleInstance(['--smoke']) === false,
+    'smoke'
+  )
+  expect('nor does a screenshot run', wantsSingleInstance(['--demo']) === false, 'demo')
+  expect(
+    'a second launch is wired to something',
+    app.listenerCount('second-instance') >= 1,
+    app.listenerCount('second-instance')
+  )
+  // what it does to a window that is minimised: this is the whole point of
+  // the feature — the click that produced no visible change is the click that
+  // made the reader think the app had not started
+  const w3 = new BrowserWindow({ width: 320, height: 200, show: false })
+  w3.show()
+  await new Promise((r) => setTimeout(r, 300))
+  w3.minimize()
+  await new Promise((r) => setTimeout(r, 500))
+  const wasMin = w3.isMinimized()
+  // the event Electron fires in the copy that is already running; emitted
+  // here rather than by starting a second process, which a run that is
+  // already holding the library open cannot do to itself
+  app.emit('second-instance', null, [])
+  bringUp(w3)
+  await new Promise((r) => setTimeout(r, 500))
+  const nowMin = w3.isMinimized()
+  const focused = w3.isFocused()
+  w3.close()
+  log('minimised window brought back', { wasMin, nowMin, focused })
+  expect('a second launch un-minimises the window', wasMin === true && nowMin === false, {
+    wasMin,
+    nowMin
+  })
+  // and brings it forward, which is what the reader was asking for by
+  // clicking the icon again.  Checked on a window that is really on screen:
+  // the window this whole run looks through is deliberately not.
+  expect('a second launch brings the window forward', focused === true, focused)
+
   if (fails.length) {
     log('FAILED CHECKS', fails.join(' | '))
     app.exit(1)
@@ -3114,7 +3167,43 @@ async function runSmoke() {
   app.exit(0)
 }
 
+/**
+ * One window, however many times the icon is clicked.
+ *
+ * Without this a second click starts a second copy: two windows on the same
+ * library, each keeping its own annotations and reading position in memory
+ * and writing them back over each other, and no way for the reader to tell
+ * which one they are looking at.  What the second copy should do is not open
+ * a window at all but hand the click to the copy already running.
+ *
+ * `--smoke` and `--demo` do not take the lock.  Both are development aids
+ * that get run while the real app is open, and being answered with "already
+ * running" would make them impossible to run at all.
+ */
+const wantsSingleInstance = (argv: string[]) =>
+  !argv.includes('--smoke') && !argv.includes('--demo')
+
+/** What a second launch does to the window that is already there: bring it
+ *  back.  Only minimised needs handling — there is no tray to hide to, so a
+ *  window that is not on screen is one that was minimised. */
+function bringUp(w: BrowserWindow) {
+  if (w.isMinimized()) w.restore()
+  w.focus()
+}
+
+const alone = !wantsSingleInstance(process.argv) || app.requestSingleInstanceLock()
+if (!alone) {
+  // quit before anything else happens: a second copy that flashes a window
+  // and then disappears is worse than one that never appears
+  app.quit()
+}
+
+app.on('second-instance', () => {
+  if (win) bringUp(win)
+})
+
 app.whenReady().then(() => {
+  if (!alone) return
   // serve local PDFs through our own scheme so webSecurity stays on
   protocol.handle('mendeley', (req) => {
     const u = new URL(req.url)
@@ -3144,7 +3233,10 @@ app.whenReady().then(() => {
 
   createWindow()
   app.on('activate', () => {
+    // on macOS a click on the dock icon lands here rather than starting a
+    // second copy, and it means the same thing: bring the window back
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    else if (win) bringUp(win)
   })
 })
 
