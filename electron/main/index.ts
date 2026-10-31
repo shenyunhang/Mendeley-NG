@@ -2433,6 +2433,102 @@ async function runSmoke() {
   )
   await new Promise((r) => setTimeout(r, 300))
 
+  // Ctrl+A is what everybody presses first when they want the whole result,
+  // and it used to do nothing at all; Esc is what they press to get out of a
+  // multi-selection, and it used to need the mouse.  What is checked is not
+  // just that they work but that they mean the right thing: "all" is what the
+  // list is showing, not the whole library, and inside the search box Ctrl+A
+  // still has to mean the text that was typed.
+  const counts = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        // the count of what is on screen over the size of the library; there
+        // is more than one badge in the chrome, so the one that reads as a
+        // fraction is the one asked for
+        '(()=>{const b=[...document.querySelectorAll(".badge")]'
+        + '.map(e=>e.textContent||"").find(t=>/\\d+\\s*\\/\\s*\\d+/.test(t))||"";'
+        + 'const m=b.match(/(\\d+)\\s*\\/\\s*(\\d+)/);'
+        + 'const t=(document.querySelector(".batch-bar span")||{}).textContent||"";'
+        + 'const n=t.match(/(\\d+)/);'
+        + 'return JSON.stringify({shown:m?+m[1]:0,all:m?+m[2]:0,'
+        + 'bar:!!document.querySelector(".batch-bar"),n:n?+n[1]:0,'
+        + 'sel:document.querySelectorAll("div.row.sel").length})})()'
+      )
+    )
+  const typeQuery = (q: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const i=document.querySelector("input");if(!i)return 0;`
+      + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+      + `set.call(i,${JSON.stringify(q)});`
+      + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+    )
+  const keyOn = (target: string, key: string, ctrl: boolean) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const el=${target};if(!el)return 0;`
+      + `el.dispatchEvent(new KeyboardEvent("keydown",{key:${JSON.stringify(key)},`
+      + `ctrlKey:${ctrl},bubbles:true,cancelable:true}));return 1})()`
+    )
+  await w.webContents.executeJavaScript(
+    '(()=>{const f=[...document.querySelectorAll(".folder-row")]'
+    + '.find(e=>((e.querySelector(".name")||{}).textContent||"").includes("全部文献"));'
+    + 'if(f)f.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 500))
+  // words out of the first row, tried until one narrows the list to more than
+  // one paper but not the whole library: with everything on screen there is
+  // no way to tell "all that is shown" from "all there is", and a single hit
+  // is not a multi-selection, so the bar being looked for would not appear
+  const words: string[] = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify((()=>{const r=document.querySelector("div.row");if(!r)return [];'
+      + 'const w=(r.innerText||"").match(/[A-Za-z]{4,}/g)||[];'
+      + 'return [...new Set(w)].slice(0,8)})())'
+    )
+  )
+  let narrowed = await counts()
+  for (const word of words) {
+    await typeQuery(word.toLowerCase())
+    await new Promise((r) => setTimeout(r, 700))
+    narrowed = await counts()
+    if (narrowed.shown >= 2 && narrowed.shown < narrowed.all) break
+  }
+  log('after narrowing', narrowed)
+  expect(
+    'the list can be narrowed to some of the library',
+    narrowed.shown >= 2 && narrowed.shown < narrowed.all,
+    { words, narrowed }
+  )
+  // opened after narrowing, so that what Esc is asked to leave alone is a row
+  // that is actually on screen
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=document.querySelector("div.row");if(!r)return 0;r.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  await keyOn('window', 'a', true)
+  await new Promise((r) => setTimeout(r, 400))
+  const selected = await counts()
+  log('after ctrl+A', selected)
+  expect('ctrl+A selects everything on screen', selected.n === narrowed.shown, {
+    selected,
+    narrowed
+  })
+  expect('and not the whole library', selected.n < selected.all, selected)
+  // the same key inside the search box is a request about the text
+  await keyOn('document.querySelector("input")', 'a', true)
+  await new Promise((r) => setTimeout(r, 400))
+  const inField = await counts()
+  log('ctrl+A in the search box', inField)
+  expect('inside a text field ctrl+A still means the text', inField.n === narrowed.shown, inField)
+  await keyOn('window', 'Escape', false)
+  await new Promise((r) => setTimeout(r, 400))
+  const escaped = await counts()
+  log('after Esc', escaped)
+  expect('Esc drops the multi-selection', escaped.bar === false && escaped.n === 0, escaped)
+  expect('and leaves the open row alone', escaped.sel === 1, escaped)
+  await keyOn('window', 'Escape', false)
+  await typeQuery('')
+  await new Promise((r) => setTimeout(r, 800))
+
   // Settings.  Everything the app remembers used to live in four corners of
   // the toolbar; this checks that the panel gathers them and that changing the
   // full-text page budget reaches the config, which is where it has to land for

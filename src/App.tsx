@@ -337,6 +337,14 @@ export default function App() {
           setShowCols(false)
           return
         }
+        // last: drop a multi-selection without touching the row that is
+        // open.  It goes after the sheets because a press that means "close
+        // this" and "drop the selection" at once does twice what was asked.
+        if (multiRef.current.length > 1) {
+          e.preventDefault()
+          setMulti([])
+          return
+        }
       }
       // Arrow keys, Enter and Delete belong to the table only when nothing
       // else has claimed them: inside a search box, a note box or a rename box
@@ -347,6 +355,20 @@ export default function App() {
         !!t &&
         (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(t.tagName) ||
           !!t.isContentEditable)
+      // Ctrl+A is the one shortcut with a meaning inside a text field, and
+      // that meaning wins there: what is being asked for is the text that was
+      // typed, not every paper in the library.
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+        e.preventDefault()
+        const all = filteredRef.current
+        if (!all.length) return
+        // everything the list is showing, which after a search or inside a
+        // folder is not the whole library — that is the point of the key
+        setMulti(all.map((d) => d.id))
+        lastIdx.current = null
+        return
+      }
       if (!claimed && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (e.key === 'ArrowDown') {
           e.preventDefault()
@@ -515,6 +537,17 @@ export default function App() {
       return (x < y ? -1 : 1) * dir
     })
   }, [docs, folderId, query, sort, onlyStarred, haystack])
+
+  /**
+   * The keydown listener is installed once, so it reaches the list and the
+   * selection through refs: a closure captured at mount would still be
+   * looking at the first render's empty list, and Ctrl+A would select
+   * nothing.
+   */
+  const filteredRef = useRef<Doc[]>([])
+  filteredRef.current = filtered
+  const multiRef = useRef<string[]>([])
+  multiRef.current = multi
 
   // Full-text search runs in the main process against the whole corpus, so it
   // is debounced: typing a word should not start one scan per keystroke.
