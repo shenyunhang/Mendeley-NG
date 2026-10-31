@@ -153,6 +153,17 @@ export default function PdfViewer({
    * and one left switched on quietly undoes the default this restores.
    */
   const [marking, setMarking] = useState(false)
+  /**
+   * A highlight that was just made out of a text selection, so that it can be
+   * taken back in one click.
+   *
+   * Only that kind.  Dragging a box over the page is an unambiguous request to
+   * mark it, where picking words is exactly what somebody does to copy them —
+   * and the mode may have been left on from the last paper.  Without a way
+   * back, one forgotten switch fills a paper with marks that then have to be
+   * found and deleted one at a time.
+   */
+  const [justMade, setJustMade] = useState<string | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   const [findQ, setFindQ] = useState('')
   const [findHits, setFindHits] = useState<FindHit[]>([])
@@ -1212,8 +1223,8 @@ export default function PdfViewer({
   }
 
   /** Save a highlight on page `on`, in that page's own 0..1 rects. */
-  const commitHighlight = async (rects: Rect[], on: number) => {
-    if (!rects.length) return
+  const commitHighlight = async (rects: Rect[], on: number): Promise<string | null> => {
+    if (!rects.length) return null
     const s = await sizeOf(on)
     const a: Annotation = {
       id: `${doc.id}-${on}-${Date.now()}`,
@@ -1232,7 +1243,30 @@ export default function PdfViewer({
     await window.api.saveAnnotations(next)
     setAnns(next.filter((x) => x.docId === doc.id))
     setSel(a.id)
+    return a.id
   }
+
+  /** Take the last highlight back, locally first and then in the cloud. */
+  const undoHighlight = async (id: string) => {
+    const all = await window.api.loadAnnotations()
+    const gone = all.find((a) => a.id === id)
+    const next = all.filter((a) => a.id !== id)
+    await window.api.saveAnnotations(next)
+    setAnns(next.filter((x) => x.docId === doc.id))
+    setSel(null)
+    setJustMade(null)
+    // after the local copy is safely written, so a failure here leaves a stray
+    // cloud highlight rather than a lost local one
+    if (gone?.remoteId) {
+      await window.api.deleteRemoteAnnotation(gone.remoteId).catch(() => {})
+    }
+  }
+
+  useEffect(() => {
+    if (!justMade) return
+    const t = setTimeout(() => setJustMade(null), 8000)
+    return () => clearTimeout(t)
+  }, [justMade])
 
   /** Pull cloud annotations, merge them in, then push anything local-only. */
   const syncCloud = async () => {
@@ -1359,7 +1393,7 @@ export default function PdfViewer({
     // a real text selection wins: it follows the words rather than a box
     const picked = selectionRects()
     if (picked.rects.length) {
-      await commitHighlight(picked.rects, picked.page)
+      setJustMade(await commitHighlight(picked.rects, picked.page))
       window.getSelection()?.removeAllRanges()
     } else if (drag && drag.w > 0.01 && drag.h > 0.005) {
       await commitHighlight([drag], dragPage.current ?? page)
@@ -1649,9 +1683,25 @@ export default function PdfViewer({
           云同步标注
         </button>
         <span style={{ color: 'var(--fg-dim)', marginLeft: 8 }}>
-          {marking
-            ? `拖选即高亮 · 本页 ${pageAnns.length} 条`
-            : `拖选即选中文字，可以复制 · 本页 ${pageAnns.length} 条标注`}
+          {justMade ? (
+            // what the reader just did, and the way out of it.  It replaces the
+            // mode hint for those few seconds because that is the moment the
+            // hint is least useful and the mistake is most likely
+            <>
+              已高亮 ·{' '}
+              <button
+                style={{ padding: '1px 6px', fontSize: '0.733rem' }}
+                title="撤销这条高亮"
+                onClick={() => void undoHighlight(justMade)}
+              >
+                撤销
+              </button>
+            </>
+          ) : marking ? (
+            `拖选即高亮 · 本页 ${pageAnns.length} 条`
+          ) : (
+            `拖选即选中文字，可以复制 · 本页 ${pageAnns.length} 条标注`
+          )}
         </span>
       </div>
 

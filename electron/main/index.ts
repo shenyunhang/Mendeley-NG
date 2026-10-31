@@ -1125,6 +1125,17 @@ async function runSmoke() {
       + 'const b=el.getBoundingClientRect();'
       + 'el.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,clientX:b.left+5,clientY:b.top+5}));return 1})()'
     )
+  /** The selection a highlight is made from.  It has to be repeatable: turning
+   *  a selection into a highlight clears it, so anything that checks what
+   *  happens afterwards needs to be able to make another one. */
+  const selectSomeText = () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const sp=[...document.querySelectorAll(".tx-layer span.tx")];'
+      + 'if(sp.length<10)return 0;const a=sp[20],b=sp[26];'
+      + 'const r=document.createRange();'
+      + 'r.setStart(a.firstChild||a,0);r.setEnd(b.firstChild||b,Math.min(3,(b.textContent||"").length));'
+      + 'const s=getSelection();s.removeAllRanges();s.addRange(r);return 1})()'
+    )
   // Highlighting is opt-in, so the same selection made while it is off has to
   // leave the page alone: picking words in order to copy them cannot also be
   // a request to mark the paper.
@@ -1139,8 +1150,27 @@ async function runSmoke() {
   // now has to produce the highlight
   await mouseUpOnPage()
   await new Promise((r) => setTimeout(r, 1500))
-  const made = await addSinceBefore()
+  const made = JSON.parse(await addSinceBefore())
   log('selection highlight', 'before', beforeCount, made)
+
+  // A highlight made while the mode was on still needs a way back: the mode
+  // can have been left on, and picking words is what somebody does to copy
+  // them.  The offer has to be there and has to work, not just be drawn.
+  const hlUndo = await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".pdf-bar button")]'
+    + '.find(x=>x.textContent.trim()==="撤销");if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 1200))
+  const undone = JSON.parse(await addSinceBefore())
+  log('undo the highlight', { hlUndo, undone })
+  expect('a highlight offers to be taken back', hlUndo === 1, { hlUndo })
+  expect('taking it back removes it', undone.added === made.added - 1, { made, undone })
+  // the selection was consumed by the highlight, so it has to be made again
+  // before the same mouseup can put one back for the sidebar to list
+  await selectSomeText()
+  await mouseUpOnPage()
+  await new Promise((r) => setTimeout(r, 1500))
+  log('highlight again for the sidebar', await addSinceBefore())
 
   // the annotation sidebar has to list a highlight that was just made, so it
   // is checked here rather than before, and the restore happens after
