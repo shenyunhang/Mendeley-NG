@@ -434,28 +434,97 @@ async function runSmoke() {
   log('renderer', info)
   if (errs.length) log('renderer errors', errs.slice(0, 10).join(' | '))
 
-  // the starred filter is read-only, so it can be exercised here without
-  // writing to the cloud, unlike the star toggle itself
-  const stars = await w.webContents.executeJavaScript(
-    '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
-    + '.find(x=>x.textContent.trim()==="★");if(!b)return "no star button";'
-    + 'const badge=()=>[...document.querySelectorAll(".toolbar .badge")].pop().textContent.trim();'
-    + 'const rows=()=>document.querySelectorAll(".row .star").length;'
-    + 'const before=badge();const n=rows();b.click();'
-    + 'return JSON.stringify({before,rows:n})})()'
-  )
-  log('stars rendered', stars)
-  await new Promise((r) => setTimeout(r, 300))
-  log(
-    'starred filter on',
-    await w.webContents.executeJavaScript(
-      '[...document.querySelectorAll(".toolbar .badge")].pop().textContent.trim()'
+  // The filters answer the four questions the table can already show but
+  // could not isolate: what have I not read, what have I no file for, what is
+  // on the cloud but not on this disk, what belongs to no folder.  Read-only,
+  // so they can be exercised here without writing to the cloud, unlike the
+  // star toggle itself.  What is checked is that each switch leaves exactly
+  // the number of papers it said it would, that two together narrow further
+  // rather than widening, and that clearing puts everything back.
+  const shown = async () =>
+    Number(
+      JSON.parse(
+        await w.webContents.executeJavaScript(
+          '(()=>{const b=[...document.querySelectorAll(".badge")]'
+          + '.map(e=>e.textContent||"").find(t=>/\\d+\\s*\\/\\s*\\d+/.test(t))||"";'
+          + 'const m=b.match(/(\\d+)/);return m?m[1]:0})()'
+        )
+      )
     )
-  )
+  const filterCard = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(()=>{const c=document.querySelector(".filter-menu");'
+        + 'if(!c)return JSON.stringify({open:0});'
+        + 'return JSON.stringify({open:1,rows:[...c.querySelectorAll(".col-row")].map(r=>'
+        + '({label:(r.querySelector("label")||{}).textContent||"",'
+        + 'n:+((r.querySelector("span:last-child")||{}).textContent||0),'
+        + 'on:!!(r.querySelector("input")||{}).checked}))})})()'
+      )
+    )
+  const tickFilter = (label: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const c=document.querySelector(".filter-menu");if(!c)return 0;`
+      + `const r=[...c.querySelectorAll(".col-row")]`
+      + `.find(x=>((x.querySelector("label")||{}).textContent||"").includes(${JSON.stringify(label)}));`
+      + `if(!r)return 0;const i=r.querySelector("input");if(!i)return 0;i.click();return 1})()`
+    )
+  const allBefore = await shown()
   await w.webContents.executeJavaScript(
     '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
-    + '.find(x=>x.textContent.trim()==="★");b.click();return 1})()'
+    + '.find(x=>x.textContent.trim().startsWith("筛选"));if(!b)return "no filter button";'
+    + 'b.click();return "ok"})()'
   )
+  await new Promise((r) => setTimeout(r, 400))
+  const card = await filterCard()
+  log('filter card', card)
+  expect('the filter card opens', card.open === 1, card)
+  expect('it offers every question', card.rows?.length === 5, card.rows?.length)
+  expect(
+    'each switch says how many papers it would leave',
+    card.rows?.every((r: { n: number }) => Number.isFinite(r.n) && r.n >= 0),
+    card.rows
+  )
+  // the switch with the most papers behind it that is still not everything:
+  // an empty switch proves nothing, because a list narrowed to nothing looks
+  // the same whether the filter worked or broke
+  const usable = (card.rows ?? []).filter(
+    (r: { n: number }) => r.n > 0 && r.n < allBefore
+  ) as { label: string; n: number }[]
+  usable.sort((a, b) => b.n - a.n)
+  const pick = usable[0]
+  log('switch under test', pick)
+  expect('there is a switch that leaves some but not all', !!pick, { allBefore, usable })
+  const second = usable[1] ?? pick
+  await tickFilter(pick.label)
+  await new Promise((r) => setTimeout(r, 500))
+  const afterStar = await shown()
+  log('after one switch', { pick, afterStar })
+  expect('a switch leaves exactly what it said', afterStar === pick.n, { pick, afterStar })
+  await tickFilter(second.label)
+  await new Promise((r) => setTimeout(r, 500))
+  const afterBoth = await shown()
+  log('after two switches', { afterStar, afterBoth, second })
+  // two together narrow further: a list of ticked boxes is an AND, and OR
+  // would make the switches useless for working through a pile
+  expect('two switches together narrow rather than widen', afterBoth <= afterStar, {
+    afterStar,
+    afterBoth
+  })
+  expect('and no further than either alone', afterBoth <= second.n, { afterBoth, second })
+  await w.webContents.executeJavaScript(
+    '(()=>{const c=document.querySelector(".filter-menu");'
+    + 'const b=[...c.querySelectorAll("button")].find(x=>x.textContent.trim()==="全部清除");'
+    + 'if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 500))
+  expect('clearing puts every paper back', (await shown()) === allBefore, allBefore)
+  // the card closes on Esc like every other floating thing
+  await w.webContents.executeJavaScript(
+    'window.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true}))'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  expect('Esc closes the filter card', (await filterCard()).open === 0, 'still open')
 
   // "save search" used to call window.prompt, which throws in Electron, so
   // the run opens the dialog and checks it is the in-app one.  It cancels

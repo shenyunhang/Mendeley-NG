@@ -21,6 +21,7 @@ import AskDialog from './components/AskDialog'
 import ConfirmDialog from './components/ConfirmDialog'
 import DocTable from './components/DocTable'
 import ColumnPicker from './components/ColumnPicker'
+import FilterMenu from './components/FilterMenu'
 import FullTextView from './components/FullTextView'
 import {
   DEFAULT_SORT,
@@ -30,6 +31,12 @@ import {
   type ColKey,
   type SortKey
 } from './lib/columns'
+import {
+  FILTER_LABEL,
+  FILTER_TEST,
+  LIST_FILTERS,
+  type ListFilter
+} from './lib/filters'
 import {
   CITE_STYLES,
   DEFAULT_CITE_STYLE,
@@ -140,7 +147,10 @@ export default function App() {
   const [dupes, setDupes] = useState<DupeGroup[] | null>(null)
   const [importing, setImporting] = useState<Entry[] | null>(null)
   const [adding, setAdding] = useState(false)
-  const [onlyStarred, setOnlyStarred] = useState(false)
+  const [filters, setFilters] = useState<ListFilter[]>([])
+  const [showFilters, setShowFilters] = useState(false)
+  const toggleFilter = (k: ListFilter) =>
+    setFilters((f) => (f.includes(k) ? f.filter((x) => x !== k) : [...f, k]))
   const [multi, setMulti] = useState<string[]>([])
   const lastIdx = useRef<number | null>(null)
   const [saved, setSaved] = useState<SavedSearch[]>([])
@@ -337,6 +347,11 @@ export default function App() {
           setShowCols(false)
           return
         }
+        if (showFilters) {
+          e.preventDefault()
+          setShowFilters(false)
+          return
+        }
         // last: drop a multi-selection without touching the row that is
         // open.  It goes after the sheets because a press that means "close
         // this" and "drop the selection" at once does twice what was asked.
@@ -433,7 +448,7 @@ export default function App() {
     // settings and showCols are read here, so the listener has to be rebuilt
     // when either moves: a closure captured at mount would still see them
     // as false and Esc would do nothing at all
-  }, [bumpFont, settings, showCols])
+  }, [bumpFont, settings, showCols, showFilters])
 
   /** `full` re-pulls the whole library.  Incremental is the default because a
    *  5.6k-document pull takes long enough to be annoying, but deletions are
@@ -509,7 +524,7 @@ export default function App() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     let out = docs
-    if (onlyStarred) out = out.filter((d) => d.starred)
+    for (const k of filters) out = out.filter(FILTER_TEST[k])
     if (folderId) {
       const ids = new Set(tree.subtree.get(folderId) ?? [folderId])
       out = out.filter((d) => (d.folder_uuids ?? []).some((f) => ids.has(f)))
@@ -536,7 +551,26 @@ export default function App() {
       if (x === y) return (a.title ?? '').localeCompare(b.title ?? '')
       return (x < y ? -1 : 1) * dir
     })
-  }, [docs, folderId, query, sort, onlyStarred, haystack])
+  }, [docs, folderId, query, sort, filters, haystack])
+
+  /**
+   * How many papers each switch would leave, counted on the list as it stands
+   * with the folder and the search box applied but without the filters
+   * themselves.  Shown next to each box, so "没有本地 PDF" can be judged
+   * before it is pressed rather than by pressing it.
+   */
+  const filterCounts = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    let base = docs
+    if (folderId) {
+      const ids = new Set(tree.subtree.get(folderId) ?? [folderId])
+      base = base.filter((d) => (d.folder_uuids ?? []).some((f) => ids.has(f)))
+    }
+    if (q) base = base.filter((d) => (haystack.get(d.id) ?? '').includes(q))
+    const out = {} as Record<ListFilter, number>
+    for (const k of LIST_FILTERS) out[k] = base.filter(FILTER_TEST[k]).length
+    return out
+  }, [docs, folderId, query, haystack, tree])
 
   /**
    * The keydown listener is installed once, so it reaches the list and the
@@ -576,7 +610,7 @@ export default function App() {
     const parts = [
       query.trim() ? `“${query.trim()}”` : '',
       folderId ? folders.find((f) => f.id === folderId)?.name ?? '' : '',
-      onlyStarred ? '★' : ''
+      ...filters.map((k) => FILTER_LABEL[k])
     ].filter(Boolean)
     if (!parts.length) return
     setAsk({
@@ -598,7 +632,7 @@ export default function App() {
         name,
         query: query.trim(),
         folderId,
-        starred: onlyStarred
+        starred: filters.includes('star')
       }
     ]
     setSaved(next)
@@ -609,7 +643,7 @@ export default function App() {
   const applySearch = (s: SavedSearch) => {
     setQuery(s.query)
     setFolderId(s.folderId)
-    setOnlyStarred(s.starred)
+    setFilters(s.starred ? ['star'] : [])
     setActiveSearch(s.id)
     setMulti([])
   }
@@ -877,7 +911,7 @@ export default function App() {
     setQuery('')
     setFolderId(null)
     setActiveSearch(null)
-    setOnlyStarred(false)
+    setFilters([])
   }, [])
 
   /**
@@ -901,7 +935,7 @@ export default function App() {
       const f = folders.find((x) => x.id === folderId)
       if (f) bits.push(`文件夹「${f.name}」`)
     }
-    if (onlyStarred) bits.push('星标')
+    for (const k of filters) bits.push(FILTER_LABEL[k])
     return (
       <div className="empty">
         <p>{bits.length ? `${bits.join(' · ')} 之下没有文献` : '没有匹配的文献'}</p>
@@ -924,7 +958,7 @@ export default function App() {
         ) : null}
       </div>
     )
-  }, [docs.length, query, folderId, folders, onlyStarred, ftMode, ftStat, clearFilters])
+  }, [docs.length, query, folderId, folders, filters, ftMode, ftStat, clearFilters])
 
   const [batchMsg, setBatchMsg] = useState<string | null>(null)
 
@@ -1676,7 +1710,7 @@ export default function App() {
         </button>
         <button
           onClick={saveSearch}
-          disabled={!query.trim() && !folderId && !onlyStarred}
+          disabled={!query.trim() && !folderId && !filters.length}
           title="把当前的文件夹 + 搜索词 + 星标筛选存成一个虚拟文件夹"
         >
           保存搜索
@@ -1692,14 +1726,24 @@ export default function App() {
         >
           撤销{undo.length ? `（${undo[undo.length - 1].label}）` : ''}
         </button>
-        <button
-          className={onlyStarred ? 'primary' : ''}
-          onClick={() => setOnlyStarred((v) => !v)}
-          title="只看星标"
-          style={{ color: onlyStarred ? undefined : 'var(--star-on)' }}
-        >
-          ★
-        </button>
+        <div style={{ position: 'relative', display: 'inline-flex' }}>
+          <button
+            className={filters.length ? 'primary' : ''}
+            onClick={() => setShowFilters((v) => !v)}
+            title="按星标 / 未读 / 有没有 PDF / 归没归文件夹来收窄列表"
+          >
+            筛选{filters.length ? `（${filters.length}）` : ''}
+          </button>
+          {showFilters && (
+            <FilterMenu
+              on={filters}
+              counts={filterCounts}
+              onToggle={toggleFilter}
+              onClear={() => setFilters([])}
+              onClose={() => setShowFilters(false)}
+            />
+          )}
+        </div>
         <div style={{ position: 'relative', display: 'inline-flex' }}>
           <button
             className={showCols ? 'primary' : ''}
