@@ -645,6 +645,59 @@ export default function App() {
     return filtered
   }, [multi, selected, filtered, docs])
 
+  /**
+   * Run one cloud call per item and say afterwards what actually happened.
+   *
+   * A batch that quietly does less than it was asked is worse than one that
+   * fails outright: two hundred documents, three of which did not make it,
+   * reads as two hundred documents, and the three are discovered later as
+   * "this thing does not work".  There is no transaction across PATCHes, so
+   * partial success is the ordinary case and not an accident.
+   *
+   * Progress is reported in at most twenty steps, because setting state once
+   * per document re-renders the table once per document.
+   */
+  const runBatch = async <T,>(
+    items: T[],
+    name: (t: T) => string,
+    run: (t: T) => Promise<void>,
+    onProgress: (done: number, total: number) => void
+  ): Promise<{ ok: number; failed: string[] }> => {
+    const failed: string[] = []
+    let ok = 0
+    const every = Math.max(1, Math.floor(items.length / 20))
+    for (let i = 0; i < items.length; i++) {
+      try {
+        await run(items[i]!)
+        ok++
+      } catch {
+        // one failure must not abandon the rest of the batch
+        failed.push(name(items[i]!))
+      }
+      if (i % every === 0 || i === items.length - 1) onProgress(i + 1, items.length)
+    }
+    return { ok, failed }
+  }
+
+  /**
+   * How a batch ends.  A clean run is a momentary note; a run that lost
+   * something goes to the banner that stays, and names what was lost,
+   * because "some of them failed" is not something anybody can act on.
+   */
+  const reportBatch = (what: string, ok: number, failed: string[]) => {
+    if (!failed.length) {
+      setBatchMsg(`${what} ${ok} 条`)
+      setTimeout(() => setBatchMsg(null), 2500)
+      return
+    }
+    setBatchMsg(`${what} ${ok} 条，${failed.length} 条失败`)
+    setTimeout(() => setBatchMsg(null), 5000)
+    setErr(
+      `${what}时有 ${failed.length} 条没成功（其余 ${ok} 条已生效）：\n` +
+        failed.join('\n')
+    )
+  }
+
   /** Drop every condition that is narrowing the list, so an empty table is
    *  not a dead end. */
   const clearFilters = useCallback(() => {
@@ -891,16 +944,20 @@ export default function App() {
   const batchFolder = async (folderId: string) => {
     const list = multi.length > 1 ? docs.filter((d) => multi.includes(d.id)) : []
     if (!list.length) return
-    let n = 0
-    for (const d of list) {
-      if ((d.folder_uuids ?? []).includes(folderId)) continue
-      try {
-        await window.api.addToFolder(folderId, d.id)
-        n++
-      } catch {
-        /* one failure should not abandon the rest of the batch */
-      }
+    const todo = list.filter((d) => !(d.folder_uuids ?? []).includes(folderId))
+    if (!todo.length) {
+      setBatchMsg('这些文献已经在这个文件夹里')
+      setTimeout(() => setBatchMsg(null), 2500)
+      return
     }
+    const { ok: n, failed } = await runBatch(
+      todo,
+      (d) => d.title || d.id,
+      async (d) => {
+        await window.api.addToFolder(folderId, d.id)
+      },
+      (done, total) => setBatchMsg(`正在加入文件夹 ${done}/${total}…`)
+    )
     setLib((l) =>
       l
         ? {
@@ -913,9 +970,12 @@ export default function App() {
           }
         : l
     )
-    setBatchMsg(`已把 ${n} 条加入文件夹`)
-    const added = list.filter((d) => !(d.folder_uuids ?? []).includes(folderId)).map((d) => d.id)
+    reportBatch('已加入文件夹', n, failed)
     if (n) {
+      // only the ones that actually landed can be undone
+      const added = todo
+        .filter((d) => !failed.includes(d.title || d.id))
+        .map((d) => d.id)
       pushUndo(`把 ${n} 条加入文件夹`, async () => {
         for (const id of added) await window.api.removeFromFolder(folderId, id).catch(() => {})
         setLib((l) =>
@@ -932,7 +992,6 @@ export default function App() {
         )
       })
     }
-    setTimeout(() => setBatchMsg(null), 2500)
   }
 
   const batchTrash = () => trashDocs(docs.filter((d) => multi.includes(d.id)))
@@ -1031,18 +1090,15 @@ export default function App() {
     }
     const field = op === 'tag-add' || op === 'tag-del' ? 'tags' : op
     const prev = list.map((d) => (d as unknown as Record<string, unknown>)[field])
-    let n = 0
-    for (let i = 0; i < list.length; i++) {
-      setBatchMsg(`批量修改 ${i + 1}/${list.length}…`)
-      try {
-        await setFlags(list[i]!, patchFor(list[i]!))
-        n++
-      } catch {
-        /* skip and keep going; the counter below reports the truth */
-      }
-    }
-    setBatchMsg(`已修改 ${n} / ${list.length} 条`)
-    setTimeout(() => setBatchMsg(null), 2500)
+    const { ok: n, failed } = await runBatch(
+      list,
+      (d) => d.title || d.id,
+      async (d) => {
+        await setFlags(d, patchFor(d))
+      },
+      (done, total) => setBatchMsg(`批量修改 ${done}/${total}…`)
+    )
+    reportBatch('已修改', n, failed)
     if (n) {
       pushUndo(`批量修改 ${n} 条的${field === 'tags' ? '标签' : '字段'}`, async () => {
         await Promise.all(
@@ -1062,26 +1118,28 @@ export default function App() {
   const trashDocs = async (list: Doc[]) => {
     if (!list.length) return
     if (!confirm(`把选中的 ${list.length} 条移入回收站？可在回收站里恢复。`)) return
-    const gone = new Set(list.map((d) => d.id))
-    let n = 0
-    for (const d of list) {
-      try {
+    const { ok: n, failed } = await runBatch(
+      list,
+      (d) => d.title || d.id,
+      async (d) => {
         await window.api.trashDoc(d.id)
-        n++
-      } catch {
-        /* keep going; the ones that failed stay in the library */
-      }
-    }
-    setLib((l) => (l ? { ...l, docs: l.docs.filter((d) => !gone.has(d.id)) } : l))
+      },
+      (done, total) => setBatchMsg(`正在移入回收站 ${done}/${total}…`)
+    )
+    const goneIds = new Set(
+      list.filter((d) => !failed.includes(d.title || d.id)).map((d) => d.id)
+    )
+    // only what actually left the library is taken out of it here; the rest
+    // stay, which is the truthful outcome and the one that can be retried
+    setLib((l) => (l ? { ...l, docs: l.docs.filter((d) => !goneIds.has(d.id)) } : l))
     setMulti([])
     setSelId(null)
-    setBatchMsg(`已移入回收站 ${n} 条`)
+    reportBatch('已移入回收站', n, failed)
     if (n) {
       pushUndo(`删除 ${n} 条`, async () => {
-        for (const d of list) await readmit(d)
+        for (const d of list.filter((x) => goneIds.has(x.id))) await readmit(d)
       })
     }
-    setTimeout(() => setBatchMsg(null), 2500)
   }
 
   /**
