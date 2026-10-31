@@ -38,7 +38,7 @@ import Settings from './components/Settings'
 import Splitter from './components/Splitter'
 import { extractIds } from './lib/pdfmeta'
 import { toBibtex, toEndnoteXml, toRis } from './lib/export'
-import { buildTree } from './lib/tree'
+import { buildTree, byName } from './lib/tree'
 import { findDuplicates, type DupeGroup } from './lib/dupes'
 import { parseAny, type Entry } from './lib/import'
 
@@ -1651,7 +1651,7 @@ export default function App() {
                 title="把选中的文献加入文件夹"
               >
                 <option value="">＋ 加入文件夹…</option>
-                {folders.map((f) => (
+                {[...folders].sort(byName).map((f) => (
                   <option key={f.id} value={f.id}>
                     {f.name}
                   </option>

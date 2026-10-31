@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Doc, Folder, MetaCandidate } from '../../shared/types'
+import { byName } from '../lib/tree'
 
 interface Props {
   doc: Doc
@@ -351,7 +352,7 @@ export default function DetailsPanel({
             <option value="">＋ 加入文件夹…</option>
             {folders
               .filter((f) => !owned.has(f.id))
-              .sort((a, b) => a.name.localeCompare(b.name))
+              .sort(byName)
               .map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.name}

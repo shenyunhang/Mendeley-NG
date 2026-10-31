@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { Folder, SavedSearch } from '../../shared/types'
-import { buildTree, isSelfOrDescendant, type Tree } from '../lib/tree'
+import { buildTree, isSelfOrDescendant } from '../lib/tree'
 
 interface Props {
   folders: Folder[]
@@ -59,10 +59,12 @@ export default function FolderTree({
       for (const c of kids) visit(c, depth + 1)
     }
 
-    const top = [...tree.roots].sort(byCountThenName(counts, tree))
-    for (const r of top) visit(r, 0)
+    // the tree arrives in name order; sorting here by how many papers a
+    // folder holds made the column readable and the positions unstable, so a
+    // folder moved every time a paper did
+    for (const r of tree.roots) visit(r, 0)
     return out
-  }, [tree, counts, filter, collapsed])
+  }, [tree, filter, collapsed])
 
   const commitRename = (id: string) => {
     const name = draft.trim()
@@ -235,19 +237,3 @@ export default function FolderTree({
   )
 }
 
-function byCountThenName(counts: Map<string, number>, tree: Tree) {
-  return (a: Folder, b: Folder) => {
-    const ca = countSubtree(counts, tree, a.id)
-    const cb = countSubtree(counts, tree, b.id)
-    if (cb !== ca) return cb - ca
-    return a.name.localeCompare(b.name)
-  }
-}
-
-/** A parent folder shows its own documents plus everything in its children. */
-function countSubtree(counts: Map<string, number>, tree: Tree, id: string) {
-  const ids = tree.subtree.get(id) ?? [id]
-  let n = 0
-  for (const i of ids) n += counts.get(i) ?? 0
-  return n
-}

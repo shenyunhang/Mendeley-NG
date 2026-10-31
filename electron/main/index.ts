@@ -346,6 +346,31 @@ async function runSmoke() {
     rowPaint
   )
 
+  // Folders arrived in the order the catalogue holds them, which is stable
+  // but arbitrary: a folder sat wherever it happened to land and finding one
+  // meant reading down the column.  Only the top level is compared, because a
+  // child is listed under its parent and so the whole column is not one
+  // alphabetical run.
+  const folderOrder = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const rows=[...document.querySelectorAll(".folder-row")]'
+      + '.filter(e=>e.style.paddingLeft==="8px");'
+      + 'const names=rows.map(e=>(e.querySelector(".name")||{}).textContent||"")'
+      + '.filter(n=>n&&n!=="全部文献").slice(0,40);'
+      // compared with the same collator the tree uses, so a difference in
+      // how the two engines rank Chinese cannot be mistaken for a bug
+      + 'const sorted=[...names].sort((a,b)=>a.localeCompare(b,"zh",{numeric:true,sensitivity:"base"}));'
+      + 'return JSON.stringify({count:names.length,'
+      + 'same:JSON.stringify(names)===JSON.stringify(sorted),first:names.slice(0,3)})})()'
+    )
+  )
+  log('folder order', folderOrder)
+  expect(
+    'folders are listed by name',
+    folderOrder.count > 1 && folderOrder.same === true,
+    folderOrder
+  )
+
   // shift-click selection, checked without any of the batch actions that
   // would write to the library
   log(
