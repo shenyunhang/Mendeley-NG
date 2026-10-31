@@ -1402,6 +1402,60 @@ async function runSmoke() {
   )
   await new Promise((r) => setTimeout(r, 400))
 
+  // An interrupted run is the ordinary case, not the exception: reading 5245
+  // papers takes minutes and nobody leaves the app open for all of it.  What
+  // an unfinished batch leaves is text past the end of what the entry table
+  // describes, and appending to that used to record the next papers at
+  // offsets behind their own text.  The table then stopped being sorted by
+  // offset, the lookup behind every hit went astray, and an index that
+  // reported itself complete returned nothing.  The gap is written here by
+  // hand, because waiting for a real six-minute build to be interrupted is
+  // not something a smoke run can do.
+  const ftDir = process.env.MENDELEY_FT_DIR || dataDir()
+  const ftDat = path.join(ftDir, 'fulltext.dat')
+  const ftJson = path.join(ftDir, 'fulltext.json')
+  const allPdf = ftDocs().filter((d) => d.localPdf)
+  let resumed: {
+    ok: boolean
+    contiguous?: boolean
+    covers?: boolean
+    bytesMatch?: boolean
+    hits?: number
+  } = { ok: false }
+  if (allPdf.length >= 20) {
+    ftClear()
+    await ftBuild(allPdf.slice(0, 10), () => undefined, true)
+    fs.appendFileSync(ftDat, Buffer.alloc(20_000, 0x20))
+    const stat2 = await ftBuild(allPdf.slice(10, 20), () => undefined, false)
+    const body = fs.readFileSync(ftDat, 'utf8')
+    const mt = JSON.parse(fs.readFileSync(ftJson, 'utf8'))
+    const sorted = Object.entries(mt.entries as Record<string, { start: number; len: number }>)
+      .sort((a, b) => a[1].start - b[1].start)
+    let covered = 0
+    let contiguous = true
+    for (const [, e] of sorted) {
+      if (e.start !== covered) contiguous = false
+      covered = e.start + e.len
+    }
+    resumed = {
+      ok: true,
+      contiguous,
+      // the whole file has to be accounted for by the table: anything past
+      // the end is text no paper can be found in
+      covers: covered === body.length,
+      bytesMatch: fs.statSync(ftDat).size === mt.bytes,
+      hits: ['the', 'of', 'and', 'in'].reduce((n, w) => n + ftSearch(w).length, 0)
+    }
+    log('index resumed after an interrupted run', { ...resumed, stat: stat2.indexed })
+  }
+  expect('an interrupted run leaves an index that still works', resumed.ok === true, resumed)
+  expect('the entry table stays contiguous', resumed.contiguous === true, resumed)
+  expect('nothing in the text file is unaccounted for', resumed.covers === true, resumed)
+  expect('the byte anchor matches the file', resumed.bytesMatch === true, resumed)
+  expect('a resumed index still finds things', (resumed.hits ?? 0) > 0, resumed)
+  // the next check wants an empty index, and this one leaves twenty papers
+  ftClear()
+
   // Batch metadata editing.  The dialog is checked without applying it:
   // PATCHing real documents is not something a smoke run should do, so what
   // is proved here is that the dialog opens for the selection, offers the

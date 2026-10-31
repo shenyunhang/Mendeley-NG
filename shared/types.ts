@@ -182,6 +182,13 @@ export interface FtStatus {
   /** Name of the file being read, so a long run shows it is doing something
    *  rather than just that it is not finished. */
   current?: string
+  /**
+   * Papers the last run could not index, with the reason.  They are the
+   * difference between "the word is not in the library" and "the word is in
+   * this one paper, which has no text layer", and only the second one is
+   * something the reader can act on.
+   */
+  skipped?: { name: string; why: string }[]
 }
 
 /** One place where the query appears in one document. */

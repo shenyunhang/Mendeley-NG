@@ -683,6 +683,30 @@ td .no-pdf {
   color: var(--fg-dim);
 }
 
+/* papers the last run could not index: a short row under the header, because
+   "5237 / 5245" without names is the difference between knowing the word is
+   not there and knowing it is in a scan nobody can read */
+.ft-skipped {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--msg-bg);
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+  line-height: 1.6;
+}
+.ft-skip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
 /* column picker: floats under its button so the table can be watched while
    boxes are ticked */
 .col-picker {

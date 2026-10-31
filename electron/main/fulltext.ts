@@ -103,8 +103,20 @@ interface Entry {
 }
 
 interface Meta {
-  version: 1
+  version: 2
   pages: number
+  /**
+   * How many bytes of the text file the entry table actually describes.
+   *
+   * Offsets in the table are counted in UTF-16 code units and the file is
+   * measured in bytes, and the two are not convertible without reading the
+   * whole thing — one Chinese character is three bytes but one code unit.
+   * So the byte length is carried alongside the entries, and it is the one
+   * place a build can pick up again from: everything after `bytes` is text
+   * that was written but never recorded, which is what an interrupted run
+   * leaves behind.
+   */
+  bytes: number
   entries: Record<string, Entry>
 }
 
@@ -125,6 +137,19 @@ let progress: { done: number; total: number; current: string } = {
   total: 0,
   current: ''
 }
+/**
+ * Papers the last run could not index, and why.
+ *
+ * A scan with no text layer, a PDF that will not open and a file that took
+ * longer than its budget all end the same way from the outside: the paper is
+ * simply absent from the index, and every search for something that is only
+ * in it comes back empty.  The counter on its own cannot tell the reader
+ * whether that is normal — a 1994 scan — or whether pdf.js is broken across
+ * the whole library, which is why the reason travels with the name.
+ */
+let skipped: { name: string; why: string }[] = []
+/** Nobody reads a hundred names; the UI says how many more there were. */
+const MAX_SKIPPED = 30
 
 /**
  * How many PDFs to read at once.
@@ -153,16 +178,27 @@ function loadMeta(): Meta {
   try {
     const m = JSON.parse(fs.readFileSync(metaFile(), 'utf8')) as Meta
     // an index built with a different page budget does not describe the same
-    // thing as the one the user is about to search, so it is discarded
-    if (m?.version === 1 && m.pages === pages) {
+    // thing as the one the user is about to search, so it is discarded; so is
+    // one written before the byte anchor existed, because there is no way to
+    // tell where its text file can safely be appended to
+    if (m?.version === 2 && m.pages === pages) {
       meta = m
       return meta
     }
   } catch {
     /* no index yet */
   }
-  meta = { version: 1, pages: pages, entries: {} }
+  meta = { version: 2, pages: pages, bytes: 0, entries: {} }
   return meta
+}
+
+/** The highest offset the entry table claims, in code units. */
+function endOf(m: Meta): number {
+  let at = 0
+  for (const e of Object.values(m.entries)) {
+    if (e.start + e.len > at) at = e.start + e.len
+  }
+  return at
 }
 
 function saveMeta() {
@@ -211,7 +247,8 @@ export function ftStatus(docs: Doc[]): FtStatus {
     done: progress.done,
     pages: pages,
     bytes,
-    current: progress.current
+    current: progress.current,
+    skipped: skipped.slice()
   }
 }
 
@@ -231,8 +268,11 @@ const DOC_TIMEOUT_MS = 20_000
 
 let failures = 0
 
-/** Pull the text of the first `n` pages, or null if the PDF will not open. */
-async function extract(file: string, n: number): Promise<{ text: string; bounds: number[] } | null> {
+/** What came out of one PDF.  `why` is empty only when there is text. */
+type Got = { text: string; bounds: number[]; why: string }
+
+/** Pull the text of the first `n` pages, and say why if there is none. */
+async function extract(file: string, n: number): Promise<Got> {
   // held in a box rather than a plain `let`, because the only assignment is
   // inside `parse` and TypeScript would otherwise narrow it to null in the
   // timer callback, where it is the whole point
@@ -257,7 +297,19 @@ async function extract(file: string, n: number): Promise<{ text: string; bounds:
       const p = await d.getPage(i)
       const tc = await p.getTextContent()
       for (const it of tc.items as unknown as { str?: string }[]) {
-        if (it.str) out += it.str + ' '
+        const s = it.str
+        if (!s) continue
+        // pdf.js hands a page over one run at a time in the order they sit on
+        // it, so a word broken across two lines arrives as `genera-` then
+        // `tive`.  Putting a space between them is what turns "generative"
+        // into two words nobody can search for — the single most common way a
+        // paper that is indexed still cannot be found.  A run ending in a
+        // hyphen is that line break, so it is joined without one.  A real
+        // compound such as "state-of-the-art" stays inside one run, and a
+        // continuation starting with a capital is left alone, so names split
+        // across lines keep their hyphen.
+        if (out.endsWith('- ') && /^[a-z]/.test(s)) out = out.slice(0, -2) + s + ' '
+        else out += s + ' '
       }
       bounds.push(out.length)
       p.cleanup()
@@ -266,7 +318,7 @@ async function extract(file: string, n: number): Promise<{ text: string; bounds:
   }
 
   try {
-    return await Promise.race([
+    const got = await Promise.race([
       parse(),
       new Promise<null>((resolve) => {
         timer = setTimeout(() => {
@@ -280,12 +332,19 @@ async function extract(file: string, n: number): Promise<{ text: string; bounds:
         }, DOC_TIMEOUT_MS)
       })
     ])
+    if (!got) return { text: '', bounds: [], why: '读超时' }
+    // A PDF of scanned pages opens, reports its page count and yields no text
+    // at all.  It is not a failure of the reader and it is not worth retrying,
+    // but it has to be said: from the outside it looks exactly like a paper
+    // that was indexed and then could not be found.
+    if (!got.text.trim()) return { text: '', bounds: [], why: '没有文本层（扫描件）' }
+    return { ...got, why: '' }
   } catch (e) {
     // the first few failures are worth seeing: a library-wide problem, such as
     // a worker that will not start, shows up as every document failing.  A
     // timeout already reported itself.
     if (!stopped && failures++ < 3) console.warn('[fulltext] cannot read', file, String(e))
-    return null
+    return { text: '', bounds: [], why: 'PDF 打不开' }
   } finally {
     if (timer) clearTimeout(timer)
     await box.doc?.destroy().catch(() => {})
@@ -313,24 +372,15 @@ export async function ftBuild(
   busy = true
   building = true
   cancelled = false
+  skipped = []
   const m = loadMeta()
   if (rebuild) {
-    meta = { version: 1, pages: pages, entries: {} }
+    meta = { version: 2, pages: pages, bytes: 0, entries: {} }
   }
   const fresh = meta!
   const queue = docs.filter((d) => d.localPdf)
   progress = { done: 0, total: queue.length, current: '' }
-  // An increment over a dropped entry table has to start the file again, not
-  // append to it: the offsets would restart at zero while the text sat behind
-  // everything already written, and a hit would then be reported against
-  // whichever paper really owns that offset.  Dropping happens when the page
-  // budget changes, which throws the index away.
-  const stale =
-    !rebuild &&
-    !Object.keys(fresh.entries).length &&
-    fs.existsSync(dataFile()) &&
-    fs.statSync(dataFile()).size > 0
-  const out = fs.openSync(dataFile(), rebuild || stale ? 'w' : 'a')
+  let out = -1
   // Offsets are counted in UTF-16 code units, because that is what the search
   // side indexes with once the file has been read back as a string.  Taking
   // the byte size here instead looks right and is not: one Chinese character
@@ -338,11 +388,7 @@ export async function ftBuild(
   // non-ASCII document would be short and the hits would point into the
   // wrong paper.
   let at = 0
-  if (!rebuild) {
-    for (const e of Object.values(fresh.entries)) {
-      if (e.start + e.len > at) at = e.start + e.len
-    }
-  }
+  let byteAt = 0
   let lastPing = 0
   const ping = (cur: string) => {
     const now = Date.now()
@@ -357,6 +403,34 @@ export async function ftBuild(
     onProgress(ftStatus(docs))
   }
   try {
+    // Opening the file used to happen before this `try`, which meant one
+    // failure — a locked file, a directory that went away — left `busy` and
+    // `building` set for the rest of the session.  Every later press of
+    // "建索引" then returned immediately and did nothing, with the bar stuck
+    // on "索引中", and the reader had no way to tell that from a long run.
+    const had = fs.existsSync(dataFile())
+    const size = had ? fs.statSync(dataFile()).size : 0
+    // Cutting the file back to what the entry table can account for is what
+    // makes a run that was interrupted survivable.  `saveMeta` runs every few
+    // batches, so quitting during a six-minute build leaves text written past
+    // the last recorded paper; appending after that records the new papers at
+    // the offsets the table ended at while their text goes to the end of the
+    // file, so the table is no longer sorted by offset and the binary search
+    // that maps every hit back to its paper goes astray — an index that
+    // reports itself complete and then finds nothing.  Truncating costs one
+    // re-read of a handful of papers and removes the whole class of failure.
+    if (!rebuild && had && fresh.bytes <= size) {
+      out = fs.openSync(dataFile(), 'r+')
+      fs.ftruncateSync(out, fresh.bytes)
+      at = endOf(fresh)
+    } else {
+      // no file, or one whose table cannot be trusted: start again
+      fresh.entries = {}
+      fresh.bytes = 0
+      out = fs.openSync(dataFile(), 'w')
+    }
+    byteAt = fresh.bytes
+
     const width = lanes()
     for (let i = 0; i < queue.length; i += width) {
       if (cancelled) break
@@ -377,8 +451,7 @@ export async function ftBuild(
         if (
           prev &&
           prev.mtime === Math.floor(st.mtimeMs) &&
-          prev.size === st.size &&
-          prev.start + prev.len <= at
+          prev.size === st.size
         ) {
           progress.done++
           continue
@@ -393,10 +466,20 @@ export async function ftBuild(
       // offsets stay contiguous and the entry table stays monotonic
       for (let k = 0; k < todo.length; k++) {
         const { d, st } = todo[k]!
-        const g = got[k]
+        const g = got[k]!
         progress.done++
-        if (!g || !g.text.trim()) continue
-        fs.writeSync(out, Buffer.from(g.text.toLowerCase(), 'utf8'))
+        if (!g.text.trim()) {
+          if (skipped.length < MAX_SKIPPED) {
+            skipped.push({ name: path.basename(d.localPdf ?? ''), why: g.why })
+          }
+          continue
+        }
+        const buf = Buffer.from(g.text.toLowerCase(), 'utf8')
+        // written at an explicit position rather than appended: append always
+        // goes to the end of the file, and the byte anchor has just been
+        // brought back to the end of the recorded text, which are not the
+        // same thing after an interrupted run
+        fs.writeSync(out, buf, 0, buf.length, byteAt)
         fresh.entries[d.id] = {
           start: at,
           len: g.text.length,
@@ -405,6 +488,10 @@ export async function ftBuild(
           size: st.size
         }
         at += g.text.length
+        byteAt += buf.length
+        // kept in step with the entries, so that a meta written at any moment
+        // describes exactly the bytes that are on disk for those papers
+        fresh.bytes = byteAt
       }
       // the offset table is written as we go, so a run that is cancelled or
       // crashes is not wasted
@@ -414,7 +501,13 @@ export async function ftBuild(
       await new Promise((r) => setImmediate(r))
     }
   } finally {
-    fs.closeSync(out)
+    if (out >= 0) {
+      try {
+        fs.closeSync(out)
+      } catch {
+        /* already gone */
+      }
+    }
     busy = false
     building = false
     cancelled = false
@@ -444,18 +537,24 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
   if (!want.length) return 0
   busy = true
   const m = loadMeta()
-  let at = 0
-  for (const e of Object.values(m.entries)) {
-    if (e.start + e.len > at) at = e.start + e.len
-  }
-  // With no entries the offset table starts again from zero, so the text file
-  // has to as well.  Appending here would put the new paper at offset 0 while
-  // its text sits after everything else, and every hit in it would be
-  // reported under whichever paper really owns that offset — the same trap
-  // `ftBuild` guards against on a rebuild.
-  const out = fs.openSync(dataFile(), Object.keys(m.entries).length ? 'a' : 'w')
+  let at = endOf(m)
+  let byteAt = m.bytes
+  // The byte anchor decides both where the text goes and whether the file has
+  // to be cut back first, for the same reason `ftBuild` does it: everything
+  // after it is text that was written but never recorded.  An entry table with
+  // no anchor behind it cannot be appended to at all.
+  const had = fs.existsSync(dataFile())
+  const size = had ? fs.statSync(dataFile()).size : 0
+  const out = fs.openSync(dataFile(), had && m.bytes <= size ? 'r+' : 'w')
   let added = 0
   try {
+    if (had && m.bytes <= size) fs.ftruncateSync(out, m.bytes)
+    else {
+      m.entries = {}
+      m.bytes = 0
+      at = 0
+      byteAt = 0
+    }
     for (const d of want) {
       let st: fs.Stats
       try {
@@ -464,8 +563,9 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
         continue
       }
       const g = await extract(d.localPdf as string, pages)
-      if (!g || !g.text.trim()) continue
-      fs.writeSync(out, Buffer.from(g.text.toLowerCase(), 'utf8'))
+      if (!g.text.trim()) continue
+      const buf = Buffer.from(g.text.toLowerCase(), 'utf8')
+      fs.writeSync(out, buf, 0, buf.length, byteAt)
       m.entries[d.id] = {
         start: at,
         len: g.text.length,
@@ -474,6 +574,8 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
         size: st.size
       }
       at += g.text.length
+      byteAt += buf.length
+      m.bytes = byteAt
       added++
     }
   } finally {
@@ -489,7 +591,8 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
 }
 
 export function ftClear() {
-  meta = { version: 1, pages: pages, entries: {} }
+  meta = { version: 2, pages: pages, bytes: 0, entries: {} }
+  skipped = []
   blob = null
   try {
     fs.writeFileSync(dataFile(), '')

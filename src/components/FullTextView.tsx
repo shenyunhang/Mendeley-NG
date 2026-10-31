@@ -148,6 +148,25 @@ export default function FullTextView({
             </button>
           ) : null}
         </div>
+      ) : !building && status?.skipped?.length ? (
+        // Which papers did not make it, and why.  "5237 / 5245" on its own
+        // cannot answer the question a reader actually has when a search
+        // comes back empty: is the word not in the library, or is it in this
+        // one paper that has no text layer?  Only the second one is
+        // something they can do anything about.
+        <div className="ft-skipped">
+          <span>
+            {status.skipped.length} 篇没能进索引，搜不到的词可能就在其中：
+          </span>
+          {status.skipped.slice(0, 4).map((s) => (
+            <span key={s.name} className="ft-skip" title={s.why}>
+              {s.name} · {s.why}
+            </span>
+          ))}
+          {status.skipped.length > 4 ? (
+            <span className="ft-skip">等 {status.skipped.length} 篇</span>
+          ) : null}
+        </div>
       ) : status && status.indexed < status.total && !building ? (
         <div className="setup-hint">
           <span>
