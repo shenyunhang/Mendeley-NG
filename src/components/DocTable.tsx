@@ -39,6 +39,13 @@ interface Props {
    *  the one that decides when that is worth writing down. */
   onColWidth?: (key: ColKey, width: number | null) => void
   /**
+   * Move one column to a new position.  `toIndex` is a gap between columns in
+   * the order as it is now, 0 being before the first and `cols.length` being
+   * after the last, so the caller does not have to know whether the column
+   * being dragged is before or after where it is going.
+   */
+  onColMove?: (key: ColKey, toIndex: number) => void
+  /**
    * What to show when there is nothing to list.  Passed in rather than
    * decided here because the table only knows that `docs` is empty, not
    * why: an empty library and a filter that excluded everything are the
@@ -60,6 +67,7 @@ export default function DocTable({
   cols,
   colWidths,
   onColWidth,
+  onColMove,
   empty
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
@@ -135,6 +143,61 @@ export default function DocTable({
     start(e)
   }
 
+  /**
+   * Reordering by dragging the header itself.
+   *
+   * The header is also the sort control, so a press is not a drag until the
+   * pointer has actually travelled: otherwise every click that lands a pixel
+   * off would reorder a column instead of sorting by it.  `movedRef` is read
+   * by the click handler and cleared there, because the click arrives after
+   * the mouse is already up and there is no other point at which to ask.
+   *
+   * Where it will land is a gap between two columns, chosen by which side of
+   * a column's midline the pointer is on.  Half a column is the honest
+   * boundary: it is where a reader aiming at "after 年份" puts the pointer.
+   */
+  const movedRef = useRef(false)
+  const moveFrom = useRef<{ x0: number } | null>(null)
+  const [moveKey, setMoveKey] = useState<ColKey | null>(null)
+  const [dropAt, setDropAt] = useState<number | null>(null)
+  const [dropX, setDropX] = useState(0)
+  const { on: moving, start: startMove } = useDragX((x) => {
+    const head = headRef.current
+    if (!head || !moveKey) return
+    if (!movedRef.current && Math.abs(x - (moveFrom.current?.x0 ?? x)) > 4) {
+      movedRef.current = true
+    }
+    const cells = Array.from(head.children).filter(
+      (el): el is HTMLElement => el instanceof HTMLElement && el.dataset.col != null
+    )
+    if (!cells.length) return
+    let target = cells.length
+    for (let i = 0; i < cells.length; i++) {
+      const r = cells[i].getBoundingClientRect()
+      if (x < r.left + r.width / 2) {
+        target = i
+        break
+      }
+    }
+    setDropAt(target)
+    const last = cells[cells.length - 1]
+    setDropX(target < cells.length ? cells[target].offsetLeft : last.offsetLeft + last.offsetWidth)
+  })
+  useEffect(() => {
+    if (moving || !moveKey) return
+    if (dropAt != null) onColMove?.(moveKey, dropAt)
+    setMoveKey(null)
+    setDropAt(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moving, moveKey])
+
+  const startColMove = (e: React.MouseEvent, c: ColumnDef) => {
+    movedRef.current = false
+    moveFrom.current = { x0: e.clientX }
+    setMoveKey(c.key)
+    startMove(e)
+  }
+
   return (
     <>
       <div
@@ -150,14 +213,25 @@ export default function DocTable({
           // this one, so a row dragged wider than the pane cannot leave the
           // two out of step.  hidden rather than auto, because a scrollbar of
           // its own is a second thing to aim at under a seven-pixel handle
-          overflow: 'hidden'
+          overflow: 'hidden',
+          position: 'relative'
         }}
       >
         {defs.map((c) => (
           <div
             key={c.key}
             data-col={c.key}
-            onClick={() => c.sort && onSort(c.sort)}
+            className={moveKey === c.key ? 'col-moving' : undefined}
+            onMouseDown={(e) => startColMove(e, c)}
+            onClick={() => {
+              // a press that travelled was a drag, and the click that follows
+              // it is not a request to sort
+              if (movedRef.current) {
+                movedRef.current = false
+                return
+              }
+              if (c.sort) onSort(c.sort)
+            }}
             style={{
               position: 'relative',
               display: 'flex',
@@ -170,7 +244,10 @@ export default function DocTable({
               userSelect: 'none',
               overflow: 'hidden'
             }}
-            title={c.sort ? `按${c.label || '此列'}排序` : undefined}
+            title={
+              (c.sort ? `按${c.label || '此列'}排序　·　` : '') +
+              `左右拖动可以把「${c.label || '此列'}」挪到别的位置`
+            }
           >
             <span
               style={{
@@ -187,7 +264,12 @@ export default function DocTable({
             <span
               className={'col-grip' + (dragKey === c.key ? ' on' : '')}
               title={`拖动改变「${c.label || '此列'}」的宽度，双击复位`}
-              onMouseDown={(e) => startColDrag(e, c)}
+              onMouseDown={(e) => {
+                // without this the press also lands on the header, which
+                // would start a reorder drag on top of the width one
+                e.stopPropagation()
+                startColDrag(e, c)
+              }}
               // a press on the handle is not a request to sort
               onClick={(e) => e.stopPropagation()}
               onDoubleClick={(e) => {
@@ -197,6 +279,9 @@ export default function DocTable({
             />
           </div>
         ))}
+        {/* where the column would land.  Drawn on the header rather than on a
+            cell, because a gap after the last column has no cell to draw on. */}
+        {moveKey && dropAt != null && <div className="col-drop" style={{ left: dropX }} />}
       </div>
 
       <div

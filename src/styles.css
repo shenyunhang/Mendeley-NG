@@ -412,6 +412,24 @@ body.resizing {
   width: 5px;
   background: var(--accent);
 }
+/* The header being dragged to a new position: kept readable rather than
+   hidden, so it is still obvious which column is in the reader's hand. */
+.col-moving {
+  opacity: 0.55;
+}
+/* Where it would land.  A line on the gap, not a box on the column: the
+   question being answered is "between which two", and a highlighted column
+   answers a different one. */
+.col-drop {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 2;
+}
 .pane-head {
   padding: 6px 10px;
   font-size: 0.8rem;

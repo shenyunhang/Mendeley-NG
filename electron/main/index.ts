@@ -1034,6 +1034,140 @@ async function runSmoke() {
     firstAdded
   )
 
+  // Reordering a column by dragging its header.  The header is also the sort
+  // control, so the two things that are checked are that a drag does reorder,
+  // and that the click which follows it is swallowed rather than sorting a
+  // column the reader was in the middle of moving.
+  const colsConfig = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(async()=>{const c=await window.api.getConfig();'
+        + 'return JSON.stringify(c.cols||null)})()'
+      )
+    )
+  const colsBeforeMove = await colsConfig()
+  const k0 = await headKeys()
+  // which column carries the sort arrow, by name and not by position: the
+  // reorder moves the arrow with its column, so comparing positions would
+  // report a sort that never happened
+  const arrowKey = async () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const cs=[...document.querySelectorAll(".col-head > div")]'
+      + '.filter(d=>d.dataset.col);'
+      + 'const a=cs.find(d=>/[▲▼]/.test(d.textContent||""));'
+      + 'return a?a.dataset.col:"none"})()'
+    )
+  const sorted0 = await arrowKey()
+  log('order before', k0, 'sorted by', sorted0)
+  const pressMove = async (js: string) => {
+    await w.webContents.executeJavaScript(js)
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  await pressMove(
+    '(()=>{const cs=[...document.querySelectorAll(".col-head > div")]'
+    + '.filter(d=>d.dataset.col);if(cs.length<4)return 0;'
+    + 'const a=cs[2].getBoundingClientRect(),b=cs[3].getBoundingClientRect();'
+    + 'window.__mv={el:cs[2],x:a.left+a.width/2,y:a.top+a.height/2,'
+    + 'tx:b.left+b.width*0.8};'
+    + 'window.__mv.el.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,button:0,'
+    + 'clientX:window.__mv.x,clientY:window.__mv.y}));return 1})()'
+  )
+  await pressMove(
+    '(()=>{const m=window.__mv;if(!m)return 0;'
+    + 'window.dispatchEvent(new MouseEvent("mousemove",{bubbles:true,'
+    + 'clientX:m.tx,clientY:m.y}));return 1})()'
+  )
+  // The move is coalesced into one per frame, and a frame in a window that is
+  // not on screen is not on a schedule anybody can wait out with a fixed
+  // sleep: ask repeatedly instead, and stop when it answers.
+  const waitFor = async (js: string, ms: number) => {
+    const t0 = Date.now()
+    for (;;) {
+      const v = await w.webContents.executeJavaScript(js)
+      if (v === 'yes' || Date.now() - t0 > ms) return v
+      await new Promise((r) => setTimeout(r, 200))
+    }
+  }
+  const midDrag = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({line:document.querySelectorAll(".col-drop").length,'
+      + 'ghost:document.querySelectorAll(".col-moving").length})'
+    )
+  )
+  const lineSeen = await waitFor(
+    '(()=>document.querySelectorAll(".col-drop").length?"yes":"no")()',
+    4000
+  )
+  log('mid drag', { ...midDrag, lineSeen })
+  expect('a dragged header shows where it would land', lineSeen === 'yes', {
+    ...midDrag,
+    lineSeen
+  })
+  expect('the column in hand is the one that dims', midDrag.ghost === 1, midDrag)
+  await pressMove('window.dispatchEvent(new MouseEvent("mouseup",{bubbles:true}))')
+  // the click a real browser fires after the mouse comes up: it must be
+  // swallowed, or releasing over a header sorts the column just moved
+  await pressMove(
+    '(()=>{const m=window.__mv;if(!m)return 0;m.el.dispatchEvent('
+    + 'new MouseEvent("click",{bubbles:true,clientX:m.tx,clientY:m.y}));return 1})()'
+  )
+  const k1 = await headKeys()
+  log('order after', k1)
+  expect(
+    'dragging a header moves the column',
+    k1[2] === k0[3] && k1[3] === k0[2] && k1.length === k0.length,
+    { k0, k1 }
+  )
+  const cfgCols1 = await colsConfig()
+  log('cols after', cfgCols1)
+  expect(
+    'the new order is remembered',
+    JSON.stringify(cfgCols1) === JSON.stringify(k1),
+    { cfgCols1, k1 }
+  )
+  const sorted1 = await arrowKey()
+  log('sorted after', sorted1)
+  expect(
+    'releasing over a header does not sort the column just moved',
+    sorted1 === sorted0,
+    { sorted0, sorted1 }
+  )
+
+  // A press that does not travel is still a sort.
+  await pressMove(
+    '(()=>{const cs=[...document.querySelectorAll(".col-head > div")]'
+    + '.filter(d=>d.dataset.col);if(!cs.length)return 0;'
+    + 'const a=cs[2].getBoundingClientRect();'
+    + 'window.__clk={el:cs[2],x:a.left+a.width/2,y:a.top+a.height/2};'
+    + 'window.__clk.el.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,button:0,'
+    + 'clientX:window.__clk.x,clientY:window.__clk.y}));return 1})()'
+  )
+  await pressMove('window.dispatchEvent(new MouseEvent("mouseup",{bubbles:true}))')
+  await pressMove(
+    '(()=>{const m=window.__clk;if(!m)return 0;m.el.dispatchEvent('
+    + 'new MouseEvent("click",{bubbles:true,clientX:m.x,clientY:m.y}));return 1})()'
+  )
+  const k2 = await headKeys()
+  const arrow = await w.webContents.executeJavaScript(
+    '(()=>{const cs=[...document.querySelectorAll(".col-head > div")]'
+    + '.filter(d=>d.dataset.col);'
+    + 'return /[▲▼]/.test(cs[2]?cs[2].textContent:"")?"yes":"no"})()'
+  )
+  log('after a plain click', { k2, arrow })
+  expect(
+    'a click that does not move still sorts',
+    arrow === 'yes' && JSON.stringify(k2) === JSON.stringify(k1),
+    { k1, k2, arrow }
+  )
+
+  await setColsAndReload(colsBeforeMove)
+  const k3 = await headKeys()
+  log('order restored', k3)
+  expect('the run leaves the order as it found it', JSON.stringify(k3) === JSON.stringify(k0), {
+    k0,
+    k3
+  })
+
   // The file naming template.  Only its preview is exercised: actually
   // renaming moves files on disk, so the confirmation is answered with 取消
   // and the template is put back afterwards.

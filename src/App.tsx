@@ -596,6 +596,24 @@ export default function App() {
   }
 
   /**
+   * Move one column to a gap between two others.
+   *
+   * `toIndex` counts the gaps in the order as it stands, so it is a position
+   * a column can be dropped into rather than an index into the list — the
+   * caller does not have to know which side of the gap the dragged column
+   * started on, and the off-by-one that comes with guessing is avoided.
+   */
+  const moveCol = (key: ColKey, toIndex: number) => {
+    const from = cols.indexOf(key)
+    if (from < 0) return
+    const at = toIndex > from ? toIndex - 1 : toIndex
+    if (at === from) return
+    const next = cols.filter((k) => k !== key)
+    next.splice(at, 0, key)
+    changeCols(next)
+  }
+
+  /**
    * One column's width, or null to hand it back to its default track.
    *
    * Only the state is touched: the drag calls this once per frame and a frame
@@ -2090,6 +2108,7 @@ export default function App() {
             cols={cols}
             colWidths={colWidths}
             onColWidth={setColWidth}
+            onColMove={moveCol}
             sort={sort}
             onSort={(k) =>
               setSort((s) =>
