@@ -170,7 +170,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 按标识符添加 | 粘 DOI / arXiv id / 标题，查到后确认再建条目，不需要 PDF |
 | 查重合并 | 按 DOI / arXiv id / 标题找重复；合并只补缺失字段 |
 | 回收站 | 移入回收站、恢复、彻底删除 |
-| 导出 | BibTeX / RIS / EndNote XML，可只导出当前筛选结果或单条 |
+| 导出 | BibTeX / RIS / EndNote XML，可只导出当前筛选结果或单条；弹保存对话框自己选位置，记住上次目录 |
 | 检查更新 | 一键从 GitHub Releases 拉新版、下载、安装并重启 |
 | 字号 | 工具栏 A−/A+，或 Ctrl+− / Ctrl+=。整站 rem，一个旋钮全跟着变 |
 | 主题 | 深 / 浅两色，工具栏 ☾ / ☀ 切换，会记住；原生滚动条与表单也跟着变 |

@@ -166,6 +166,9 @@ export interface AppConfig {
    *  costs index size; lowering it costs recall.  Changing it drops the index,
    *  because one built for a different budget describes a different corpus. */
   ftPages?: number
+  /** Where the last export was written.  The save dialog starts here next
+   *  time, so exporting is not a hunt through the tree every time. */
+  exportDir?: string
 }
 
 export const DEFAULT_FT_PAGES = 3

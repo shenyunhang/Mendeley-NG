@@ -1221,6 +1221,69 @@ async function runSmoke() {
     + `pdfNameTemplate:${JSON.stringify(tpl0 ?? '{authors} - {year} - {title}')}});return 1})()`
   )
 
+  // Export used to be a browser download, which always landed in the downloads
+  // folder and came out as "library (1).bib" the second time.  A save dialog
+  // cannot be driven headlessly, so it is stubbed: what is asserted is that
+  // the text reaches whatever path the dialog returns, that the dialog is
+  // asked for a .bib with a sensible starting name, that the folder is
+  // remembered for next time, and that cancelling stays silent.
+  const exportDir = path.join(dataDir(), 'smoke-export')
+  fs.rmSync(exportDir, { recursive: true, force: true })
+  fs.mkdirSync(exportDir, { recursive: true })
+  const savedTo = path.join(exportDir, 'smoke.bib')
+  let cancelNext = false
+  const askLog: { defaultPath?: string; ext?: string }[] = []
+  const realSaveDialog = dialog.showSaveDialog
+  ;(dialog as unknown as { showSaveDialog: unknown }).showSaveDialog = async (
+    _w: unknown,
+    o: { defaultPath?: string; filters?: { extensions: string[] }[] }
+  ) => {
+    askLog.push({ defaultPath: o?.defaultPath, ext: o?.filters?.[0]?.extensions?.[0] })
+    return cancelNext ? { canceled: true, filePath: '' } : { canceled: false, filePath: savedTo }
+  }
+  const clickExport = (label: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const b=[...document.querySelectorAll('button')]`
+      + `.find(x=>x.textContent.trim()===${JSON.stringify(label)});if(!b||b.disabled)return 0;`
+      + `b.click();return 1})()`
+    )
+  expect('an export button is reachable', (await clickExport('导出 BibTeX')) === 1, 'button')
+  // the round trip is two processes long; wait for the file rather than
+  // guessing how long the dialog and the write take
+  let wrote = ''
+  for (let i = 0; i < 60 && !wrote; i++) {
+    await new Promise((r) => setTimeout(r, 100))
+    if (fs.existsSync(savedTo)) wrote = fs.readFileSync(savedTo, 'utf8')
+  }
+  expect('the export reaches the chosen path', wrote.length > 0, savedTo)
+  expect('what lands in the file is BibTeX', /@\w+\{/.test(wrote), wrote.slice(0, 80))
+  expect('the dialog is asked for a bib file', askLog[0]?.ext === 'bib', askLog[0])
+  expect(
+    'the dialog starts from a named file',
+    /library\.bib$/.test(askLog[0]?.defaultPath ?? ''),
+    askLog[0]?.defaultPath
+  )
+  expect(
+    'the folder is remembered for next time',
+    loadConfig().exportDir === exportDir,
+    loadConfig().exportDir
+  )
+  cancelNext = true
+  await clickExport('导出 BibTeX')
+  await new Promise((r) => setTimeout(r, 900))
+  const afterCancel = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({err:!!document.querySelector(".err"),'
+      + 'msg:(document.querySelector(".pdf-msg")||{}).textContent||null})'
+    )
+  )
+  // cancelling is the reader changing their mind, not a failure: a banner here
+  // would make the button feel like it broke
+  expect('cancelling the export says nothing', afterCancel.err === false, afterCancel)
+  ;(dialog as unknown as { showSaveDialog: unknown }).showSaveDialog = realSaveDialog
+  fs.rmSync(exportDir, { recursive: true, force: true })
+  saveConfig({ ...loadConfig(), exportDir: undefined })
+
   const shot = async (name: string) => {
     const p = path.join(app.getPath('temp'), 'mendeley-ng-' + name + '.png')
     const img = await w.webContents.capturePage()
@@ -2624,6 +2687,36 @@ ipcMain.handle('dialog:importToken', async () => {
     return { ok: false, error: String(e) }
   }
 })
+
+/**
+ * Exports are the one place where a file has to land where the reader said,
+ * not wherever the browser keeps downloads: the second export used to arrive
+ * as "library (1).bib" and nobody had asked for that.  The folder is
+ * remembered so the next export starts where the last one ended.
+ *
+ * Cancelling is a normal outcome, not a failure — it must not raise a banner.
+ */
+ipcMain.handle(
+  'dialog:saveText',
+  async (_e, name: string, text: string, kind: string, ext: string) => {
+    if (!win) return { canceled: true }
+    const cfg = loadConfig()
+    const r = await dialog.showSaveDialog(win, {
+      title: `导出为 ${kind}`,
+      defaultPath: path.join(cfg.exportDir || app.getPath('downloads'), name),
+      filters: [{ name: kind, extensions: [ext] }],
+      properties: ['showOverwriteConfirmation']
+    })
+    if (r.canceled || !r.filePath) return { canceled: true }
+    try {
+      fs.writeFileSync(r.filePath, text, 'utf8')
+      saveConfig({ ...cfg, exportDir: path.dirname(r.filePath) })
+      return { path: r.filePath }
+    } catch (e) {
+      return { error: String(e) }
+    }
+  }
+)
 
 ipcMain.handle('doc:patch', async (_e, id: string, body: Record<string, unknown>) => {
   const c = ensureClient()

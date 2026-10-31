@@ -1407,9 +1407,27 @@ export default function App() {
     ]
   }
 
-  const exportBib = () => download(toBibtex(target), 'library.bib')
-  const exportRis = () => download(toRis(target), 'library.ris')
-  const exportEndnote = () => download(toEndnoteXml(target), 'library.xml')
+  /**
+   * Exports ask where the file should go instead of dropping it in the
+   * downloads folder, where a second export would quietly arrive as
+   * "library (1).bib".  The folder is remembered on the far side, so the next
+   * export starts where the last one ended.  Cancelling is silent: the reader
+   * changed their mind, nothing went wrong.
+   */
+  const exportAs = async (fmt: 'bib' | 'ris' | 'xml') => {
+    const kind = fmt === 'bib' ? 'BibTeX' : fmt === 'ris' ? 'RIS' : 'EndNote XML'
+    const text =
+      fmt === 'bib' ? toBibtex(target) : fmt === 'ris' ? toRis(target) : toEndnoteXml(target)
+    const r = await window.api.saveText(`library.${fmt}`, text, kind, fmt)
+    if (r.error) setErr(`导出失败：${r.error}`)
+    else if (r.path) {
+      setBatchMsg(`已导出 ${target.length} 条到 ${r.path}`)
+      setTimeout(() => setBatchMsg(null), 6000)
+    }
+  }
+  const exportBib = () => void exportAs('bib')
+  const exportRis = () => void exportAs('ris')
+  const exportEndnote = () => void exportAs('xml')
 
   /**
    * Put a formatted citation on the clipboard.  This is the single most
@@ -2279,11 +2297,3 @@ export default function App() {
   )
 }
 
-function download(text: string, name: string) {
-  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = name
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000)
-}

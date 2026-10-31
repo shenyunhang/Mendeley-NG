@@ -33,6 +33,14 @@ const api = {
   readClipboard: () => ipcRenderer.invoke('clipboard:read') as Promise<string>,
   pickPdfDir: () => ipcRenderer.invoke('dialog:pickPdfDir') as Promise<string | null>,
   importToken: () => ipcRenderer.invoke('dialog:importToken') as Promise<{ ok: boolean; error?: string } | null>,
+  /** Ask where to put an export, then write it.  `canceled` means the reader
+   *  closed the dialog, which is not an error. */
+  saveText: (name: string, text: string, kind: string, ext: string) =>
+    ipcRenderer.invoke('dialog:saveText', name, text, kind, ext) as Promise<{
+      path?: string
+      canceled?: boolean
+      error?: string
+    }>,
 
   patchDoc: (id: string, body: Record<string, unknown>) =>
     ipcRenderer.invoke('doc:patch', id, body) as Promise<Doc>,

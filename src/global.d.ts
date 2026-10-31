@@ -24,6 +24,12 @@ export interface Api {
   readClipboard: () => Promise<string>
   pickPdfDir: () => Promise<string | null>
   importToken: () => Promise<{ ok: boolean; error?: string } | null>
+  saveText: (
+    name: string,
+    text: string,
+    kind: string,
+    ext: string
+  ) => Promise<{ path?: string; canceled?: boolean; error?: string }>
   patchDoc: (id: string, body: Record<string, unknown>) => Promise<Doc>
   trashDoc: (id: string) => Promise<{ ok: boolean }>
   listTrash: () => Promise<Doc[]>
