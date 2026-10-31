@@ -418,7 +418,6 @@ export default function DetailsPanel({
         <button
           className="danger"
           onClick={async () => {
-            if (!confirm(`把「${doc.title || '这条文献'}」移入回收站？可在回收站里恢复。`)) return
             await onTrash?.()
           }}
           title="移入回收站，可在回收站恢复"

@@ -18,6 +18,7 @@ import DupesView from './components/DupesView'
 import ImportView from './components/ImportView'
 import AddByIdView from './components/AddByIdView'
 import AskDialog from './components/AskDialog'
+import ConfirmDialog from './components/ConfirmDialog'
 import DocTable from './components/DocTable'
 import ColumnPicker from './components/ColumnPicker'
 import FullTextView from './components/FullTextView'
@@ -145,6 +146,27 @@ export default function App() {
     initial: string
     onOk: (v: string) => void
   } | null>(null)
+  /**
+   * One confirmation box for the whole app, served through a promise so that
+   * the caller reads the way it used to with `confirm()`:
+   * `if (!(await confirm({ ... }))) return`.
+   *
+   * Every destructive action routes through it rather than through
+   * `window.confirm`, which does not follow the theme, cannot say whether the
+   * thing can be undone, and cannot be tested — the smoke run had to stub it
+   * to always refuse, so the paths behind it were never exercised.
+   */
+  const [confirm, setConfirm] = useState<{
+    title: string
+    body?: string
+    ok?: string
+    resolve: (v: boolean) => void
+  } | null>(null)
+  const askConfirm = useCallback(
+    (req: { title: string; body?: string; ok?: string }) =>
+      new Promise<boolean>((resolve) => setConfirm({ ...req, resolve })),
+    []
+  )
   const [pdfDir, setPdfDir] = useState('')
   /**
    * Whether a token has been found yet, or `null` while that is still being
@@ -547,8 +569,15 @@ export default function App() {
     setMulti([])
   }
 
-  const deleteSearch = (id: string) => {
-    const next = saved.filter((s) => s.id !== id)
+  const deleteSearch = async (id: string) => {
+    const s = saved.find((x) => x.id === id)
+    const go = await askConfirm({
+      title: `删除保存的搜索「${s?.name}」？`,
+      body: '保存的搜索没有回收站，删掉就没了。',
+      ok: '删除'
+    })
+    if (!go) return
+    const next = saved.filter((x) => x.id !== id)
     setSaved(next)
     if (activeSearch === id) setActiveSearch(null)
     window.api.setConfig({ savedSearches: next })
@@ -581,8 +610,15 @@ export default function App() {
 
   const applyView = (v: SavedView) => changeCols(normaliseCols(v.cols))
 
-  const deleteView = (id: string) => {
-    const next = views.filter((v) => v.id !== id)
+  const deleteView = async (id: string) => {
+    const v = views.find((x) => x.id === id)
+    const go = await askConfirm({
+      title: `删除视图「${v?.name}」？`,
+      body: '视图只是一套列的排布，删掉不影响文献本身。',
+      ok: '删除'
+    })
+    if (!go) return
+    const next = views.filter((x) => x.id !== id)
     setViews(next)
     window.api.setConfig({ views: next })
   }
@@ -939,12 +975,14 @@ export default function App() {
         window.api.setConfig({ pdfNameTemplate: next })
         const plan = await window.api.renamePdfs(next, false)
         if (!plan.total) return
-        const go = confirm(
-          `按新模板要改名 ${plan.total} 个本地 PDF。\n\n` +
+        const go = await askConfirm({
+          title: `按新模板要改名 ${plan.total} 个本地 PDF`,
+          body:
             plan.sample.join('\n') +
             (plan.total > plan.sample.length ? `\n…还有 ${plan.total - plan.sample.length} 个` : '') +
-            '\n\n现在就改？（同名的会跳过，不会覆盖）'
-        )
+            '\n\n同名的会跳过，不会覆盖。',
+          ok: '改名'
+        })
         if (!go) return
         const r = await window.api.renamePdfs(next, true)
         await window.api.loadLibrary().then((res) => {
@@ -1070,6 +1108,17 @@ export default function App() {
   const deleteAnnotation = async (id: string) => {
     const all = await window.api.loadAnnotations()
     const gone = all.find((a) => a.id === id)
+    // An annotation is the one thing here that is gone for good: there is no
+    // trash for it, and deleting it also deletes it in the cloud.  Everything
+    // else that can be removed has a way back.
+    const go = await askConfirm({
+      title: '删除这条标注？',
+      body: gone?.text
+        ? `「${gone.text.slice(0, 60)}${gone.text.length > 60 ? '…' : ''}」\n\n不可恢复，云端那条也会一并删掉。`
+        : '不可恢复，云端那条也会一并删掉。',
+      ok: '删除标注'
+    })
+    if (!go) return
     const next = all.filter((a) => a.id !== id)
     await window.api.saveAnnotations(next)
     setAllAnns(next)
@@ -1136,7 +1185,14 @@ export default function App() {
   /** Move `list` to the trash.  Shared by the batch bar and the row menu. */
   const trashDocs = async (list: Doc[]) => {
     if (!list.length) return
-    if (!confirm(`把选中的 ${list.length} 条移入回收站？可在回收站里恢复。`)) return
+    const go = await askConfirm({
+      title: `把 ${list.length} 条文献移入回收站？`,
+      body:
+        (list.length === 1 ? `「${list[0]?.title || '无标题'}」` : `选中的 ${list.length} 条`) +
+        '会移入回收站，可以在回收站里恢复。',
+      ok: '移入回收站'
+    })
+    if (!go) return
     const { ok: n, failed } = await runBatch(
       list,
       (d) => d.title || d.id,
@@ -1554,6 +1610,21 @@ export default function App() {
           onCancel={() => setAsk(null)}
         />
       )}
+      {confirm && (
+        <ConfirmDialog
+          title={confirm.title}
+          body={confirm.body}
+          ok={confirm.ok}
+          onOk={() => {
+            confirm.resolve(true)
+            setConfirm(null)
+          }}
+          onCancel={() => {
+            confirm.resolve(false)
+            setConfirm(null)
+          }}
+        />
+      )}
 
       <div className="body" ref={bodyRef}>
         <div className="pane pane-left" style={{ flexBasis: leftW }}>
@@ -1616,10 +1687,14 @@ export default function App() {
             onDelete={async (fid) => {
               const f = folders.find((x) => x.id === fid)
               const kids = (tree.subtree.get(fid) ?? [fid]).length - 1
-              const msg = kids
-                ? `删除文件夹「${f?.name}」及其 ${kids} 个子文件夹？其中的文献不会被删除。`
-                : `删除文件夹「${f?.name}」？其中的文献不会被删除。`
-              if (!confirm(msg)) return
+              const go = await askConfirm({
+                title: kids
+                  ? `删除文件夹「${f?.name}」及其 ${kids} 个子文件夹？`
+                  : `删除文件夹「${f?.name}」？`,
+                body: '其中的文献不会被删除，只是不再属于这个文件夹。',
+                ok: '删除文件夹'
+              })
+              if (!go) return
               await window.api.deleteFolder(fid)
               const gone = new Set(tree.subtree.get(fid) ?? [fid])
               setFolders((fs) => fs.filter((x) => !gone.has(x.id)))
@@ -1669,10 +1744,26 @@ export default function App() {
             docs={docs}
             status={ftStat}
             onClose={() => setFtMode(false)}
-            onBuild={(rebuild) => {
+            onBuild={async (rebuild) => {
+              if (rebuild) {
+                const go = await askConfirm({
+                  title: '清空全文索引并从头重建？',
+                  body: '会重新读取全部本地 PDF，几千篇要几分钟。中途可以停，已经读进去的会留着。',
+                  ok: '重建'
+                })
+                if (!go) return
+              }
               window.api.ftBuild(rebuild).then(setFtStat)
             }}
-            onClear={() => window.api.ftClear().then(setFtStat)}
+            onClear={async () => {
+              const go = await askConfirm({
+                title: '删除全文索引？',
+                body: '搜索正文前需要重建一次。文献本身不受影响。',
+                ok: '删除索引'
+              })
+              if (!go) return
+              window.api.ftClear().then(setFtStat)
+            }}
             onCancel={() => window.api.ftCancel().then(setFtStat)}
             onOpen={(d, p) => {
               setSelId(d.id)
@@ -1706,6 +1797,14 @@ export default function App() {
             onClose={() => setDupes(null)}
             onMerge={async (g, keeper) => {
               const others = g.docs.filter((d) => d.id !== keeper.id)
+              const go = await askConfirm({
+                title: `合并这 ${g.docs.length} 条？`,
+                body:
+                  `留下的那条是「${keeper.title || '无标题'}」，它的空字段会用其余几条补上。\n` +
+                  `其余 ${others.length} 条会移入回收站，可以在回收站里恢复。`,
+                ok: '合并'
+              })
+              if (!go) return
               // fill only what the keeper is missing, so merging never
               // overwrites a good field with a worse one
               const patch: Record<string, unknown> = {}
@@ -1792,8 +1891,15 @@ export default function App() {
               setTrash((t) => (t ? t.filter((d) => d.id !== id) : t))
             }}
             onPurge={async (id) => {
+              const d = trash.find((x) => x.id === id)
+              const go = await askConfirm({
+                title: `彻底删除「${d?.title || '无标题'}」？`,
+                body: '此操作不可恢复，云端那条记录也会一并删掉。',
+                ok: '彻底删除'
+              })
+              if (!go) return
               await window.api.purgeDoc(id)
-              setTrash((t) => (t ? t.filter((d) => d.id !== id) : t))
+              setTrash((t) => (t ? t.filter((x) => x.id !== id) : t))
             }}
           />
         ) : (
@@ -1938,6 +2044,14 @@ export default function App() {
                 )
               }
               onTrash={async () => {
+                // the details pane is a quieter place to do this from than a
+                // menu, which is exactly why it has to ask
+                const go = await askConfirm({
+                  title: '把这条文献移入回收站？',
+                  body: `「${selected.title || '无标题'}」会移入回收站，可以在回收站里恢复。`,
+                  ok: '移入回收站'
+                })
+                if (!go) return
                 await window.api.trashDoc(selected.id)
                 setLib((l) => (l ? { ...l, docs: l.docs.filter((x) => x.id !== selected.id) } : l))
                 setSelId(null)
@@ -1976,6 +2090,7 @@ export default function App() {
             <PdfViewer
               doc={selected}
               jumpTo={jump}
+              confirm={askConfirm}
               onLocalPdf={(id, p) =>
                 setLib((l) =>
                   l ? { ...l, docs: l.docs.map((x) => (x.id === id ? { ...x, localPdf: p } : x)) } : l

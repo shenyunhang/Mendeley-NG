@@ -57,8 +57,6 @@ export default function DupesView({ groups, onClose, onMerge }: Props) {
                   style={{ padding: '2px 8px', fontSize: '0.733rem' }}
                   disabled={busy === g.key}
                   onClick={async () => {
-                    if (!confirm(`合并这 ${g.docs.length} 条？其余 ${g.docs.length - 1} 条会移入回收站。`))
-                      return
                     setBusy(g.key)
                     await onMerge(g, keeper)
                     setBusy(null)

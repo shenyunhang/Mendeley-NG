@@ -123,13 +123,17 @@ const rectToPos = (r: Rect, page: number, s: Size): PdfPos => ({
 export default function PdfViewer({
   doc,
   onLocalPdf,
-  jumpTo
+  jumpTo,
+  confirm
 }: {
   doc: Doc
   onLocalPdf?: (docId: string, p: string) => void
   /** Open at this page.  The nonce is what makes a second jump to the same
    *  page on the same document possible, e.g. two hits on page 3. */
   jumpTo?: { page: number; nonce: number } | null
+  /** The app's one confirmation box.  Deleting an annotation is the only
+   *  destructive thing in here, and it has no way back. */
+  confirm: (req: { title: string; body?: string; ok?: string }) => Promise<boolean>
 }) {
   const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null)
   const [numPages, setNumPages] = useState(0)
@@ -1332,6 +1336,18 @@ export default function PdfViewer({
   const remove = async (id: string) => {
     const target = anns.find((a) => a.id === id)
     if (!target) return
+    // Asking here too, and not only in the annotation list, because this is
+    // the button next to the highlight itself — the one most easily hit by
+    // accident while reaching for the colour swatches beside it.  An
+    // annotation has no trash to come back from.
+    const go = await confirm({
+      title: target.type === 'note' ? '删除这条笔记？' : '删除这条标注？',
+      body: target.note
+        ? `「${target.note.slice(0, 60)}${target.note.length > 60 ? '…' : ''}」\n\n不可恢复，云端那条也会一并删掉。`
+        : '不可恢复，云端那条也会一并删掉。',
+      ok: '删除'
+    })
+    if (!go) return
     if (target.remoteId) {
       try {
         await window.api.deleteRemoteAnnotation(target.remoteId)

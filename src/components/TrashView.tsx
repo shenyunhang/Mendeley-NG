@@ -66,10 +66,7 @@ export default function TrashView({ docs, onClose, onRestore, onPurge }: Props) 
                 className="danger"
                 style={{ padding: '2px 8px', fontSize: '0.733rem' }}
                 title="不可恢复，云端记录也会一并删除"
-                onClick={() => {
-                  if (confirm(`彻底删除「${d.title || '无标题'}」？此操作不可恢复。`))
-                    onPurge(d.id)
-                }}
+                onClick={() => onPurge(d.id)}
               >
                 彻底删除
               </button>

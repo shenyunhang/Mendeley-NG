@@ -74,10 +74,7 @@ export default function FullTextView({
           style={{ padding: '2px 6px', fontSize: '0.733rem' }}
           disabled={building}
           title="清空并从头重建（已删文献留下的空洞只有重建能回收）"
-          onClick={() => {
-            if (!confirm('清空全文索引并从头重建？会重新读取全部本地 PDF。')) return
-            onBuild(true)
-          }}
+          onClick={() => onBuild(true)}
         >
           重建
         </button>
@@ -85,10 +82,7 @@ export default function FullTextView({
           style={{ padding: '2px 6px', fontSize: '0.733rem' }}
           disabled={building}
           title="删除索引"
-          onClick={() => {
-            if (!confirm('删除全文索引？搜索正文前需要重建。')) return
-            onClear()
-          }}
+          onClick={() => onClear()}
         >
           清空
         </button>

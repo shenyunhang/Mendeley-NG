@@ -623,6 +623,19 @@ td .no-pdf {
   margin-top: 10px;
 }
 
+/* the second question before anything that cannot be taken back.  Wider than
+   the one-line input dialog because it has to say what the consequence is,
+   and the consequence is the whole reason it is on screen. */
+.confirm-modal {
+  max-width: 30em;
+}
+.confirm-body {
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: var(--fg-dim);
+  white-space: pre-line;
+}
+
 .group-head {
   padding: 5px 8px;
   font-size: 0.733rem;
