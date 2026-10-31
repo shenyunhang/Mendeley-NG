@@ -24,6 +24,31 @@ export type SortKey =
   | 'starred'
   | 'created'
 
+/** Every key the comparison in App understands.  Sorting is remembered
+ *  between runs, so a key read back out of the config has to be checked
+ *  against this list: a name that stopped being a sort key would otherwise
+ *  come back as an ordering no column can display the arrow for. */
+export const SORT_KEYS: SortKey[] = [
+  'title',
+  'authors',
+  'year',
+  'source',
+  'citation_key',
+  'starred',
+  'created'
+]
+
+/** A new library is sorted newest first, which is what "最近添加" implies. */
+export const DEFAULT_SORT: { key: SortKey; dir: 1 | -1 } = { key: 'year', dir: -1 }
+
+export function normaliseSort(c: unknown): { key: SortKey; dir: 1 | -1 } {
+  if (!c || typeof c !== 'object') return DEFAULT_SORT
+  const s = c as { key?: unknown; dir?: unknown }
+  const key = SORT_KEYS.find((k) => k === s.key)
+  if (!key) return DEFAULT_SORT
+  return { key, dir: s.dir === -1 ? -1 : 1 }
+}
+
 export interface ColumnDef {
   key: ColKey
   label: string

@@ -169,6 +169,9 @@ export interface AppConfig {
   /** Where the last export was written.  The save dialog starts here next
    *  time, so exporting is not a hunt through the tree every time. */
   exportDir?: string
+  /** Sort the reader last asked for.  A key that is no longer a sort key is
+   *  dropped on the way back in, so the arrow always lands on a real column. */
+  sort?: { key: string; dir: 1 | -1 }
 }
 
 export const DEFAULT_FT_PAGES = 3

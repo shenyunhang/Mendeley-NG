@@ -1168,6 +1168,85 @@ async function runSmoke() {
     k3
   })
 
+  // How the list is sorted is something the reader chose, so it has to
+  // survive a restart.  Pressing 标题 and coming back on Monday to
+  // newest-first undoes the one press that matters, and it is the kind of
+  // thing that reads as the app not listening.  Both halves are checked: the
+  // press writes, and a fresh load reads it back.
+  const sortCfg = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(async()=>{const c=await window.api.getConfig();'
+        + 'return JSON.stringify(c.sort||null)})()'
+      )
+    )
+  const setSortAndReload = async (s: { key: string; dir: 1 | -1 } | null) => {
+    // straight to the config: setConfig can only merge, so clearing the sort
+    // the way the reader never had one would leave the old value behind
+    const cfg = loadConfig()
+    if (s) cfg.sort = s
+    else delete cfg.sort
+    saveConfig(cfg)
+    await w.loadFile(path.join(__dirname, '../renderer/index.html'))
+    await new Promise((r) => setTimeout(r, 2500))
+  }
+  const pressHead = (col: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const c=[...document.querySelectorAll(".col-head > div")]`
+      + `.find(d=>d.dataset.col===${JSON.stringify(col)});if(!c)return 0;`
+      + `c.dispatchEvent(new MouseEvent("click",{bubbles:true}));return 1})()`
+    )
+  // what the reader had before the run started touching things: the press
+  // further down writes, and the run has to put it back
+  const sortState = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(()=>{const cs=[...document.querySelectorAll(".col-head > div")]'
+        + '.filter(d=>d.dataset.col);'
+        + 'const a=cs.find(d=>/[▲▼]/.test(d.textContent||""));'
+        + 'return JSON.stringify(a?{col:a.dataset.col,'
+        + 'dir:/▲/.test(a.textContent||"")?1:-1}:null)})()'
+      )
+    )
+  const sort0: { key: string; dir: 1 | -1 } | null = cfg0.sort ?? null
+  const before = await sortState()
+  // the press is asked for relative to whatever was sorted before it, because
+  // earlier checks in this run have already pressed a header: 1 or -1 on its
+  // own would only be right for one starting state
+  const want1 = before?.col === 'title' ? -(before.dir as number) : 1
+  expect('title is a column that can sort', (await pressHead('title')) === 1, 'title')
+  await new Promise((r) => setTimeout(r, 400))
+  const sort1 = await sortCfg()
+  log('sort after one press', { had: sort0, before, sort1 })
+  expect(
+    'a press on a header is remembered',
+    sort1?.key === 'title' && sort1?.dir === want1,
+    { sort1, want1 }
+  )
+  await pressHead('title')
+  await new Promise((r) => setTimeout(r, 400))
+  const sort2 = await sortCfg()
+  log('sort after a second press', sort2)
+  expect('pressing the same header again flips it', sort2?.dir === -want1, { sort2, want1 })
+  await setSortAndReload(sort2)
+  const arrowAfter = await arrowKey()
+  log('arrow after a fresh load', arrowAfter)
+  expect('the sort comes back after a restart', arrowAfter === 'title', arrowAfter)
+  // a key that stopped being sortable must not come back as an arrow on
+  // nothing: it falls back to the default instead
+  await setSortAndReload({ key: 'nonsense', dir: 1 })
+  expect('a sort key that no longer exists is dropped', (await arrowKey()) === 'year', 'nonsense')
+  await setSortAndReload(sort0)
+  const wantArrow = sort0 ? sort0.key : 'year'
+  const wantDir = sort0 ? sort0.dir : -1
+  const backState = await sortState()
+  log('sort restored', { wanted: { wantArrow, wantDir }, got: backState })
+  expect(
+    'the run leaves the sort as it found it',
+    backState?.col === wantArrow && backState?.dir === wantDir,
+    { wantArrow, wantDir, backState }
+  )
+
   // The file naming template.  Only its preview is exercised: actually
   // renaming moves files on disk, so the confirmation is answered with 取消
   // and the template is put back afterwards.

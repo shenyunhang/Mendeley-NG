@@ -22,7 +22,14 @@ import ConfirmDialog from './components/ConfirmDialog'
 import DocTable from './components/DocTable'
 import ColumnPicker from './components/ColumnPicker'
 import FullTextView from './components/FullTextView'
-import { migrateCols, normaliseCols, type ColKey, type SortKey } from './lib/columns'
+import {
+  DEFAULT_SORT,
+  migrateCols,
+  normaliseCols,
+  normaliseSort,
+  type ColKey,
+  type SortKey
+} from './lib/columns'
 import {
   CITE_STYLES,
   DEFAULT_CITE_STYLE,
@@ -123,10 +130,7 @@ export default function App() {
   const [folderId, setFolderId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [selId, setSelId] = useState<string | null>(null)
-  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({
-    key: 'year',
-    dir: -1
-  })
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(DEFAULT_SORT)
   const [status, setStatus] = useState<SyncStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [rightTab, setRightTab] = useState<'pdf' | 'details'>('details')
@@ -241,6 +245,10 @@ export default function App() {
       setSaved(c.savedSearches ?? [])
       setViews(c.views ?? [])
       setCols(migrateCols(c.cols))
+      // how the reader left the list is part of how they read it; going back
+      // to newest-first on every start undid the one press that matters most
+      // right after opening the app
+      setSort(normaliseSort(c.sort))
       if (c.colWidths) setColWidths(c.colWidths)
       if (c.pdfNameTemplate) setNameTemplate(c.pdfNameTemplate)
       if (isCiteStyle(c.citeStyle)) setCiteStyle(c.citeStyle)
@@ -593,6 +601,21 @@ export default function App() {
   const changeCols = (next: ColKey[]) => {
     setCols(next)
     window.api.setConfig({ cols: next })
+  }
+
+  /**
+   * A press on a column header is a request about how to read the list, and
+   * it is written through: finding the order reset to newest-first on
+   * Monday after pressing a header twice on Friday is the kind of small
+   * betrayal that makes a tool feel like it is not listening.  Pressing the
+   * same header again flips the direction rather than starting over, which
+   * is the only reason a second press is ever needed.
+   */
+  const sortBy = (k: SortKey) => {
+    const next: { key: SortKey; dir: 1 | -1 } =
+      sort.key === k ? { key: k, dir: (sort.dir * -1) as 1 | -1 } : { key: k, dir: 1 }
+    setSort(next)
+    window.api.setConfig({ sort: next })
   }
 
   /**
@@ -2133,11 +2156,7 @@ export default function App() {
             onColWidth={setColWidth}
             onColMove={moveCol}
             sort={sort}
-            onSort={(k) =>
-              setSort((s) =>
-                s.key === k ? { key: k, dir: (s.dir * -1) as 1 | -1 } : { key: k, dir: 1 }
-              )
-            }
+            onSort={sortBy}
             multi={multi}
             selectedId={selId}
             empty={emptyState}
