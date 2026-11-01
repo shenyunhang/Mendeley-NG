@@ -2271,6 +2271,39 @@ async function runSmoke() {
   expect('find draws a mark for them', fi.marks > 0, fi)
   expect('find marks the current hit', fi.current === true, fi)
   expect('a find mark has real size', !!fi.box && fi.box.w > 0 && fi.box.h > 0, fi)
+  // "1 / 102" says which and how many only to somebody who already knows the
+  // convention.  Spelled out, it answers the question the count exists for:
+  // is this the first of three or the first of a hundred?
+  expect(
+    'the count says which match this is and how many there are',
+    /第\s*\d+\s*个匹配/.test(String(fi.count ?? '')) &&
+      /共\s*\d+\s*个/.test(String(fi.count ?? '')),
+    fi
+  )
+  // The matches are on the page, so the count belongs over the page, in the
+  // corner the eye goes to.  Checked geometrically rather than by reading the
+  // stylesheet, because what matters is where it lands, not what it says.
+  const findBox = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const f=document.querySelector(".pdf-find");'
+      + 'const p=document.querySelector(".pdf-body");if(!f||!p)return "{}";'
+      + 'const a=f.getBoundingClientRect(),b=p.getBoundingClientRect();'
+      + 'return JSON.stringify({pos:getComputedStyle(f).position,'
+      + 'fromRight:Math.round(b.right-a.right),fromTop:Math.round(a.top-b.top),'
+      + 'inside:a.top>=b.top-1&&a.right<=b.right+1})})()'
+    )
+  )
+  log('find bar placement', findBox)
+  expect(
+    'the find bar floats over the top right of the page',
+    findBox.pos === 'absolute' && findBox.inside === true && findBox.fromRight < 40,
+    findBox
+  )
+  expect(
+    'and it is at the top of it, not halfway down',
+    typeof findBox.fromTop === 'number' && findBox.fromTop >= 0 && findBox.fromTop < 40,
+    findBox
+  )
   // stepping has to move the caret, and on a multi-hit query it also has to
   // wrap around rather than dead-end at the last one
   await w.webContents.executeJavaScript(

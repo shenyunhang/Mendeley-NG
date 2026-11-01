@@ -1750,43 +1750,11 @@ export default function PdfViewer({
         </span>
       </div>
 
-      {findOpen && (
-        <div className="pdf-find">
-          <input
-            ref={findInput}
-            value={findQ}
-            placeholder="在这篇 PDF 里查找…"
-            onChange={(e) => setFindQ(e.target.value)}
-          />
-          <button
-            disabled={!findHits.length}
-            title="上一个 (Shift+Enter)"
-            onClick={() => gotoHit(findAt - 1)}
-          >
-            ↑
-          </button>
-          <button
-            disabled={!findHits.length}
-            title="下一个 (Enter / F3)"
-            onClick={() => gotoHit(findAt + 1)}
-          >
-            ↓
-          </button>
-          <span className="find-count">
-            {findBusy
-              ? '查找中…'
-              : findHits.length
-                ? `${findAt + 1} / ${findHits.length}`
-                : findQ.trim().length >= 2
-                  ? '无匹配'
-                  : ''}
-          </span>
-          <span style={{ flex: 1 }} />
-          <button title="关闭 (Esc)" onClick={() => setFindOpen(false)}>
-            ×
-          </button>
-        </div>
-      )}
+      {/* The find bar used to be a row of its own under the toolbar, which put
+          the count somewhere the reader is not looking: the matches are in the
+          page, and so is the number that says how many there are.  It floats
+          over the top right corner of the page instead, which is also where it
+          does not push the page down every time it is opened. */}
 
       {msg && (
         <div className="pdf-msg" onClick={() => setMsg(null)}>
@@ -1934,6 +1902,43 @@ export default function PdfViewer({
                 </div>
               )
             })}
+          </div>
+        )}
+
+        {findOpen && (
+          <div className="pdf-find">
+            <input
+              ref={findInput}
+              value={findQ}
+              placeholder="在这篇 PDF 里查找…"
+              onChange={(e) => setFindQ(e.target.value)}
+            />
+            <button
+              disabled={!findHits.length}
+              title="上一个 (Shift+Enter)"
+              onClick={() => gotoHit(findAt - 1)}
+            >
+              ↑
+            </button>
+            <button
+              disabled={!findHits.length}
+              title="下一个 (Enter / F3)"
+              onClick={() => gotoHit(findAt + 1)}
+            >
+              ↓
+            </button>
+            <span className="find-count">
+              {findBusy
+                ? '查找中…'
+                : findHits.length
+                  ? `第 ${findAt + 1} 个匹配 · 共 ${findHits.length} 个`
+                  : findQ.trim().length >= 2
+                    ? '无匹配'
+                    : ''}
+            </span>
+            <button title="关闭 (Esc)" onClick={() => setFindOpen(false)}>
+              ×
+            </button>
           </div>
         )}
       </div>
