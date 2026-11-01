@@ -24,8 +24,10 @@ import {
   ftBuild,
   ftCancel,
   ftClear,
+  ftPending,
   ftSearch,
   ftStatus,
+  ftVoid,
   setFullTextPages
 } from './fulltext'
 import type { FtStatus } from '../../shared/types'
@@ -3028,6 +3030,173 @@ async function runSmoke() {
     (addInfo.hits ?? 0) > 0 && addInfo.owned === true,
     addInfo
   )
+
+  // An entry describes a file, not just a document.  The same paper offered
+  // twice must not be written twice, and the same paper under a new name must
+  // be read again — which is what a rename or a re-attached PDF looks like.
+  let againInfo: { ok: boolean; same?: boolean; moved?: boolean; indexed?: number } = {
+    ok: false
+  }
+  let two: Doc[] = []
+  let late: Doc | undefined
+  let lateOther: Doc | undefined
+  const copyDir = path.join(app.getPath('temp'), 'mendeley-ng-ft-copies')
+  if (corpus.length >= 4) {
+    two = corpus.slice(0, 2)
+    const pair = corpus.slice(2, 4)
+    const before = ftStatus(ftDocs())
+    await ftAdd(pair, pair.map((d) => d.id))
+    const again = ftStatus(ftDocs())
+    fs.mkdirSync(copyDir, { recursive: true })
+    const moved = pair.map((d, i) => ({
+      ...d,
+      localPdf: path.join(copyDir, `${i}-${path.basename(d.localPdf as string)}`)
+    }))
+    moved.forEach((d, i) =>
+      fs.copyFileSync(pair[i]!.localPdf as string, d.localPdf as string)
+    )
+    await ftAdd(moved, moved.map((d) => d.id))
+    const afterMoved = ftStatus(ftDocs())
+    againInfo = {
+      ok: true,
+      same: again.bytes === before.bytes && again.indexed === before.indexed,
+      // new text, and no new document: the paper was re-read, not added
+      moved: afterMoved.bytes > again.bytes && afterMoved.indexed === again.indexed,
+      indexed: afterMoved.indexed
+    }
+  }
+  log('the same paper again', againInfo)
+  expect(
+    'a paper already in the index is not written twice',
+    againInfo.ok === true && againInfo.same === true,
+    againInfo
+  )
+  expect(
+    'a paper whose file moved is read again',
+    againInfo.ok === true && againInfo.moved === true,
+    againInfo
+  )
+
+  // A paper that arrives while the library is being indexed has to wait its
+  // turn.  The build took the list of papers it will read before it started,
+  // so nothing else would ever pick that one up.
+  //
+  // What is being added is a copy of a paper that does have a text layer
+  // under an id the build has never heard of, so the only way it can reach
+  // the index is the queue.  Whether a paper has a text layer is measured
+  // rather than assumed: a scan has none, and that is a property of the
+  // paper, not of the append.
+  let duringInfo: {
+    ok: boolean
+    added?: number
+    queued?: number
+    left?: number
+    indexed?: number
+    want?: number
+  } = { ok: false }
+  if (corpus.length >= 4) {
+    ftClear()
+    const twoGot = await ftAdd(two, two.map((d) => d.id))
+    let src: Doc | undefined
+    for (const d of corpus.slice(0, 10)) {
+      ftClear()
+      if (await ftAdd([d], [d.id])) {
+        src = d
+        break
+      }
+    }
+    if (src) {
+      const copy = (tag: string): Doc => ({
+        ...src!,
+        id: `smoke-late-${tag}`,
+        localPdf: path.join(copyDir, `${tag}-${path.basename(src!.localPdf as string)}`)
+      })
+      late = copy('a')
+      lateOther = copy('b')
+      fs.copyFileSync(src.localPdf as string, late.localPdf as string)
+      fs.copyFileSync(src.localPdf as string, lateOther.localPdf as string)
+      ftClear()
+      // not awaited: the whole point is to be inside the run
+      const running = ftBuild(two, () => undefined, true)
+      // ftBuild claims the text file before it awaits anything, so this lands
+      // while it is busy rather than racing it
+      const added = await ftAdd([late], [late.id])
+      const queued = ftPending()
+      await running
+      const left = ftPending()
+      duringInfo = {
+        ok: true,
+        added,
+        queued,
+        left,
+        indexed: ftStatus(ftDocs()).indexed,
+        want: twoGot + 1
+      }
+    }
+    ftClear()
+  }
+  log('a paper arriving during a build', duringInfo)
+  expect(
+    'a paper that arrives mid-build waits instead of being dropped',
+    duringInfo.ok === true && duringInfo.added === 0 && duringInfo.queued === 1,
+    duringInfo
+  )
+  expect(
+    'the run picks it up when it finishes',
+    duringInfo.ok === true && duringInfo.left === 0 && duringInfo.indexed === duringInfo.want,
+    duringInfo
+  )
+
+  // An index with nothing in it is not fixed by adding one paper to it: the
+  // paper becomes findable and the rest of the library does not, which reads
+  // as a working search that happens to know about one paper.  Both halves
+  // matter — the build when there is nothing, and no build when there is.
+  const settle = async (want: boolean, ms: number) => {
+    for (let t = 0; t < ms; t += 100) {
+      await new Promise((r) => setTimeout(r, 100))
+      if (ftStatus(ftDocs()).building === want) return true
+    }
+    return false
+  }
+  let voidInfo: {
+    ok: boolean
+    wasVoid?: boolean
+    started?: boolean
+    stopped?: boolean
+    quiet?: boolean
+  } = { ok: false }
+  if (late && lateOther) {
+    ftClear()
+    const wasVoid = ftVoid()
+    indexAdded(late)
+    const started = await settle(true, 8000)
+    ftCancel()
+    const stopped = await settle(false, 12000)
+    // the other half: a library that already has an index is not rebuilt
+    // behind the reader's back because one paper arrived
+    ftClear()
+    await ftAdd(two, two.map((d) => d.id))
+    indexAdded(lateOther)
+    // 1.2 s of quiet is not a proof, but a build that is going to start has
+    // to claim the text file within a few hundred milliseconds
+    const quiet = !(await settle(true, 1200))
+    voidInfo = { ok: true, wasVoid, started, stopped, quiet }
+    ftClear()
+  }
+  log('an index that has nothing in it', voidInfo)
+  expect(
+    'one paper in an empty index starts a build',
+    voidInfo.ok === true && voidInfo.wasVoid === true && voidInfo.started === true,
+    voidInfo
+  )
+  expect('the build it started can be stopped', voidInfo.stopped === true, voidInfo)
+  expect(
+    'a library with an index is not rebuilt behind the reader',
+    voidInfo.ok === true && voidInfo.quiet === true,
+    voidInfo
+  )
+  fs.rmSync(copyDir, { recursive: true, force: true })
+
   // the run left the throwaway index holding only those four; put it back the
   // way the next run expects to find it
   ftClear()
@@ -3648,7 +3817,16 @@ ipcMain.handle(
         skipped++
       }
     }
-    if (renamed) saveLibrary(lib.docs, lib.folders)
+    if (renamed) {
+      saveLibrary(lib.docs, lib.folders)
+      // The papers have moved, so the paths the index recorded for them are
+      // now names that do not exist.  The text is still the right text — it
+      // came from the same file — but the entry is made to say where it is
+      // now, or the next thing that compares the two decides a paper changed
+      // because it moved, and reads a library's worth of PDFs to find out
+      // that it did not.
+      for (const d of lib.docs) if (touched.has(d.id)) indexAdded(d)
+    }
     return { total: plan.length, renamed, skipped, sample }
   }
 )
@@ -3763,13 +3941,37 @@ ipcMain.handle(
  * where indexing the library takes minutes — which is why a newly imported
  * paper used to stay invisible to full-text search until the whole thing was
  * rebuilt, and usually was not.
+ *
+ * And when there is no index to add it to, adding it is not enough.  One
+ * paper in an otherwise empty index makes search look like it works and
+ * answer with the paper that was just imported, which is the one paper
+ * nobody needs to search for.  So the library is built as well, in the
+ * background, with the same progress and the same cancel as pressing the
+ * button.
  */
 function indexAdded(doc: Doc) {
+  // Read before the add: once the paper is in, the index is no longer empty
+  // and the question cannot be asked any more.
+  const wasVoid = ftVoid()
   void ftAdd([doc], [doc.id])
     .then((n) => {
       if (n > 0) win?.webContents.send('ft:progress', ftStatus(ftDocs()))
+      if (n > 0 && wasVoid && ftDocs().filter((d) => d.localPdf).length > 1) startBuild()
     })
     .catch(() => undefined)
+}
+
+/**
+ * Start a build and answer with the status the panel shows while it goes.
+ * A build cannot be awaited by whoever asked: it reads every local PDF, which
+ * takes minutes on a large library.
+ */
+function startBuild(rebuild = false) {
+  const docs = ftDocs()
+  void ftBuild(docs, (s) => win?.webContents.send('ft:progress', s), rebuild).catch(
+    () => undefined
+  )
+  return ftStatus(docs)
 }
 
 ipcMain.handle('pdf:download', async (_e, docId: string) => {
@@ -3837,12 +4039,7 @@ const ftDocs = () => {
 // minutes on a large library, so it is started on request and reports
 // progress rather than blocking an invoke for the whole run.
 ipcMain.handle('ft:status', () => ftStatus(ftDocs()))
-ipcMain.handle('ft:build', async (_e, rebuild?: boolean) => {
-  const docs = ftDocs()
-  const send = (s: FtStatus) => win?.webContents.send('ft:progress', s)
-  void ftBuild(docs, send, !!rebuild).catch(() => {})
-  return ftStatus(docs)
-})
+ipcMain.handle('ft:build', (_e, rebuild?: boolean) => startBuild(!!rebuild))
 // Stopping a build has to be its own call.  The build is answered
 // immediately and runs in the background, so "cancel" cannot arrive on the
 // same channel as the thing being cancelled.

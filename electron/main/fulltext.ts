@@ -100,6 +100,14 @@ interface Entry {
   bounds: number[]
   mtime: number
   size: number
+  /**
+   * Which file the text came from.  The text does not depend on it, so a
+   * build never re-reads a paper just because the name changed, but an
+   * append does: a paper that has been renamed or re-attached is read
+   * again rather than left describing a path that is no longer there.
+   * Older entries lack it, which counts as "not the same file".
+   */
+  file?: string
 }
 
 interface Meta {
@@ -150,6 +158,24 @@ let progress: { done: number; total: number; current: string } = {
 let skipped: { name: string; why: string }[] = []
 /** Nobody reads a hundred names; the UI says how many more there were. */
 const MAX_SKIPPED = 30
+
+/**
+ * Papers that arrived while the index was busy, waiting for their turn.
+ *
+ * An import that lands in the middle of a build used to be dropped: `ftAdd`
+ * refuses to run while something else holds the text file, and the build had
+ * already taken the list of papers it is going to read, so the new one was in
+ * neither.  It then stayed invisible to search until the library was indexed
+ * again — exactly what `ftAdd` exists to prevent, and the one moment it was
+ * most likely to happen, because a build is when people are tidying up.
+ * They wait here instead, and whichever run finishes takes them.
+ */
+let pending: Doc[] = []
+
+/** How many papers are waiting.  The smoke run reads it straight off. */
+export function ftPending(): number {
+  return pending.length
+}
 
 /**
  * How many PDFs to read at once.
@@ -267,6 +293,21 @@ export function ftStatus(docs: Doc[]): FtStatus {
     skipped: skipped.slice(),
     legacy
   }
+}
+
+/**
+ * Whether the index describes nothing that could be searched: it has never
+ * been built, or a different version of the app wrote it and it has been
+ * voided.
+ *
+ * Adding one paper to an index like that is not the job.  The paper becomes
+ * findable and everything else in the library does not, which is a worse
+ * answer than an empty one: a search that finds only the paper imported a
+ * minute ago looks like a working search.
+ */
+export function ftVoid(): boolean {
+  const m = loadMeta()
+  return legacy || Object.keys(m.entries).length === 0
 }
 
 type PdfDoc = Awaited<ReturnType<typeof pdfjs.getDocument>['promise']>
@@ -512,7 +553,8 @@ export async function ftBuild(
           len: g.text.length,
           bounds: g.bounds.map((b) => at + b),
           mtime: Math.floor(st.mtimeMs),
-          size: st.size
+          size: st.size,
+          file: d.localPdf
         }
         at += g.text.length
         byteAt += buf.length
@@ -542,6 +584,13 @@ export async function ftBuild(
     blob = null
     saveMeta()
   }
+  // Papers that arrived while the run was going.  A build takes its list of
+  // what to read before it starts reading, so without this they would wait
+  // for the next build — the wait this whole module exists to avoid.  They
+  // are indexed after a cancelled run too: cancelling stops the run, it does
+  // not stop the paper from having been imported.
+  const queued = pending.splice(0)
+  if (queued.length) await ftAdd(queued, queued.map((d) => d.id))
   const s = ftStatus(docs)
   onProgress(s)
   return s
@@ -557,11 +606,24 @@ export async function ftBuild(
  * full-text search until the whole library was indexed again.  Rebuilding
  * takes minutes, so the newest paper — the one somebody is most likely to
  * look for — was reliably the one that could not be found.
+ *
+ * A paper that is already in the index with the same file behind it is left
+ * alone.  Appending a second copy of text that is already there is not
+ * harmless: the old copy stays in the file for ever, reachable from no
+ * entry, and the file grows by a paper every time anything asks about one.
  */
 export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
-  if (busy || !dir) return 0
+  if (!dir) return 0
   const want = docs.filter((d) => d.localPdf && ids.includes(d.id))
   if (!want.length) return 0
+  // Queued rather than dropped.  Both a build and an append hold the text
+  // file, and both drain this list when they are done, so a paper that
+  // arrived in the middle of either is indexed a moment later instead of
+  // never.
+  if (busy) {
+    for (const d of want) if (!pending.some((p) => p.id === d.id)) pending.push(d)
+    return 0
+  }
   busy = true
   const m = loadMeta()
   let at = endOf(m)
@@ -589,6 +651,18 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
       } catch {
         continue
       }
+      const prev = m.entries[d.id]
+      // Same file, same moment, same length: the text already in the index is
+      // this text.  A different path counts as a different file, so a paper
+      // that was renamed, re-downloaded or re-attached is read again.
+      if (
+        prev &&
+        prev.file === d.localPdf &&
+        prev.mtime === Math.floor(st.mtimeMs) &&
+        prev.size === st.size
+      ) {
+        continue
+      }
       const g = await extract(d.localPdf as string, pages)
       if (!g.text.trim()) continue
       const buf = Buffer.from(g.text, 'utf8')
@@ -598,7 +672,8 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
         len: g.text.length,
         bounds: g.bounds.map((b) => at + b),
         mtime: Math.floor(st.mtimeMs),
-        size: st.size
+        size: st.size,
+        file: d.localPdf
       }
       at += g.text.length
       byteAt += buf.length
@@ -614,6 +689,11 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
     if (added) blob = null
     saveMeta()
   }
+  // Whatever turned up while this run held the file gets its turn now.  It is
+  // drained before the recursive call, so a run that keeps being handed
+  // papers still terminates.
+  const queued = pending.splice(0)
+  if (queued.length) added += await ftAdd(queued, queued.map((d) => d.id))
   return added
 }
 
