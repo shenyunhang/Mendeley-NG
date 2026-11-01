@@ -860,6 +860,20 @@ td .no-pdf {
   white-space: nowrap;
   color: var(--fg);
 }
+/* The message pdf.js gave when it would not start.  Shown verbatim because it
+   names the missing thing, and a paraphrase of an error message is how a
+   reader ends up searching for a problem that was never described to them. */
+.ft-err {
+  display: inline-block;
+  margin: 2px 0 4px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--msg-bg);
+  font-family: var(--mono, monospace);
+  font-size: 0.733rem;
+  color: var(--fg);
+  word-break: break-word;
+}
 
 /* column picker: floats under its button so the table can be watched while
    boxes are ticked.  Fixed for the same reason the menu is — the bar clips

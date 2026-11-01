@@ -759,6 +759,7 @@ SetupGuide、批量进度、拖列宽、拖列换顺序、添加时间默认列�
 | 113 | **索引建完了，之前搜不到的词还是显示"没找到"** | 搜索只在"词变了"时跑；补上"索引跑完了"也算一次变化，建完自动重搜当前这个词 | 2026-11-01「索引建立完成后还是没有」 |
 | 114 | **索引"建完了"没有自证**：满屏 78 行只能证明有个字符串匹配上了 | 冒烟直接审索引文件本身：一条 entry 一篇且不重复、没有空文本、`entry.file` 还在且大小对、每个命中能在**它所属那篇**的文本里找到那个词、页码落在该篇页数内 | 2026-11-01「先拿那 78 行结果跑一遍，看是不是真没索引到」 |
 | 115 | **建完索引还是提示"还没有索引"**：跑完了但一篇都没读出来，和从没建过用的是同一句话 | 文件不在原处也计进 `skipped`；跑完 `indexed === 0 && done > 0 && skipped.length` 时改说「读完了，但一篇正文都没读出来」，列出失败原因并给「重建索引」 | 2026-11-01「建立完索引还是提示没有索引」 |
+| 116 | **创建索引全库失败，每篇都报「PDF 打不开」，而这些 PDF 其实都能打开**（安装版独有） | 根因：`dist` 脚本是 `electron-vite build && electron-builder`，**没跑 `copy-worker.mjs`** → asar 里没有 `out/main/pdf.worker.mjs` → pdf.js 每篇都抛 `Setting up fake worker failed`，被 catch 一律吞成「PDF 打不开」。修：dist 补拷 worker；诊断改为报 pdf.js 的真实原话，并在全库零篇时明说「不是这些 PDF 的问题」 | 2026-11-01「创建索引 最终显示pdf打不开 而实际pdf可以打开」 |
 
 **102 补的四种"索引跟不上"**（fab9db5 只做了"挂上文件就补一条"）：
 
@@ -881,6 +882,34 @@ SetupGuide、批量进度、拖列宽、拖列换顺序、添加时间默认列�
   测的是框打开了、预填的是它现在的名字、Esc 关掉且名字没变，以及两种拒绝情形都真的拒绝。
   回退验证（只撤 `src`）只有 `F2 opens the rename box` 一条 FAIL——
   另外三条是"不该发生的事没发生"，没做功能时它们本来就该过，测不出东西。
+- **116 打包链路和构建链路不是同一条命令**：`build` 是
+  `electron-vite build && node scripts/copy-worker.mjs`，而 `dist` 原来只有
+  `electron-vite build && electron-builder`——**漏了拷 worker 那一步**。
+  结果是装出来的包里 `out/main/` 只有 `index.js`，没有 `pdf.worker.mjs`，
+  `workerSrc()` 三个候选全部落空返回 `''`，pdf.js 对**每一篇**都抛
+  `Setting up fake worker failed: "No "GlobalWorkerOptions.workerSrc" specified."`。
+  任何"只在 build 里做、dist 里没做"的事都会踩这个——**往 `build` 里加东西时，
+  同一个动作要问一遍 `dist` 要不要**。
+- **116 这类问题冒烟读 PDF 永远测不出来**：冒烟是 `npm run build` 的产物，
+  worker 就在那儿，读得好好地。要测只能查两样：`out/main/pdf.worker.mjs` 真的存在
+  （且 > 100 KB，桩文件骗得过 exists），以及 **`dist` 脚本字符串里含 `copy-worker`**。
+  后者是对打包配置的断言，能防回归；前者只能防住"这次忘了 build"。
+- **116 复现要去看装好的那个包，不是看源码**：`npx asar list "…/resources/app.asar"`
+  一列表就看见 `\out\main\` 下只有 `index.js`。源码目录里 `out/main/pdf.worker.mjs`
+  一直是有的（build 拷过），所以"我这儿明明有"是真的，而且完全误导。
+- **116 诊断不能替文件背锅**：`extract` 的 catch 原先一律返回「PDF 打不开」。
+  一条关于"worker 线程缺失"的消息**不是关于某个 PDF 的事实**，却被当成 5245 个 PDF
+  各自的事实列了出来。现在 `Got` 多带一个 `err`（pdf.js 的原话），
+  `isReaderFailure()` 认出这类消息并 `console.error` 一次（而不是 `failures++ < 3` 之后沉默）。
+- **116 库级故障和篇级失败必须分开报**：`FtStatus.reader` 只在"这一轮一篇都没读出来
+  （`wrote === 0` 且队列非空）"时才设。否则一篇坏 PDF 会让整个安装被判死刑。
+  面板上 `reader` 的分支排在其它空态**之前**，把 pdf.js 的原话原样显示——
+  转述过的错误信息等于没给，读者会去找一个从没被描述过的问题。
+- **116 遗留：`standardFontDataUrl` / `cMapUrl` 仍未配**。冒烟日志里有 190 次
+  `UnknownErrorException: Ensure that the standardFontDataUrl API parameter is provided`，
+  说明确有 PDF 用到非嵌入标准字体，文本抽取质量受损（但**不致命**：80 篇里 79 篇照样读到）。
+  要配就得把 `node_modules/pdfjs-dist/standard_fonts` 和 `cmaps` 也打进包
+  （现在 asar 里根本没有 pdfjs-dist），是另一个改动。
 - **115 空态不能只看 `indexed === 0`**："跑完了但一篇都没读出来"和"从没建过"都会让
   `indexed` 是 0，而这两件事要读者做的完全相反——前者要他去看原因，后者要他去等六分钟。
   区分靠 `done > 0 && skipped.length`：`done` 在建索引开始时归零，跑过就一定是总数；

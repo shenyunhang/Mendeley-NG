@@ -160,6 +160,20 @@ let skipped: { name: string; why: string }[] = []
 const MAX_SKIPPED = 30
 
 /**
+ * What pdf.js said when it could not start at all, or null when the last run
+ * read at least one paper.
+ *
+ * This is kept apart from `skipped` on purpose.  A reader that will not start
+ * fails on every document with the same message, so it lands in `skipped` as
+ * five thousand rows that all say "PDF 打不开" — which is not a fact about
+ * five thousand PDFs, it is one fact about the install, and it is the one
+ * fact the reader has to be told.  Reporting it per paper also hides it: the
+ * list is capped, so what reaches the screen is thirty identical lines and a
+ * count, and the obvious conclusion — that the files are broken — is wrong.
+ */
+let reader: string | null = null
+
+/**
  * Papers that arrived while the index was busy, waiting for their turn.
  *
  * An import that lands in the middle of a build used to be dropped: `ftAdd`
@@ -291,6 +305,7 @@ export function ftStatus(docs: Doc[]): FtStatus {
     bytes,
     current: progress.current,
     skipped: skipped.slice(),
+    reader,
     legacy
   }
 }
@@ -326,8 +341,29 @@ const DOC_TIMEOUT_MS = 20_000
 
 let failures = 0
 
-/** What came out of one PDF.  `why` is empty only when there is text. */
-type Got = { text: string; bounds: number[]; why: string }
+/**
+ * Whether an exception is about the reader failing to start rather than about
+ * the file being unreadable.
+ *
+ * These are the messages pdf.js gives when its worker thread is missing, and
+ * then every document fails identically whatever is in it.  Telling that
+ * apart is the whole difference between "your PDFs are broken" and "this
+ * install is", and only one of the two is something the reader can fix.
+ */
+function isReaderFailure(err: string): boolean {
+  return /fake worker|workerSrc|pdf\.worker|GlobalWorkerOptions/i.test(err)
+}
+
+/**
+ * What came out of one PDF.  `why` is empty only when there is text.
+ *
+ * `err` is what the reader actually said, which is not the same as `why`:
+ * `why` is what the panel shows for one paper, and a message about a missing
+ * worker thread is not a fact about a paper at all.  It travels separately so
+ * a run in which every document failed with the same message can be reported
+ * as one broken reader rather than as five thousand broken PDFs.
+ */
+type Got = { text: string; bounds: number[]; why: string; err?: string }
 
 /** Pull the text of the first `n` pages, and say why if there is none. */
 async function extract(file: string, n: number): Promise<Got> {
@@ -405,11 +441,19 @@ async function extract(file: string, n: number): Promise<Got> {
     if (!got.text.trim()) return { text: '', bounds: [], why: '没有文本层（扫描件）' }
     return { ...got, why: '' }
   } catch (e) {
+    const err = String((e as { message?: unknown })?.message ?? e)
     // the first few failures are worth seeing: a library-wide problem, such as
     // a worker that will not start, shows up as every document failing.  A
     // timeout already reported itself.
-    if (!stopped && failures++ < 3) console.warn('[fulltext] cannot read', file, String(e))
-    return { text: '', bounds: [], why: 'PDF 打不开' }
+    //
+    // A reader that cannot start at all is said once and loudly.  Everything
+    // else is a fact about one paper and only the first few are worth a line
+    // in the log; "Setting up fake worker failed" is a fact about the install,
+    // and it was being logged three times and then buried under five thousand
+    // identical rows in the panel.
+    if (isReaderFailure(err)) console.error('[fulltext] pdf.js cannot start:', err)
+    else if (!stopped && failures++ < 3) console.warn('[fulltext] cannot read', file, err)
+    return { text: '', bounds: [], why: 'PDF 打不开', err }
   } finally {
     if (timer) clearTimeout(timer)
     await box.doc?.destroy().catch(() => {})
@@ -438,6 +482,7 @@ export async function ftBuild(
   building = true
   cancelled = false
   skipped = []
+  reader = null
   // whatever was on disk is being replaced from here on, so the note about
   // it being out of date has served its turn
   legacy = false
@@ -449,6 +494,10 @@ export async function ftBuild(
   const queue = docs.filter((d) => d.localPdf)
   progress = { done: 0, total: queue.length, current: '' }
   let out = -1
+  /** First message that said the reader itself would not start. */
+  let readerErr: string | null = null
+  /** Papers this run actually got text out of. */
+  let wrote = 0
   // Offsets are counted in UTF-16 code units, because that is what the search
   // side indexes with once the file has been read back as a string.  Taking
   // the byte size here instead looks right and is not: one Chinese character
@@ -544,6 +593,11 @@ export async function ftBuild(
         const g = got[k]!
         progress.done++
         if (!g.text.trim()) {
+          // A reader that never started is not one paper's problem.  It is
+          // recorded once, and only believed if the run went on to read
+          // nothing at all — one paper failing this way while four thousand
+          // others are read is a different thing and is reported per paper.
+          if (g.err && isReaderFailure(g.err) && !readerErr) readerErr = g.err
           if (skipped.length < MAX_SKIPPED) {
             skipped.push({ name: path.basename(d.localPdf ?? ''), why: g.why })
           }
@@ -565,6 +619,7 @@ export async function ftBuild(
         }
         at += g.text.length
         byteAt += buf.length
+        wrote++
         // kept in step with the entries, so that a meta written at any moment
         // describes exactly the bytes that are on disk for those papers
         fresh.bytes = byteAt
@@ -589,6 +644,11 @@ export async function ftBuild(
     cancelled = false
     progress.current = ''
     blob = null
+    // Only called a broken reader if the run read nothing whatsoever.  A build
+    // that got four thousand papers out of five thousand is working, whatever
+    // one of them said, and blaming the install would send somebody off to
+    // reinstall over a single corrupt file.
+    reader = readerErr && wrote === 0 && queue.length > 0 ? readerErr : null
     saveMeta()
   }
   // Papers that arrived while the run was going.  A build takes its list of
@@ -707,6 +767,7 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
 export function ftClear() {
   meta = { version: 2, pages: pages, bytes: 0, entries: {} }
   skipped = []
+  reader = null
   legacy = false
   blob = null
   try {

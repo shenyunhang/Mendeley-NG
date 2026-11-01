@@ -2670,6 +2670,11 @@ async function runSmoke() {
   expect('indexing reads the PDFs', ftStat1.indexed > 0, ftStat1)
   expect('progress counted every document', ftStat1.done === ftStat1.total, ftStat1)
   expect('progress names the file being read', sawCurrent.length > 0, sawCurrent)
+  // The same run, judged from the other side: a build that read thousands of
+  // papers is working, so it must not come back saying pdf.js could not
+  // start.  That claim is only made when a run reads nothing at all — one
+  // corrupt file out of five thousand is not a broken install.
+  expect('a run that read papers does not blame the install', ftStat1.reader == null, ftStat1)
   // Stopping has to be safe to press at any time, including after the run has
   // already finished: what was read stays readable.
   const ftCancelStat = JSON.parse(
@@ -2880,6 +2885,46 @@ async function runSmoke() {
   )
   ftClear()
   fs.rmSync(staleDir, { recursive: true, force: true })
+
+  // pdf.js reads every PDF in a worker thread that has to be copied next to
+  // the bundled main process.  `dist` used to skip that step, so the packaged
+  // app had no worker at all and every document failed with "Setting up fake
+  // worker failed" — reported as thousands of rows of "PDF 打不开" over files
+  // that open fine in a reader.  A smoke run is built with `npm run build`,
+  // which does copy it, so reading a PDF here can never catch this: only
+  // looking for the file, and at the command that was meant to put it there,
+  // can.  The indexer now also says what the reader actually said rather than
+  // blaming each paper, and that is asserted further down.
+  const rootDir = app.getAppPath()
+  let workerInfo: { ok: boolean; bytes?: number; big?: boolean; script?: string } = {
+    ok: false
+  }
+  try {
+    const st = fs.statSync(path.join(rootDir, 'out', 'main', 'pdf.worker.mjs'))
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')
+    ) as { scripts?: Record<string, string> }
+    workerInfo = {
+      ok: true,
+      bytes: st.size,
+      // the real worker is about a megabyte; a stub would read fine here
+      big: st.size > 100_000,
+      script: pkg.scripts?.dist ?? ''
+    }
+  } catch {
+    /* not laid out the way this run expects */
+  }
+  log('pdf.js worker', workerInfo)
+  expect(
+    "the build carries pdf.js's worker",
+    workerInfo.ok === true && workerInfo.big === true,
+    workerInfo
+  )
+  expect(
+    'packaging is told to copy it',
+    /copy-worker/.test(workerInfo.script ?? ''),
+    workerInfo
+  )
 
   // An interrupted run is the ordinary case, not the exception: reading 5245
   // papers takes minutes and nobody leaves the app open for all of it.  What

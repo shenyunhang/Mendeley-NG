@@ -158,6 +158,23 @@ export default function FullTextView({
             正文才有东西可读。
           </p>
         </div>
+      ) : !building && status?.reader ? (
+        <div className="empty">
+          {/* A reader that will not start is one fact about the install, not
+              five thousand facts about five thousand PDFs.  Every document
+              fails the same way, so the only honest thing to show is what the
+              reader said and that it is not the papers' fault — anything else
+              sends somebody off to "fix" files that were never broken. */}
+          <p>pdf.js 起不来，不是这些 PDF 的问题。</p>
+          <p className="sub">
+            读的时候 pdf.js 报的是：<code className="ft-err">{status.reader}</code>
+          </p>
+          <p className="sub">
+            最常见的成因是包里少了 pdf.js 的 worker 线程文件——那样<strong>每一篇</strong>
+            都会以同样一句话失败，跟 PDF 本身无关。重装或升级到修复后的版本即可；
+            同一台机器上从源码跑（<code>npm start</code>）能读到正文，就说明是装的这个包缺文件。
+          </p>
+        </div>
       ) : !building && status && !status.indexed && status.done > 0 && status.skipped.length ? (
         <div className="empty">
           <p>读完了，但一篇正文都没读出来。</p>

@@ -216,6 +216,16 @@ export interface FtStatus {
    */
   skipped: { name: string; why: string }[]
   /**
+   * What pdf.js said when it could not start at all, or null.
+   *
+   * Set only when a run finished having read nothing: one message about the
+   * install, rather than five thousand rows in `skipped` that all say the
+   * same thing.  A reader that will not start fails on every document
+   * identically, so without this the panel lists thirty identical lines and
+   * the reader concludes their PDFs are broken.
+   */
+  reader?: string | null
+  /**
    * True when an index exists on disk but was written by a different version
    * of the app and cannot be read.  Without it an update looks like it threw
    * away a build the reader already paid for.
