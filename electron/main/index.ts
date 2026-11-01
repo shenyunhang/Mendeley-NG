@@ -2619,6 +2619,88 @@ async function runSmoke() {
     ftOut
   )
   expect('a hit carries a page number', /^p\d+$/.test(ftOut.pages[0] ?? ''), ftOut.pages)
+
+  // Seventy-eight rows on screen is not proof that the text was read, only
+  // that some string matched somewhere.  An index that wrote the same paper
+  // into twenty slots, or one that kept the offsets of a table it no longer
+  // matches, would both report themselves complete and both show a full page
+  // of rows.  So the index is checked against what it claims to have read:
+  // one entry per document, none of them empty or a copy of another, every
+  // one pointing at a file that is still there, and every hit landing inside
+  // the stretch of text belonging to the paper it is shown under.
+  const ftDir = process.env.MENDELEY_FT_DIR || dataDir()
+  const mt = JSON.parse(
+    fs.readFileSync(path.join(ftDir, 'fulltext.json'), 'utf8')
+  ) as {
+    entries: Record<
+      string,
+      { start: number; len: number; bounds: number[]; size: number; file?: string }
+    >
+  }
+  const body = fs.readFileSync(path.join(ftDir, 'fulltext.dat'), 'utf8')
+  const es = Object.entries(mt.entries)
+  const heads = new Set(es.map(([, e]) => body.slice(e.start, e.start + 200)))
+  const files = es.filter(([, e]) => e.file).map(([, e]) => {
+    try {
+      return fs.statSync(e.file as string).size === e.size
+    } catch {
+      return false
+    }
+  })
+  const lens = es.map(([, e]) => e.len).sort((a, b) => a - b)
+  const hits = ftSearch('the')
+  // the word has to be findable in the stretch of text the entry claims for
+  // that paper, which is the one thing a scrambled offset table cannot fake
+  const inDoc = hits.filter((h) => {
+    const e = mt.entries[h.docId]
+    return !!e && body.slice(e.start, e.start + e.len).toLowerCase().includes('the')
+  })
+  const paged = hits.filter((h) => {
+    const e = mt.entries[h.docId]
+    return !!e && h.page >= 1 && h.page <= Math.max(1, e.bounds.length)
+  })
+  const ftAudit = {
+    entries: es.length,
+    uniqueHeads: heads.size,
+    empty: es.filter(([, e]) => e.len <= 0).length,
+    shortest: lens[0] ?? 0,
+    median: lens[Math.floor(lens.length / 2)] ?? 0,
+    longest: lens[lens.length - 1] ?? 0,
+    filesChecked: files.length,
+    filesMatching: files.filter(Boolean).length,
+    hits: hits.length,
+    hitsInTheirOwnText: inDoc.length,
+    hitsPaged: paged.length,
+    chars: body.length
+  }
+  log('ft index audited', ftAudit)
+  expect(
+    'every indexed document is there exactly once',
+    ftAudit.entries > 0 && ftAudit.uniqueHeads === ftAudit.entries && ftAudit.empty === 0,
+    ftAudit
+  )
+  expect('an indexed document has real text in it', ftAudit.shortest > 100, ftAudit)
+  expect(
+    'every entry still points at its own file',
+    ftAudit.filesChecked > 0 && ftAudit.filesMatching === ftAudit.filesChecked,
+    ftAudit
+  )
+  expect(
+    'the word is in the text of the paper each hit is shown under',
+    ftAudit.hits > 0 && ftAudit.hitsInTheirOwnText === ftAudit.hits,
+    ftAudit
+  )
+  expect('every hit names a page that paper has', ftAudit.hitsPaged === ftAudit.hits, ftAudit)
+  // what was read, so that the numbers above can be checked against the PDFs
+  log(
+    'ft sample',
+    es.slice(0, 3).map(([id, e]) => ({
+      id,
+      file: e.file,
+      len: e.len,
+      head: body.slice(e.start, e.start + 120).replace(/\s+/g, ' ')
+    }))
+  )
   // opening a hit has to land on the page the hit named
   const wantPage = Number((ftOut.pages[0] ?? 'p1').slice(1))
   await w.webContents.executeJavaScript(
@@ -2645,7 +2727,6 @@ async function runSmoke() {
   // reported itself complete returned nothing.  The gap is written here by
   // hand, because waiting for a real six-minute build to be interrupted is
   // not something a smoke run can do.
-  const ftDir = process.env.MENDELEY_FT_DIR || dataDir()
   const ftDat = path.join(ftDir, 'fulltext.dat')
   const ftJson = path.join(ftDir, 'fulltext.json')
   const allPdf = ftDocs().filter((d) => d.localPdf)
