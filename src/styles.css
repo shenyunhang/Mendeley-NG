@@ -681,6 +681,31 @@ td .no-pdf {
   border-bottom: 1px solid var(--border);
   font-size: 0.8rem;
   flex: 0 0 auto;
+  /* one row, always, and for the same reason the toolbar is one row: a bar
+     that cannot fit stands its own labels up in a column, which is what
+     "云同步标注" did at a width where there was in fact room for it */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+/* Nothing in here may be squeezed, for the same reason and with the same
+   treatment as the toolbar's children.  It matters more here than there:
+   Chinese wraps between any two characters, so the floor a flex item shrinks
+   to -- its min-content -- is one character, and a squeezed Chinese button
+   does not clip its label, it stands it on end. */
+.pdf-bar > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* The one thing in the bar that does give way, because it is a sentence and
+   not a control: losing the end of it costs nothing next to a button standing
+   on end.  `min-width: 0` is what lets it shrink at all -- with `nowrap`
+   above, its min-content is the whole sentence, and a flex item never shrinks
+   past that on its own. */
+.pdf-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* Floats over the top right of the page rather than sitting in the chrome:
    the matches are on the page, so the count belongs where the reader is
@@ -1562,6 +1587,32 @@ button.danger:hover:not(:disabled) {
   border-bottom: 1px solid var(--border);
   background: var(--panel-head);
   font-size: 0.8rem;
+  /* the swatches are the same story as the bar above: squeezed, they shrink
+     to nothing rather than overflow, and a row of eight colours is the only
+     way to pick one */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.ann-box > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* Both bars scroll instead of squeezing, so at a narrow pane there is a
+   scrollbar inside the bar -- and a full-height one would make the bar jump
+   taller at exactly the width where the pane is smallest and the page needs
+   the room most. */
+.pdf-bar::-webkit-scrollbar,
+.ann-box::-webkit-scrollbar {
+  height: 6px;
+}
+.pdf-bar::-webkit-scrollbar-thumb,
+.ann-box::-webkit-scrollbar-thumb {
+  background: var(--sep);
+  border-radius: 3px;
+}
+.pdf-bar::-webkit-scrollbar-track,
+.ann-box::-webkit-scrollbar-track {
+  background: transparent;
 }
 .swatch {
   width: 1.15rem;

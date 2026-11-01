@@ -2304,6 +2304,25 @@ async function runSmoke() {
     typeof findBox.fromTop === 'number' && findBox.fromTop >= 0 && findBox.fromTop < 40,
     findBox
   )
+  // A squeezed control does not clip its label, it stands it up: Chinese wraps
+  // between any two characters, so the width a flex item shrinks to is one
+  // character wide and as many rows deep as the label has characters.  The
+  // yardstick is the ← button, which is one character to begin with and so is
+  // the one thing in the bar that cannot be stood on end whatever the width.
+  const barRows = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=document.querySelector(".pdf-bar");if(!b)return "{}";'
+      + 'const k=[...b.children].map(c=>c.offsetHeight);'
+      + 'return JSON.stringify({n:k.length,first:k[0],tallest:Math.max(...k),'
+      + 'scroll:b.scrollWidth,client:b.clientWidth})})()'
+    )
+  )
+  log('pdf bar rows', barRows)
+  expect(
+    'the reader bar keeps every control on one line',
+    barRows.n > 5 && barRows.tallest <= barRows.first + 2,
+    barRows
+  )
   // stepping has to move the caret, and on a multi-hit query it also has to
   // wrap around rather than dead-end at the last one
   await w.webContents.executeJavaScript(

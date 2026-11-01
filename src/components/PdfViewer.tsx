@@ -1727,7 +1727,7 @@ export default function PdfViewer({
         <button onClick={syncCloud} disabled={busy}>
           云同步标注
         </button>
-        <span style={{ color: 'var(--fg-dim)', marginLeft: 8 }}>
+        <span className="pdf-hint" style={{ color: 'var(--fg-dim)', marginLeft: 8 }}>
           {justMade ? (
             // what the reader just did, and the way out of it.  It replaces the
             // mode hint for those few seconds because that is the moment the
