@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { usePopSpot } from '../lib/popspot'
 
 export interface MenuItem {
   label: string
@@ -31,6 +32,9 @@ interface Props {
  */
 export default function MenuButton({ label, title, disabled, primary, items }: Props) {
   const [open, setOpen] = useState(false)
+  const btn = useRef<HTMLButtonElement>(null)
+  const pop = useRef<HTMLDivElement>(null)
+  const spot = usePopSpot(btn, pop)
 
   useEffect(() => {
     if (!open) return
@@ -51,6 +55,7 @@ export default function MenuButton({ label, title, disabled, primary, items }: P
   return (
     <div className="menu-btn" onMouseLeave={() => setOpen(false)}>
       <button
+        ref={btn}
         className={primary ? 'primary' : ''}
         disabled={disabled}
         title={title}
@@ -59,7 +64,7 @@ export default function MenuButton({ label, title, disabled, primary, items }: P
         {label} ▾
       </button>
       {open && (
-        <div className="menu-pop">
+        <div className="menu-pop" ref={pop} style={spot ?? undefined}>
           {items.map((it) => (
             <button
               key={it.label}

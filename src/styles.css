@@ -184,10 +184,12 @@ textarea:focus {
   display: inline-flex;
   flex: 0 0 auto;
 }
+/* Fixed, not absolute: the bar is allowed to scroll sideways, and a box that
+   scrolls on one axis clips on the other, so a card placed below its button
+   was cut off at the bar's bottom edge.  The coordinates come from
+   `usePopSpot` for the same reason. */
 .menu-pop {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
+  position: fixed;
   z-index: 40;
   min-width: 132px;
   display: flex;
@@ -860,11 +862,10 @@ td .no-pdf {
 }
 
 /* column picker: floats under its button so the table can be watched while
-   boxes are ticked */
+   boxes are ticked.  Fixed for the same reason the menu is — the bar clips
+   what hangs below it. */
 .col-picker {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
+  position: fixed;
   z-index: 40;
   width: 232px;
   max-height: 420px;

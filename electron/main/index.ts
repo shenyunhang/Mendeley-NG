@@ -482,6 +482,63 @@ async function runSmoke() {
   // fitting matters as much as not wrapping: a bar that has to be scrolled to
   // reach the font size or the theme hides the two things at its far end
   expect('the bar fits without being scrolled', barInfo.overflow <= 0, barInfo.overflow)
+
+  // A card has to open where it can be read.  The bar is one row because it
+  // is allowed to scroll sideways, and a box that scrolls on one axis clips
+  // on the other — `overflow-x: auto` turns `overflow-y` into `auto` too — so
+  // a card placed under its button was cut off at the bar's bottom edge: the
+  // menu opened and there was nothing there.  Nothing about the card said so,
+  // which is why it took a reader to notice.
+  //
+  // What is checked is not the geometry but whether the card is the topmost
+  // thing at its own middle, which is what "on top" means to a pointer.  A
+  // clipped card still reports a rectangle; it just is not there.
+  const popInfo = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>{const sleep=(m)=>new Promise(r=>setTimeout(r,m));'
+      + 'const press=(t)=>{const b=[...document.querySelectorAll(".toolbar button")]'
+      + '.find(x=>x.textContent.trim().startsWith(t));if(b){b.click();return 1}return 0};'
+      + 'const look=(sel)=>{const c=document.querySelector(sel);if(!c)return {open:0};'
+      + 'const bar=document.querySelector(".toolbar").getBoundingClientRect();'
+      + 'const r=c.getBoundingClientRect();'
+      + 'const hit=document.elementFromPoint(Math.round(r.left+r.width/2),'
+      + 'Math.round(r.top+r.height/2));'
+      + 'return {open:1,onTop:!!hit&&(hit===c||c.contains(hit)),'
+      + 'hit:hit?(hit.className||hit.tagName):null,below:Math.round(r.bottom-bar.bottom),'
+      + 'inWindow:r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth}};'
+      + 'const out={pressed:[]};'
+      + 'out.pressed.push(press("更多"));await sleep(200);out.more=look(".menu-pop");'
+      + 'press("更多");await sleep(200);'
+      + 'out.pressed.push(press("筛选"));await sleep(200);out.filter=look(".col-picker");'
+      + 'press("筛选");await sleep(200);'
+      + 'out.pressed.push(press("列"));await sleep(200);out.cols=look(".col-picker");'
+      + 'press("列");await sleep(200);'
+      + 'return JSON.stringify(out)})()'
+    )
+  )
+  log('cards that open below the bar', popInfo)
+  expect(
+    'the more menu opens clear of the bar',
+    popInfo.more?.open === 1 && popInfo.more?.onTop === true,
+    popInfo.more
+  )
+  expect(
+    'the filter card opens clear of the bar',
+    popInfo.filter?.open === 1 && popInfo.filter?.onTop === true,
+    popInfo.filter
+  )
+  expect(
+    'the column card opens clear of the bar',
+    popInfo.cols?.open === 1 && popInfo.cols?.onTop === true,
+    popInfo.cols
+  )
+  expect(
+    'and none of them is cut off by the window',
+    popInfo.more?.inWindow === true &&
+      popInfo.filter?.inWindow === true &&
+      popInfo.cols?.inWindow === true,
+    popInfo
+  )
   // and what was removed to make room is still reachable
   await openMenu('更多')
   await new Promise((r) => setTimeout(r, 300))

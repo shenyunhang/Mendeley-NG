@@ -1,7 +1,12 @@
+import { useRef, type RefObject } from 'react'
 import { COLUMNS, DEFAULT_COLS, type ColKey } from '../lib/columns'
+import { usePopSpot } from '../lib/popspot'
 import type { SavedView } from '../../shared/types'
 
 interface Props {
+  /** The button it hangs from; see `spotFor` for why it cannot be placed by
+   *  CSS any more. */
+  anchor: RefObject<HTMLElement>
   cols: ColKey[]
   onChange: (cols: ColKey[]) => void
   views: SavedView[]
@@ -17,6 +22,7 @@ interface Props {
  * boxes are ticked, which a modal would hide.
  */
 export default function ColumnPicker({
+  anchor,
   cols,
   onChange,
   views,
@@ -25,6 +31,8 @@ export default function ColumnPicker({
   onDeleteView,
   onClose
 }: Props) {
+  const card = useRef<HTMLDivElement>(null)
+  const spot = usePopSpot(anchor, card)
   const toggle = (k: ColKey) => {
     // the last column cannot be switched off: a table with no columns is not
     // a view of anything
@@ -45,7 +53,7 @@ export default function ColumnPicker({
   }
 
   return (
-    <div className="col-picker" onMouseLeave={onClose}>
+    <div className="col-picker" ref={card} style={spot ?? undefined} onMouseLeave={onClose}>
       <div className="col-picker-head">
         <b>列</b>
         <span style={{ flex: 1 }} />

@@ -1,6 +1,12 @@
+import { useRef, type RefObject } from 'react'
 import type { ListFilter } from '../lib/filters'
+import { usePopSpot } from '../lib/popspot'
 
 interface Props {
+  /** The button it hangs from.  It is placed against this rather than against
+   *  its own parent, because a bar that can scroll sideways clips a card that
+   *  reaches below it. */
+  anchor: RefObject<HTMLElement>
   on: ListFilter[]
   /** How many papers each switch would leave, counted before the switch is
    *  thrown.  A number answers "is this worth pressing" without pressing. */
@@ -27,9 +33,18 @@ const ITEMS: { key: ListFilter; label: string; title: string }[] = [
  * question behind downloading a batch, and knowing beforehand that it is four
  * papers rather than four hundred decides whether it is worth doing now.
  */
-export default function FilterMenu({ on, counts, onToggle, onClear, onClose }: Props) {
+export default function FilterMenu({
+  anchor,
+  on,
+  counts,
+  onToggle,
+  onClear,
+  onClose
+}: Props) {
+  const card = useRef<HTMLDivElement>(null)
+  const spot = usePopSpot(anchor, card)
   return (
-    <div className="col-picker filter-menu" onMouseLeave={onClose}>
+    <div className="col-picker filter-menu" ref={card} style={spot ?? undefined} onMouseLeave={onClose}>
       <div className="col-picker-head">
         <b>筛选</b>
         <span style={{ flex: 1 }} />

@@ -230,6 +230,11 @@ export default function App() {
    *  They are written by the details panel, which reports back after saving. */
   const [noteMap, setNoteMap] = useState<Record<string, string>>({})
   const searchRef = useRef<HTMLInputElement>(null)
+  // The two cards that hang off the bar are placed against these, not against
+  // their own parents: the bar may scroll sideways, and a box that scrolls on
+  // one axis clips on the other.
+  const filterBtn = useRef<HTMLButtonElement>(null)
+  const colsBtn = useRef<HTMLButtonElement>(null)
   // the keydown listener is installed once, so it has to reach the undo stack
   // through a ref rather than closing over a stale one
   const undoRef = useRef<() => void>(() => {})
@@ -1726,6 +1731,7 @@ export default function App() {
         </button>
         <div style={{ position: 'relative', display: 'inline-flex' }}>
           <button
+            ref={filterBtn}
             className={filters.length ? 'primary' : ''}
             onClick={() => setShowFilters((v) => !v)}
             title="按星标 / 未读 / 有没有 PDF / 归没归文件夹来收窄列表"
@@ -1734,6 +1740,7 @@ export default function App() {
           </button>
           {showFilters && (
             <FilterMenu
+              anchor={filterBtn}
               on={filters}
               counts={filterCounts}
               onToggle={toggleFilter}
@@ -1744,6 +1751,7 @@ export default function App() {
         </div>
         <div style={{ position: 'relative', display: 'inline-flex' }}>
           <button
+            ref={colsBtn}
             className={showCols ? 'primary' : ''}
             onClick={() => setShowCols((v) => !v)}
             title="选择要显示哪些列、按什么顺序，并可以存成视图"
@@ -1752,6 +1760,7 @@ export default function App() {
           </button>
           {showCols && (
             <ColumnPicker
+              anchor={colsBtn}
               cols={cols}
               onChange={changeCols}
               views={views}
