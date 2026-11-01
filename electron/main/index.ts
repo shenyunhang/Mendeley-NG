@@ -3476,6 +3476,36 @@ async function runSmoke() {
   )
   log('multi select', multiInfo)
   expect('ctrl-click builds a multi-selection', /已选 2 条/.test(multiInfo), multiInfo)
+  // Batch download.  What is checked is the offer and not the download:
+  // actually pulling files from the cloud writes them into the library and
+  // needs a token, and neither is this run's to do.  What has to be right is
+  // the number on the button, because a batch that quietly fetched three of
+  // the two hundred it was handed did something other than what it said.
+  //
+  // The number is counted against the selected rows' own PDF dots rather than
+  // against itself: a button that agreed with its own arithmetic would prove
+  // nothing at all.
+  const dlOffer = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const bs=[...document.querySelectorAll(".batch-bar button")]'
+      + '.filter(b=>(b.textContent||"").trim().startsWith("下载 PDF"));'
+      + 'return JSON.stringify({btn:bs.length?bs[0].textContent.trim():null,'
+      + 'disabled:bs.length?bs[0].disabled:null,'
+      + 'selected:document.querySelectorAll("div.row.multi").length,'
+      + 'cloudOnly:[...document.querySelectorAll("div.row.multi .pdf-dot")]'
+      + '.filter(d=>(d.getAttribute("title")||"")==="云端有文件").length})})()'
+    )
+  )
+  log('batch download offer', dlOffer)
+  expect('the batch bar offers to download the missing PDFs', dlOffer.btn !== null, dlOffer)
+  const offered = /（(\d+)）/.exec(dlOffer.btn ?? '')
+  expect(
+    'the offer names how many of the selection it would fetch',
+    dlOffer.cloudOnly === 0
+      ? dlOffer.disabled === true && offered === null
+      : offered !== null && Number(offered[1]) === dlOffer.cloudOnly,
+    dlOffer
+  )
   log(
     'click 改字段',
     await w.webContents.executeJavaScript(

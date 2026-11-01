@@ -1357,6 +1357,85 @@ export default function App() {
 
   const batchTrash = () => trashDocs(docs.filter((d) => multi.includes(d.id)))
 
+  /** Which of a list are worth a download: the cloud has a file and the disk
+   *  does not.  Counting them is the whole point of the number on the button
+   *  — a batch that downloads three of the two hundred selected is a batch
+   *  that did something other than what it said, unless it said so first. */
+  const needsPdf = (list: Doc[]) => list.filter((d) => d.file_attached && !d.localPdf)
+
+  /**
+   * Pull the missing PDFs down, a few at a time.
+   *
+   * Three lanes, not two hundred at once: the files come from S3 presigned
+   * URLs and a burst is refused rather than queued, so a wide batch would
+   * fail *more* papers than a narrow one.  A failure costs the paper it
+   * happened on and nothing else, because there is no transaction across
+   * independent downloads and one broken attachment is not a reason to give
+   * up on the rest.
+   *
+   * The paths are collected and written back in handfuls rather than one at a
+   * time: every write re-runs the filter and the sort over the whole library,
+   * and doing that once per downloaded paper is the kind of cost that shows
+   * up as "the app went slow while it was downloading".
+   */
+  const dlStop = useRef(false)
+  const [dlRun, setDlRun] = useState<{ done: number; total: number } | null>(null)
+  const batchDownload = async (list: Doc[]) => {
+    const need = needsPdf(list)
+    if (!need.length) {
+      setBatchMsg('这些本地都已经有 PDF 了')
+      setTimeout(() => setBatchMsg(null), 2500)
+      return
+    }
+    dlStop.current = false
+    setDlRun({ done: 0, total: need.length })
+    const got = new Map<string, string>()
+    const failed: string[] = []
+    let done = 0
+    const flush = () => {
+      if (!got.size) return
+      const g = new Map(got)
+      got.clear()
+      setLib((l) =>
+        l
+          ? {
+              ...l,
+              docs: l.docs.map((x) => (g.has(x.id) ? { ...x, localPdf: g.get(x.id)! } : x))
+            }
+          : l
+      )
+    }
+    const queue = need.slice()
+    const lanes = Math.min(3, queue.length)
+    const work = async () => {
+      for (;;) {
+        const d = queue.shift()
+        if (!d || dlStop.current) return
+        try {
+          const r = await window.api.downloadPdf(d.id)
+          if (!r.ok || !r.path) throw new Error(r.error ?? '下载失败')
+          got.set(d.id, r.path)
+        } catch {
+          failed.push(d.title || '(无标题)')
+        }
+        done++
+        setDlRun({ done, total: need.length })
+        if (done % 10 === 0) flush()
+      }
+    }
+    await Promise.all(Array.from({ length: lanes }, work))
+    flush()
+    const stopped = dlStop.current
+    setDlRun(null)
+    const okN = need.length - failed.length - queue.length
+    if (stopped) {
+      setBatchMsg(`已停止，下载了 ${okN} 篇`)
+      setTimeout(() => setBatchMsg(null), 3000)
+      return
+    }
+    reportBatch('已下载', okN, failed)
+  }
+
   /** Starred / read / tags.  These are per-user flags rather than metadata,
    *  so they are patched straight away instead of waiting for a save button. */
   const setFlags = useCallback(async (d: Doc, patch: Partial<Doc>) => {
@@ -2367,6 +2446,22 @@ export default function App() {
               <button onClick={() => copyCitation(docs.filter((d) => multi.includes(d.id)))}>
                 复制引文
               </button>
+              {(() => {
+                const need = needsPdf(docs.filter((d) => multi.includes(d.id))).length
+                return (
+                  <button
+                    disabled={!need || !!dlRun}
+                    onClick={() => void batchDownload(docs.filter((d) => multi.includes(d.id)))}
+                    title={
+                      need
+                        ? `把选中的 ${need} 篇里本地还没有的 PDF 从云端下载下来`
+                        : '选中的这些本地都已经有 PDF 了'
+                    }
+                  >
+                    下载 PDF{need ? `（${need}）` : ''}
+                  </button>
+                )
+              })()}
               <button
                 onClick={() => setBatchEdit(true)}
                 title="给选中的每一条统一加标签、改类型、设星标或已读"
@@ -2375,6 +2470,28 @@ export default function App() {
               </button>
               <span style={{ flex: 1 }} />
               <button onClick={() => setMulti([])}>取消选择</button>
+            </div>
+          )}
+          {dlRun && (
+            <div className="batch-bar">
+              <span>
+                正在下载 PDF {dlRun.done} / {dlRun.total}…
+              </span>
+              {/* which paper is the only honest answer to "is it stuck?": a
+                  counter that has not moved for a minute looks exactly like a
+                  hang, and a download that blocked the reader from doing
+                  anything else while it ran would be the wrong trade */}
+              <span style={{ flex: 1 }} />
+              <button
+                className="danger"
+                style={{ padding: '2px 6px' }}
+                title="停下。已经下载下来的会留着"
+                onClick={() => {
+                  dlStop.current = true
+                }}
+              >
+                停止
+              </button>
             </div>
           )}
           {batchMsg && <div className="pdf-msg">{batchMsg}</div>}
