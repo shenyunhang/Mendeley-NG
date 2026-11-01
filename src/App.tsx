@@ -93,14 +93,32 @@ const clampLeft = (v: number) => Math.round(clampNum(v, LEFT_MIN, LEFT_MAX))
 const clampRight = (v: number) =>
   Math.round(clampNum(v, RIGHT_MIN, RIGHT_MAX) * 10) / 10
 
-/** Toolbar wording for each updater phase; null means "say nothing". */
+/**
+ * Toolbar wording for each updater phase; null means "say nothing".
+ *
+ * Every phase names the version that is running, and the ones that have a
+ * version to offer name that too.  "已是最新版本" without a number answers a
+ * question nobody asked — compared to what? — and a reader who was told a
+ * build is fixed has no way to tell whether the number in front of them is
+ * the fixed one or the one they reported.
+ */
 const UPD_TEXT: Record<UpdateState['phase'], ((s: UpdateState) => string) | null> = {
   idle: null,
-  checking: () => '检查更新…',
-  available: (s) => `发现新版本 ${s.version}，开始下载`,
-  'not-available': () => '已是最新版本',
-  downloading: (s) => `下载中 ${s.percent ?? 0}%`,
-  downloaded: () => '安装并重启…',
+  checking: (s) => (s.current ? `检查更新…（当前 ${s.current}）` : '检查更新…'),
+  available: (s) =>
+    s.current && s.version
+      ? `新版本 ${s.version}（当前 ${s.current}），开始下载`
+      : `发现新版本 ${s.version ?? ''}，开始下载`,
+  // the answer to "am I on the fixed one?" is the number, not the adjective
+  'not-available': (s) => (s.current ? `已是最新版本（当前 ${s.current}）` : '已是最新版本'),
+  downloading: (s) =>
+    s.version ? `下载 ${s.version} ${s.percent ?? 0}%` : `下载中 ${s.percent ?? 0}%`,
+  downloaded: (s) =>
+    s.version && s.current
+      ? `${s.version} 已就绪（当前 ${s.current}），重启安装`
+      : s.version
+        ? `${s.version} 已就绪，重启安装`
+        : '安装并重启…',
   error: (s) => `更新失败：${s.message ?? '未知错误'}`,
   unsupported: (s) => s.message ?? '当前环境不支持更新'
 }
@@ -1725,7 +1743,9 @@ export default function App() {
             {
               label: upd?.phase === 'available' ? `更新到 ${upd.version}` : '检查更新',
               disabled: !!upd && ['checking', 'downloading', 'downloaded'].includes(upd.phase),
-              title: '从 GitHub Releases 拉取最新版本并自动安装重启',
+              title: upd?.current
+                ? `当前 ${upd.current}。从 GitHub Releases 拉取最新版本并自动安装重启`
+                : '从 GitHub Releases 拉取最新版本并自动安装重启',
               run: () => {
                 void window.api.checkUpdate().then((r) => {
                   if (r?.unsupported || r?.error || !r?.available) return
@@ -1844,7 +1864,9 @@ export default function App() {
           <span
             className="status"
             style={{ color: upd.phase === 'error' ? 'var(--err)' : 'var(--accent)' }}
-            title={upd.message ?? ''}
+            // the release notes are the interesting half when there is an
+            // update; the two version numbers are already in the text
+            title={upd.message ?? (upd.current ? `当前版本 ${upd.current}` : '')}
           >
             {UPD_TEXT[upd.phase]?.(upd)}
           </span>
@@ -2422,6 +2444,10 @@ export default function App() {
           ft={ftStat}
           ftPages={ftPages}
           version={version}
+          upd={upd}
+          onCheckUpdate={() => void window.api.checkUpdate()}
+          onDownloadUpdate={() => void window.api.downloadUpdate()}
+          onInstallUpdate={() => void window.api.installUpdate()}
           onClose={() => setSettings(false)}
           onTheme={(t) => {
             setTheme(t)

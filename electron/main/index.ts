@@ -2131,13 +2131,28 @@ async function runSmoke() {
     await new Promise((r) => setTimeout(r, 1500))
     return src()
   }
+  // Measured from a page the run chose, not from wherever the outline left
+  // the reader.  Plenty of real PDFs have no outline at all — the library
+  // currently open has one with none — and then the jump below never
+  // happens, the reader stays on whatever page the previous check happened
+  // to leave it on, and the cache is blamed for a position nobody asked for.
+  // Page one is typed into the box the way a reader would type it.
+  const gotoPage = (n: number) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const i=document.querySelector(".pdf-bar input");if(!i)return 0;`
+      + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+      + `set.call(i,"${n}");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+    )
+  await gotoPage(1)
+  await new Promise((r) => setTimeout(r, 1500))
   log('render src (current page)', await src())
+  // forward onto a fresh page, then back onto the one that was just left:
+  // the step back has a bitmap waiting for it, and must not re-render
+  await turn('→')
   const backOne = JSON.parse(await turn('←'))
-  const fwdAgain = JSON.parse(await turn('→'))
-  // a page turn onto a warmed neighbour must not re-render from scratch:
-  // either the bitmap is already in the cache, or the warm that was started
-  // for it is joined instead of duplicated
   expect('prefetch serves a step back', backOne.src === 'cache', backOne)
+  // and forward again onto the page that was just left behind
+  const fwdAgain = JSON.parse(await turn('→'))
   expect('prefetch serves a step forward', fwdAgain.src === 'cache', fwdAgain)
 
   // Ctrl + wheel is the zoom gesture, and it is the one thing a reader tries
@@ -2200,7 +2215,21 @@ async function runSmoke() {
   await new Promise((r) => setTimeout(r, 3000))
   const cBottom = JSON.parse(await contInfo())
   log('continuous at bottom', cBottom)
-  expect('continuous lays out every page', cTop.pages === 4, cTop)
+  // compared against the page count the reader itself reports, rather than
+  // against a number: which paper is open is whatever was selected last, and
+  // that is not this run's business to know.  Four was right for one paper
+  // and wrong the moment a different one was selected.
+  const cTotal = await w.webContents.executeJavaScript(
+    '(()=>{const s=[...document.querySelectorAll(".pdf-bar span")]'
+    + '.map(x=>(x.textContent||"").trim()).find(t=>/^\\/\\s*\\d+$/.test(t));'
+    + 'return s?parseInt(s.replace(/\\D/g,""),10):-1})()'
+  )
+  log('continuous page count', { pages: cTop.pages, reported: cTotal })
+  expect(
+    'continuous lays out every page',
+    cTotal > 1 && cTop.pages === cTotal,
+    { cTop, cTotal }
+  )
   expect('continuous paints pages in view', cTop.painted > 0, cTop)
   expect('continuous paints further down', cBottom.painted > 0, cBottom)
   expect('scrolling the column moves the page box', cBottom.page !== cTop.page, {
@@ -3180,6 +3209,60 @@ async function runSmoke() {
     si
   )
   expect('it shows the version', si.version === true, si)
+
+  // "已是最新版本" without a number answers a question nobody asked — newest
+  // compared to what?  A reader who was told a build is fixed needs the two
+  // numbers side by side to know whether what they are running is the fixed
+  // one, so every update line names the version that is running and, when
+  // there is one, the version on offer.  Checked by pressing the button and
+  // reading both the state the main process sent and the line on screen.
+  const appVersion = app.getVersion()
+  await w.webContents.executeJavaScript(
+    '(()=>{window.__upd=[];window.__offUpd=window.api.onUpdateState('
+    + '(s)=>{window.__upd.push(s)});return 1})()'
+  )
+  const updLineBefore = await w.webContents.executeJavaScript(
+    'JSON.stringify({line:(document.querySelector(".about-upd .upd-line")||{}).textContent||null,'
+    + 'btn:(document.querySelector(".about-upd button")||{}).textContent||null})'
+  )
+  const updBefore = JSON.parse(updLineBefore)
+  log('update line at rest', { appVersion, ...updBefore })
+  expect(
+    'the updater names the version that is running',
+    /Mendeley NG/.test(String(updBefore.line ?? '')) === false &&
+      String(updBefore.line ?? '').includes(appVersion),
+    { appVersion, updBefore }
+  )
+  expect('it offers to go and look', /检查更新/.test(String(updBefore.btn ?? '')), updBefore)
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=document.querySelector(".about-upd button");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 800))
+  const updAfter = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({line:(document.querySelector(".about-upd .upd-line")||{}).textContent||null,'
+      + 'states:(window.__upd||[]).map(s=>({phase:s.phase,current:s.current,version:s.version}))})'
+    )
+  )
+  log('update line after checking', updAfter)
+  // whichever way the check went, the answer has to say which version it is
+  // an answer about
+  expect(
+    'an answer from the updater still names this version',
+    String(updAfter.line ?? '').includes(appVersion),
+    { appVersion, updAfter }
+  )
+  // and the state itself carries it, so no phase has to be trusted to put it
+  // in its own wording
+  expect(
+    'every state the updater sends carries the version it is about',
+    (updAfter.states ?? []).length > 0 &&
+      (updAfter.states as { current?: string }[]).every((s) => s.current === appVersion),
+    updAfter.states
+  )
+  await w.webContents.executeJavaScript(
+    '(()=>{if(window.__offUpd)window.__offUpd();return 1})()'
+  )
   await w.webContents.executeJavaScript(
     '(()=>{const m=document.querySelector(".settings");'
     + 'const inp=[...m.querySelectorAll("input")].find(i=>i.type!=="checkbox");if(!inp)return 0;'

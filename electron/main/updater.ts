@@ -1,21 +1,13 @@
 import { app, ipcMain } from 'electron'
 import { autoUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater'
 
-export interface UpdateState {
-  phase:
-    | 'idle'
-    | 'checking'
-    | 'available'
-    | 'not-available'
-    | 'downloading'
-    | 'downloaded'
-    | 'error'
-    | 'unsupported'
-  /** version being offered, when known */
-  version?: string
-  percent?: number
-  message?: string
-}
+// One definition, in shared/types, re-exported so callers that imported it
+// from here keep working.  Two interfaces with the same name drift: the field
+// added to one is silently absent from the other, and a status that carries
+// the version being offered but not the version being run is exactly the kind
+// of half-answer this module keeps having to explain.
+import type { UpdateState } from '../../shared/types'
+export type { UpdateState }
 
 /**
  * Auto-update over GitHub Releases.
@@ -43,6 +35,13 @@ let updateAvailable = false
 /** Whether the check in flight is one the app started rather than the reader.
  *  The events fire outside the invoke, so they need to know whose they are. */
 let quietRun = false
+/**
+ * The version on offer, kept because the progress events do not repeat it.
+ * A download that says "42%" without saying what is at 42% leaves the reader
+ * watching a bar for a version they were told about once, several screens
+ * and one restart ago.
+ */
+let offered = ''
 
 function installHandlers() {
   autoUpdater.autoDownload = false
@@ -52,6 +51,7 @@ function installHandlers() {
 
   autoUpdater.on('update-available', (info: UpdateInfo) => {
     updateAvailable = true
+    offered = info.version
     send({ phase: 'available', version: info.version, message: info.releaseNotes as string })
   })
 
@@ -64,10 +64,11 @@ function installHandlers() {
   })
 
   autoUpdater.on('download-progress', (p: ProgressInfo) => {
-    send({ phase: 'downloading', percent: Math.round(p.percent) })
+    send({ phase: 'downloading', percent: Math.round(p.percent), version: offered || undefined })
   })
 
   autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
+    offered = info.version
     send({ phase: 'downloaded', version: info.version })
   })
 
@@ -81,7 +82,10 @@ function installHandlers() {
 }
 
 export function initUpdater(emit: (s: UpdateState) => void) {
-  send = emit
+  // Every state carries the version that is running, so the panel can put the
+  // two numbers next to each other without the renderer having to ask again.
+  // "已是最新版本" on its own is unanswerable: newest compared to what?
+  send = (s: UpdateState) => emit({ ...s, current: app.getVersion() })
   installHandlers()
 
   /**
@@ -102,7 +106,12 @@ export function initUpdater(emit: (s: UpdateState) => void) {
         idle()
         return { unsupported: true }
       }
-      send({ phase: 'unsupported', message: '开发模式不支持更新（需打包安装后的版本）' })
+      // the version is in the message as well as in `current`, so the one
+      // phase that has nothing to offer still answers "what am I running?"
+      send({
+        phase: 'unsupported',
+        message: `当前 ${app.getVersion()}：开发模式不支持更新（需打包安装后的版本）`
+      })
       return { unsupported: true }
     }
     try {

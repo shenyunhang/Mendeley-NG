@@ -250,7 +250,18 @@ export interface SavedView {
 /** Progress of an auto-update, pushed from main to the renderer. */
 export interface UpdateState {
   phase: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error' | 'unsupported'
+  /** version being offered, when known */
   version?: string
+  /**
+   * The version that is running right now.
+   *
+   * Every phase carries it, including the ones with nothing to report.  A
+   * check that comes back "已是最新版本" and does not say which version is
+   * being called latest answers a question nobody asked: what the reader
+   * wanted to know is whether the thing they are running is the thing that
+   * was fixed, and that needs both numbers side by side.
+   */
+  current?: string
   percent?: number
   message?: string
 }

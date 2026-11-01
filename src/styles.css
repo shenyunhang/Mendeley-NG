@@ -299,6 +299,20 @@ textarea:focus {
   flex: 0 0 auto;
   border-radius: 12%;
 }
+/* the two version numbers, and the one button that acts on them */
+.about-upd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+.about-upd .upd-line {
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+}
+.about-upd .upd-line.err {
+  color: var(--err);
+}
 .batch-edit {
   min-width: 380px;
 }

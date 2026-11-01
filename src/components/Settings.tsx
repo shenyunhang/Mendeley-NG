@@ -1,7 +1,28 @@
 import { useState } from 'react'
-import type { FtStatus } from '../../shared/types'
+import type { FtStatus, UpdateState } from '../../shared/types'
 import { DEFAULT_FT_PAGES, DEFAULT_PDF_TEMPLATE } from '../../shared/types'
 import logoUrl from '../../assets/logo.svg'
+
+/**
+ * What the update line says, given the state and the version that is running.
+ *
+ * Both numbers are named in every line that has a second number to name.
+ * "有新版本" without saying which one, or "已是最新" without saying what is
+ * being called latest, both leave the reader unable to answer the question
+ * they actually came here with: is the thing I am running the thing that was
+ * fixed?
+ */
+function updLine(upd: UpdateState | null | undefined, current: string): string | null {
+  const p = upd?.phase
+  if (!upd || !p || p === 'idle') return null
+  if (p === 'checking') return `正在检查…（当前 ${current}）`
+  if (p === 'available') return `有新版本 ${upd.version ?? ''}（当前 ${current}）`
+  if (p === 'not-available') return `已是最新版本（当前 ${current}）`
+  if (p === 'downloading') return `正在下载 ${upd.version ?? ''} ${upd.percent ?? 0}%`
+  if (p === 'downloaded') return `${upd.version ?? ''} 已下载，重启后安装（当前 ${current}）`
+  if (p === 'error') return `检查更新失败：${upd.message ?? '未知错误'}`
+  return upd.message ?? null
+}
 
 interface Props {
   theme: 'dark' | 'light'
@@ -14,6 +35,12 @@ interface Props {
   ft: FtStatus | null
   ftPages: number
   version: string
+  /** What the updater is doing, so the two versions can be compared here
+   *  rather than in a toolbar line that vanishes. */
+  upd?: UpdateState | null
+  onCheckUpdate?: () => void
+  onDownloadUpdate?: () => void
+  onInstallUpdate?: () => void
   onClose: () => void
   onTheme: (t: 'dark' | 'light') => void
   onFont: (n: number) => void
@@ -40,6 +67,10 @@ export default function Settings({
   ft,
   ftPages,
   version,
+  upd,
+  onCheckUpdate,
+  onDownloadUpdate,
+  onInstallUpdate,
   onClose,
   onTheme,
   onFont,
@@ -152,6 +183,38 @@ export default function Settings({
             <div>Mendeley NG {version}</div>
             <div className="set-note">
               Mendeley Desktop 1.19.8 的替代品，本地优先，高 DPI 原生正常。
+            </div>
+            {/* Both numbers, side by side.  A reader who was told a build is
+                fixed needs to know whether the version in front of them is
+                the fixed one or the one they reported, and that is a question
+                about two versions, not one. */}
+            <div className="about-upd">
+              {updLine(upd, version) ? (
+                <span className={upd?.phase === 'error' ? 'upd-line err' : 'upd-line'}>
+                  {updLine(upd, version)}
+                </span>
+              ) : (
+                <span className="upd-line">当前 {version}</span>
+              )}
+              <button
+                disabled={upd?.phase === 'checking' || upd?.phase === 'downloading'}
+                title={`当前 ${version}。从 GitHub Releases 拉取最新版本`}
+                onClick={() => {
+                  if (upd?.phase === 'available') onDownloadUpdate?.()
+                  else if (upd?.phase === 'downloaded') onInstallUpdate?.()
+                  else onCheckUpdate?.()
+                }}
+              >
+                {upd?.phase === 'available'
+                  ? `下载 ${upd.version ?? ''}`
+                  : upd?.phase === 'downloaded'
+                    ? '重启并安装'
+                    : upd?.phase === 'checking'
+                      ? '检查中…'
+                      : upd?.phase === 'downloading'
+                        ? `下载中 ${upd.percent ?? 0}%`
+                        : '检查更新'}
+              </button>
             </div>
           </div>
         </div>
