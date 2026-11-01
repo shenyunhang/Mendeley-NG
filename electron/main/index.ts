@@ -3546,6 +3546,110 @@ async function runSmoke() {
   )
   await new Promise((r) => setTimeout(r, 300))
   expect('cancelling closes the dialog', (await beInfo()).open === 0, be1)
+
+  // Duplicates the reader has already judged.  Two papers sharing a title are
+  // very often two papers — a submission and its rebuttal, a paper and its
+  // extended version — and a list that reports the same handful every time
+  // it is opened teaches the reader to stop opening it.  So a group can be
+  // put aside, and putting it aside must be reversible: a convenience that
+  // only goes one way is how a decision gets lost.
+  //
+  // The library is real, so whether there is any group at all is not this
+  // run's to decide; what is checked is that the group count and the
+  // "not a duplicate" count move together, and that restoring puts back
+  // exactly what was put aside.
+  const dupeInfo = () =>
+    w.webContents.executeJavaScript(
+      'JSON.stringify({open:document.querySelectorAll(".dupe-group").length,'
+      + 'gone:document.querySelectorAll(".dupe-group.dupe-gone").length,'
+      + 'aside:(document.querySelector(\'.pane-head button[title*="不是重复"]\')||{}).textContent||null,'
+      + 'empty:(document.querySelector(".pane-mid .empty")||{}).textContent||null,'
+      + 'said:(document.querySelector(".pane-head span[style]")||{}).textContent||null})'
+    )
+  await openMenu('更多')
+  await new Promise((r) => setTimeout(r, 300))
+  log('click 查重', await clickMenu('查重'))
+  await new Promise((r) => setTimeout(r, 4000))
+  const dBefore = JSON.parse(await dupeInfo())
+  log('duplicates', dBefore)
+  if (!dBefore.open) {
+    log('no duplicate groups in this library; the ignore path cannot be walked')
+    expect(
+      'a library with no duplicates says so',
+      /没有发现重复/.test(dBefore.empty ?? ''),
+      dBefore
+    )
+  } else {
+    const pressAside = () =>
+      w.webContents.executeJavaScript(
+        '(()=>{const g=document.querySelector(".dupe-group:not(.dupe-gone)");'
+        + 'if(!g)return 0;const b=[...g.querySelectorAll(".dupe-head button")]'
+        + '.find(x=>x.textContent.trim()==="不是重复");if(!b)return 0;b.click();return 1})()'
+      )
+    const pressBack = () =>
+      w.webContents.executeJavaScript(
+        '(()=>{const g=document.querySelector(".dupe-group.dupe-gone");'
+        + 'if(!g)return 0;const b=[...g.querySelectorAll(".dupe-head button")]'
+        + '.find(x=>x.textContent.trim().indexOf("撤销")===0);if(!b)return 0;b.click();return 1})()'
+      )
+    expect('a group can be put aside', (await pressAside()) === 1, dBefore)
+    await new Promise((r) => setTimeout(r, 500))
+    const dAside = JSON.parse(await dupeInfo())
+    log('after putting one aside', dAside)
+    expect(
+      'putting a group aside takes it off the list',
+      dAside.open === dBefore.open - 1 && /1 组/.test(dAside.aside ?? ''),
+      { before: dBefore.open, after: dAside }
+    )
+    // and it comes back: dimmed, and only because it was asked for
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=document.querySelector(\'.pane-head button[title*="不是重复"]\');'
+      + 'if(!b)return 0;b.click();return 1})()'
+    )
+    await new Promise((r) => setTimeout(r, 400))
+    const dShown = JSON.parse(await dupeInfo())
+    log('the aside group, asked for', dShown)
+    expect(
+      'a group put aside is still there, only dimmed',
+      dShown.open === dBefore.open && dShown.gone === 1,
+      dShown
+    )
+    // the decision is written through: a dismissal that came back on Monday
+    // would be the same list the reader stopped opening
+    const ignoreCfg = JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(async()=>{const c=await window.api.getConfig();'
+        + 'return JSON.stringify(c.dupeIgnores||null)})()'
+      )
+    )
+    log('the ignore list as saved', ignoreCfg)
+    expect(
+      'the decision is remembered rather than just hidden',
+      Array.isArray(ignoreCfg) && ignoreCfg.length === 1 && ignoreCfg[0].length > 1,
+      ignoreCfg
+    )
+    expect('a group put aside can be brought back', (await pressBack()) === 1, dShown)
+    await new Promise((r) => setTimeout(r, 500))
+    const dBack = JSON.parse(await dupeInfo())
+    log('after undoing it', dBack)
+    expect(
+      'undoing puts the group back and the count with it',
+      dBack.open === dBefore.open && dBack.gone === 0,
+      { before: dBefore.open, back: dBack }
+    )
+    const clearedCfg = JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(async()=>{const c=await window.api.getConfig();'
+        + 'return JSON.stringify(c.dupeIgnores||null)})()'
+      )
+    )
+    expect('undoing clears what was remembered', !clearedCfg || clearedCfg.length === 0, clearedCfg)
+  }
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
+    + '.find(x=>x.textContent.trim()==="返回库");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
   await w.webContents.executeJavaScript(
     '(()=>{const b=[...document.querySelectorAll(".batch-bar button")]'
     + '.find(x=>x.textContent.trim()==="取消选择");if(b)b.click();return 1})()'

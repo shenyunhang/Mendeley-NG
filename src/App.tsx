@@ -176,6 +176,7 @@ export default function App() {
   const [upd, setUpd] = useState<UpdateState | null>(null)
   const [trash, setTrash] = useState<Doc[] | null>(null)
   const [dupes, setDupes] = useState<DupeGroup[] | null>(null)
+  const [dupeIgnores, setDupeIgnores] = useState<string[][]>([])
   const [importing, setImporting] = useState<Entry[] | null>(null)
   const [adding, setAdding] = useState(false)
   const [filters, setFilters] = useState<ListFilter[]>([])
@@ -312,6 +313,11 @@ export default function App() {
       if (c.colWidths) setColWidths(c.colWidths)
       if (c.pdfNameTemplate) setNameTemplate(c.pdfNameTemplate)
       if (isCiteStyle(c.citeStyle)) setCiteStyle(c.citeStyle)
+      // entries with fewer than two papers are not a group and cannot have
+      // been one: the filter also throws away anything a hand edited into the
+      // file, which is better than carrying it into a comparison that would
+      // then never match
+      setDupeIgnores((c.dupeIgnores ?? []).filter((e) => Array.isArray(e) && e.length > 1))
       if (typeof c.ftPages === 'number' && c.ftPages > 0) setFtPages(c.ftPages)
       if (typeof c.paneLeft === 'number') setLeftW(clampLeft(c.paneLeft))
       if (typeof c.paneRight === 'number') setRightPct(clampRight(c.paneRight))
@@ -2258,6 +2264,21 @@ export default function App() {
         ) : dupes ? (
           <DupesView
             groups={dupes}
+            ignored={dupeIgnores}
+            onIgnore={(ids) => {
+              const next = [...dupeIgnores, ids]
+              setDupeIgnores(next)
+              window.api.setConfig({ dupeIgnores: next })
+            }}
+            onRestore={(ids) => {
+              const next = dupeIgnores.filter((e) => {
+                if (e.length !== ids.length) return true
+                const a = [...e].sort().join(' ')
+                return a !== [...ids].sort().join(' ')
+              })
+              setDupeIgnores(next)
+              window.api.setConfig({ dupeIgnores: next })
+            }}
             onClose={() => setDupes(null)}
             onMerge={async (g, keeper) => {
               const others = g.docs.filter((d) => d.id !== keeper.id)

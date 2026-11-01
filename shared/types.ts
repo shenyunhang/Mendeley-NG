@@ -172,6 +172,11 @@ export interface AppConfig {
   /** Sort the reader last asked for.  A key that is no longer a sort key is
    *  dropped on the way back in, so the arrow always lands on a real column. */
   sort?: { key: string; dir: 1 | -1 }
+  /** Duplicate groups the reader has said are not duplicates, as the ids of
+   *  the papers in each.  Groups are remembered by their papers rather than
+   *  by the key the grouping used, because the key is derived: a DOI added
+   *  later changes it, and "these two are different papers" stays true. */
+  dupeIgnores?: string[][]
   /** Where the window was left.  Kept as a rectangle plus a flag rather than
    *  as the rectangle a maximised window reports, which is the whole screen
    *  and leaves nothing to come back to. */

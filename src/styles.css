@@ -972,6 +972,12 @@ td .no-pdf {
   display: flex;
   gap: 2px;
 }
+/* a group put aside as "not a duplicate": dimmed rather than removed, because
+   it is only ever shown on purpose, and a reader who is looking at it is
+   looking at it to undo the decision */
+.dupe-gone {
+  opacity: 0.55;
+}
 /* the sort card: one row per key, the whole row is the press.  A row that
    only pressed on a small arrow would be a row the reader has to aim at. */
 .sort-pick {
