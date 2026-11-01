@@ -30,6 +30,10 @@ interface Props {
   pdfDir: string
   nameTemplate: string
   citeStyle: string
+  /** Whether a pull happens on its own at start-up.  Off still leaves the
+   *  同步云端 button, and saying so is the point: a switch whose other
+   *  position nobody can describe is a switch nobody can decide about. */
+  syncOnStart: boolean
   /** Full-text index state, shown rather than described: whether the index
    *  exists is the one thing that decides whether the page budget matters. */
   ft: FtStatus | null
@@ -47,6 +51,7 @@ interface Props {
   onPickPdfDir: () => void
   onNameTemplate: () => void
   onCiteStyle: (s: string) => void
+  onSyncOnStart: (v: boolean) => void
   onFtPages: (n: number) => void
 }
 
@@ -64,6 +69,7 @@ export default function Settings({
   pdfDir,
   nameTemplate,
   citeStyle,
+  syncOnStart,
   ft,
   ftPages,
   version,
@@ -77,6 +83,7 @@ export default function Settings({
   onPickPdfDir,
   onNameTemplate,
   onCiteStyle,
+  onSyncOnStart,
   onFtPages
 }: Props) {
   // the page budget is applied on blur rather than on every keystroke: each
@@ -152,6 +159,22 @@ export default function Settings({
             <option value="key">BibTeX key</option>
             <option value="bibtex">BibTeX 条目</option>
           </select>
+        </div>
+
+        <div className="set-sec">同步</div>
+        <div className="set-row">
+          <span className="set-key">启动时</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={syncOnStart}
+              onChange={(e) => onSyncOnStart(e.target.checked)}
+            />
+            打开软件时自动同步一次
+          </label>
+        </div>
+        <div className="set-note">
+          只拉增量，失败不出声；关掉就只有点「同步云端」时才同步。
         </div>
 
         <div className="set-sec">全文检索</div>

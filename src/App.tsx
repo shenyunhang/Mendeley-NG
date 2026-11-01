@@ -177,6 +177,7 @@ export default function App() {
   const [trash, setTrash] = useState<Doc[] | null>(null)
   const [dupes, setDupes] = useState<DupeGroup[] | null>(null)
   const [dupeIgnores, setDupeIgnores] = useState<string[][]>([])
+  const [syncOnStart, setSyncOnStart] = useState(true)
   const [importing, setImporting] = useState<Entry[] | null>(null)
   const [adding, setAdding] = useState(false)
   const [filters, setFilters] = useState<ListFilter[]>([])
@@ -318,6 +319,10 @@ export default function App() {
       // file, which is better than carrying it into a comparison that would
       // then never match
       setDupeIgnores((c.dupeIgnores ?? []).filter((e) => Array.isArray(e) && e.length > 1))
+      // on unless it was switched off: a library that is only refreshed when
+      // somebody remembers to press the button is a library that is stale by
+      // whatever was done on the other machine
+      setSyncOnStart(c.syncOnStart !== false)
       if (typeof c.ftPages === 'number' && c.ftPages > 0) setFtPages(c.ftPages)
       if (typeof c.paneLeft === 'number') setLeftW(clampLeft(c.paneLeft))
       if (typeof c.paneRight === 'number') setRightPct(clampRight(c.paneRight))
@@ -550,6 +555,41 @@ export default function App() {
     }
     setBusy(false)
   }, [])
+
+  /**
+   * One quiet pull at start-up.
+   *
+   * The library on disk is a cache of the cloud, and a cache refreshed only
+   * when somebody remembers to press 同步 is stale by exactly the work done
+   * on the other machine.  Incremental, because a full pull of five thousand
+   * papers is long enough to be noticed and nothing here needs it.
+   *
+   * Silent, and that is the whole design: a red banner on every launch that
+   * happened to be offline is worse than a list that is a few hours behind,
+   * and the reader never asked to be told.  Whoever wants to know can press
+   * the button, which is loud on purpose.
+   *
+   * It waits for the token question to be answered rather than assuming it —
+   * `sync` throws `NO_TOKEN` otherwise, and an error at start-up is the one
+   * kind of error that gets read.
+   */
+  const startedSync = useRef(false)
+  useEffect(() => {
+    if (!syncOnStart || hasToken !== true || startedSync.current) return
+    startedSync.current = true
+    window.api
+      .sync(false)
+      .then((r) => {
+        if (r && !('error' in r)) {
+          setLib({ docs: r.docs, folders: r.folders, syncedAt: new Date().toISOString() })
+          setFolders(r.folders)
+        }
+      })
+      .catch(() => {
+        /* a start-up pull that failed is not news: the cached library is
+           still on screen, and the button says when it last worked */
+      })
+  }, [syncOnStart, hasToken])
 
   const docs = lib?.docs ?? []
 
@@ -2677,6 +2717,7 @@ export default function App() {
           pdfDir={pdfDir}
           nameTemplate={nameTemplate}
           citeStyle={citeStyle}
+          syncOnStart={syncOnStart}
           ft={ftStat}
           ftPages={ftPages}
           version={version}
@@ -2699,6 +2740,10 @@ export default function App() {
             if (!isCiteStyle(s)) return
             setCiteStyle(s)
             void window.api.setConfig({ citeStyle: s })
+          }}
+          onSyncOnStart={(v) => {
+            setSyncOnStart(v)
+            void window.api.setConfig({ syncOnStart: v })
           }}
           onFtPages={(n) => void changeFtPages(n)}
         />

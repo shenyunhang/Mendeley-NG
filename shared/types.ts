@@ -172,6 +172,11 @@ export interface AppConfig {
   /** Sort the reader last asked for.  A key that is no longer a sort key is
    *  dropped on the way back in, so the arrow always lands on a real column. */
   sort?: { key: string; dir: 1 | -1 }
+  /** Pull from the cloud once on start-up.  On unless switched off: a library
+   *  only refreshed when somebody remembers to press the button is a library
+   *  stale by whatever was done on the other machine.  Failures stay quiet —
+   *  the cached library is on screen either way. */
+  syncOnStart?: boolean
   /** Duplicate groups the reader has said are not duplicates, as the ids of
    *  the papers in each.  Groups are remembered by their papers rather than
    *  by the key the grouping used, because the key is derived: a DOI added

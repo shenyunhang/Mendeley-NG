@@ -451,6 +451,35 @@ async function runSmoke() {
   log('renderer', info)
   if (errs.length) log('renderer errors', errs.slice(0, 10).join(' | '))
 
+  // A library refreshed only when somebody remembers to press 同步 is stale by
+  // exactly the work done on the other machine, so the app pulls once by
+  // itself on start-up.  The pull the main process does at boot happens before
+  // the window exists and so reaches nobody, which means the only status line
+  // the renderer can be showing here is the start-up one — and it is the one
+  // place where silence is the design: an error banner on every launch that
+  // happened to be offline is worse than a list a few hours behind.
+  const startSync = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>{const wait=(m)=>new Promise(r=>setTimeout(r,m));'
+      + 'let msg=null;'
+      + 'for(let i=0;i<60;i++){'
+      + 'const s=document.querySelector(".toolbar .status");'
+      + 'if(s&&/^(增量同步|同步完成)/.test(s.textContent||"")){msg=s.textContent;break}'
+      + 'await wait(500)}'
+      + 'return JSON.stringify({msg:msg,err:!!document.querySelector(".err"),'
+      + 'token:await window.api.hasToken(),'
+      + 'cfg:(await window.api.getConfig()).syncOnStart})})()'
+    )
+  )
+  log('start-up sync', startSync)
+  expect(
+    'the app pulls the library once by itself on start-up',
+    typeof startSync.msg === 'string' && /^(增量同步|同步完成)/.test(startSync.msg),
+    startSync
+  )
+  expect('and shows no banner while doing it', startSync.err === false, startSync)
+  expect('and it is on unless switched off', startSync.cfg !== false, startSync)
+
   // The bar is one row and every label on it is on one line.  A button
   // squeezed narrow enough wraps its own text — "检查" over "更新" — which
   // is harder to read at a glance than a wide button, and it is what made the
@@ -1663,6 +1692,14 @@ async function runSmoke() {
       + `set.call(i,${JSON.stringify(v)});`
       + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
     )
+  // The press below only asks for a key's own direction when the list is not
+  // already sorted by that key; when it is, the press turns the direction
+  // instead.  The default with no sort saved is the year, which is exactly the
+  // key about to be pressed — so on a clean config the press would flip rather
+  // than choose, and the direction read back would be the opposite of the one
+  // being claimed.  A known key goes on first; the reload at the end of this
+  // block puts back whatever the reader had.
+  await setSortAndReload({ key: 'title', dir: 1 })
   expect('the toolbar offers a sort card', (await toolbarBtn('排序')) === 1, '排序')
   await new Promise((r) => setTimeout(r, 400))
   const sortKeys = await sortCardKeys()
@@ -2056,11 +2093,15 @@ async function runSmoke() {
   const mi = JSON.parse(await menuInfo())
   log('row menu', JSON.stringify(mi))
   expect('a right click opens the row menu', mi.open === 1, mi)
-  expect('the row menu offers actions and separators', mi.items.length >= 4 && mi.seps >= 1, mi)
+  // `|| []` rather than a bare read: a menu that did not open answers with no
+  // list at all, and reading `.length` off that throws, which ends the run
+  // before the config is put back — one red line turning into a dozen more on
+  // every later run, because the next run starts from what this one left.
+  expect('the row menu offers actions and separators', (mi.items || []).length >= 4 && mi.seps >= 1, mi)
   expect('the row menu stays inside the window', mi.inWindow === true, mi)
   expect(
     'the row menu can hand the file to the OS',
-    mi.items.includes('在文件夹中显示') && mi.items.includes('用系统程序打开'),
+    (mi.items || []).includes('在文件夹中显示') && (mi.items || []).includes('用系统程序打开'),
     mi
   )
   // the two shell actions are only offered where there is a file to hand over:
@@ -3222,6 +3263,12 @@ async function runSmoke() {
     await new Promise((r) => setTimeout(r, 350))
   }
   await openSort()
+  // a press on the key the list is already sorted by turns the direction
+  // instead of asking for it, and the default with nothing saved is the year —
+  // so the year goes on by way of another key first, otherwise the first list
+  // read here would be the oldest-first one and the two would swap places
+  await pickSort('title')
+  await new Promise((r) => setTimeout(r, 400))
   await pickSort('year')
   await new Promise((r) => setTimeout(r, 800))
   const ftNewest = await ftYears()
@@ -3933,6 +3980,53 @@ async function runSmoke() {
     si
   )
   expect('it shows the version', si.version === true, si)
+
+  // The start-up pull is the one thing this app does without being asked, so
+  // it has to be switchable off, and the switch has to land in the config a
+  // later launch reads — a box that only changed the panel would come back on
+  // next time and the reader would have no way to tell why.
+  expect('settings has a section for it', si.secs.includes('同步'), si.secs)
+  const syncBox = '打开软件时自动同步一次'
+  const findSyncBox =
+    '(()=>{const m=document.querySelector(".settings");if(!m)return JSON.stringify({found:0});'
+    + 'const l=[...m.querySelectorAll("label")].find(x=>x.textContent.includes('
+    + JSON.stringify(syncBox) + '));'
+    + 'if(!l)return JSON.stringify({found:0});'
+    + 'const i=l.querySelector("input[type=checkbox]");'
+    + 'return JSON.stringify({found:1,on:i?!!i.checked:null})})()'
+  // 0 rather than a throw when the row is not there: a missing switch is a
+  // failure to report, not a reason to end the run before the rest of the
+  // settings are put back
+  const pressSyncBox =
+    '(()=>{const m=document.querySelector(".settings");if(!m)return 0;'
+    + 'const l=[...m.querySelectorAll("label")].find(x=>x.textContent.includes('
+    + JSON.stringify(syncBox) + '));'
+    + 'if(!l)return 0;const i=l.querySelector("input[type=checkbox]");'
+    + 'if(!i)return 0;i.click();return 1})()'
+  const boxOn = JSON.parse(await w.webContents.executeJavaScript(findSyncBox))
+  log('auto-sync box', boxOn)
+  expect(
+    'the switch is there and starts on',
+    boxOn.found === 1 && boxOn.on === true,
+    boxOn
+  )
+  await w.webContents.executeJavaScript(pressSyncBox)
+  await new Promise((r) => setTimeout(r, 400))
+  const cfgOff = JSON.parse(
+    await w.webContents.executeJavaScript('(async()=>JSON.stringify(await window.api.getConfig()))()')
+  )
+  log('config after switching it off', cfgOff.syncOnStart)
+  expect('switching it off reaches the config', cfgOff.syncOnStart === false, cfgOff.syncOnStart)
+  const boxOff = JSON.parse(await w.webContents.executeJavaScript(findSyncBox))
+  expect('and the box on screen goes with it', boxOff.on === false, boxOff)
+  // put back: both the config and the panel, so the next run starts from on
+  await w.webContents.executeJavaScript(pressSyncBox)
+  await new Promise((r) => setTimeout(r, 400))
+  const cfgOn = JSON.parse(
+    await w.webContents.executeJavaScript('(async()=>JSON.stringify(await window.api.getConfig()))()')
+  )
+  log('config after switching it back', cfgOn.syncOnStart)
+  expect('switching it back on reaches the config too', cfgOn.syncOnStart === true, cfgOn.syncOnStart)
 
   // "已是最新版本" without a number answers a question nobody asked — newest
   // compared to what?  A reader who was told a build is fixed needs the two
