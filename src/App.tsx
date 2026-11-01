@@ -2472,6 +2472,10 @@ export default function App() {
             <PdfViewer
               doc={selected}
               jumpTo={jump}
+              // the word in the search box, whichever of the two modes typed
+              // it: a hit in the list is a claim about the paper, and the
+              // paper is where it has to be checkable
+              hitQuery={ftMode ? ftQuery : query}
               confirm={askConfirm}
               onLocalPdf={(id, p) =>
                 setLib((l) =>

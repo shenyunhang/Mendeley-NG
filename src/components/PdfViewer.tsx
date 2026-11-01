@@ -124,6 +124,7 @@ export default function PdfViewer({
   doc,
   onLocalPdf,
   jumpTo,
+  hitQuery,
   confirm
 }: {
   doc: Doc
@@ -131,6 +132,9 @@ export default function PdfViewer({
   /** Open at this page.  The nonce is what makes a second jump to the same
    *  page on the same document possible, e.g. two hits on page 3. */
   jumpTo?: { page: number; nonce: number } | null
+  /** The word the library was searched for, to be marked on the paper.  See
+   *  the effect that watches it for why it is marked rather than looked up. */
+  hitQuery?: string
   /** The app's one confirmation box.  Deleting an annotation is the only
    *  destructive thing in here, and it has no way back. */
   confirm: (req: { title: string; body?: string; ok?: string }) => Promise<boolean>
@@ -935,6 +939,51 @@ export default function PdfViewer({
     setFindOpen(false)
   }, [doc.localPdf])
 
+  /**
+   * Whether the marks now on the page were put there by the search term below
+   * rather than by the reader opening find and typing.
+   *
+   * It decides two things: whether the scan runs while the find box is shut,
+   * and whether dropping the term is allowed to take the marks with it -- a
+   * find the reader asked for is theirs, and this must not wipe it.
+   */
+  const queryDriven = useRef(false)
+
+  /** Shutting the box takes its marks with it: an orange box left on the page
+   *  with nothing saying which word it belongs to is worse than none. */
+  const closeFind = useCallback(() => {
+    queryDriven.current = false
+    setFindQ('')
+    setFindHits([])
+    setFindAt(0)
+    setFindOpen(false)
+  }, [])
+
+  /**
+   * The word the library was searched for, marked on the paper.
+   *
+   * A hit in the list is a claim about the paper, and the paper is where the
+   * reader has to be able to check it: without this, finding the word again
+   * inside a thirty-page PDF is exactly the work the search was meant to save.
+   * It is the same scan the find box runs, so there is still only one of them
+   * and only one cache of page text.
+   *
+   * The box itself is opened by the scan, not here, and only when the word is
+   * actually in *this* paper.  A term can match a title, an author or a tag
+   * and appear nowhere in the text, and a box announcing no matches on every
+   * click is worse than no box.
+   */
+  useEffect(() => {
+    const q = (hitQuery ?? '').trim()
+    if (q.length < 2) {
+      if (!queryDriven.current) return
+      closeFind()
+      return
+    }
+    queryDriven.current = true
+    setFindQ(q)
+  }, [hitQuery, doc.id, doc.localPdf, closeFind])
+
   const itemsOf = async (n: number): Promise<TextRun[]> => {
     const hit = textCache.current.get(n)
     if (hit) return hit
@@ -1093,7 +1142,18 @@ export default function PdfViewer({
         }
       }
       setFindBusy(false)
-      if (all.length) gotoHit(0, all)
+      if (!all.length) return
+      setFindOpen(true)
+      // A term from the library search must not move the reader: a hit in the
+      // list carries its own page, and the reader is already on it.  Only the
+      // caret is placed, on the first hit of the page being read, so that the
+      // count and the ↑ ↓ mean something from where the reader is standing.
+      if (queryDriven.current) {
+        const onThis = all.findIndex((h) => h.page === pageRef.current)
+        setFindAt(onThis >= 0 ? onThis : 0)
+        return
+      }
+      gotoHit(0, all)
     },
     // gotoHit reads page/scale through the closure on purpose: a stale copy
     // would only mean one extra scroll
@@ -1102,12 +1162,21 @@ export default function PdfViewer({
   )
 
   // a query is worth a scan once the typing pauses; 250ms is long enough that
-  // a four-character word costs one scan rather than four
+  // a four-character word costs one scan rather than four.  The box being shut
+  // does not stop it when the term came from the library search: that scan is
+  // what puts the marks on the page, and it opens the box itself if there is
+  // something to report.
   useEffect(() => {
-    if (!findOpen) return
+    if (!findOpen && !queryDriven.current) return
     const t = setTimeout(() => runFind(findQ), 250)
     return () => clearTimeout(t)
-  }, [findQ, findOpen, runFind])
+    // `findOpen` is left out on purpose.  The scan is what opens the box when
+    // the term came from the library search, so having the box's own state in
+    // here would start a second walk of every page the moment the first one
+    // finished.  What starts a scan is a new term or a new document, both of
+    // which arrive through `findQ` and `runFind`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findQ, runFind])
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -1134,7 +1203,7 @@ export default function PdfViewer({
       if (e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
-        setFindOpen(false)
+        closeFind()
         return
       }
       // only the find box answers Enter: the note box has its own meaning for
@@ -1149,12 +1218,15 @@ export default function PdfViewer({
     window.addEventListener('keydown', h, true)
     return () => window.removeEventListener('keydown', h, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [findOpen, findAt, findHits, continuous])
+  }, [findOpen, findAt, findHits, continuous, closeFind])
 
-  // exposed so the smoke run can assert on a hit count without screenshotting
+  // exposed so the smoke run can assert on a hit count without screenshotting.
+  // The page count is the one that says the whole file was walked: a mark on
+  // the page being read is what a single-page scan would leave too.
   useEffect(() => {
     const d = document.documentElement.dataset
     d.findHits = String(findHits.length)
+    d.findPages = String(new Set(findHits.map((h) => h.page)).size)
     d.findPage = findHits.length ? String(findHits[findAt]?.page ?? '') : ''
   }, [findHits, findAt])
 
@@ -1936,7 +2008,7 @@ export default function PdfViewer({
                     ? '无匹配'
                     : ''}
             </span>
-            <button title="关闭 (Esc)" onClick={() => setFindOpen(false)}>
+            <button title="关闭 (Esc)" onClick={closeFind}>
               ×
             </button>
           </div>

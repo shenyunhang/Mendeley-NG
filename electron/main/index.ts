@@ -2882,6 +2882,74 @@ async function runSmoke() {
   )
   log('ft open at page', { want: wantPage, got: landed })
   expect('opening a hit jumps to its page', Number(landed) === wantPage, { want: wantPage, got: landed })
+
+  // The word the list was searched for has to be found again inside the
+  // paper.  A hit in the list is a claim about the paper, and the paper is
+  // where that claim has to be checkable: without the marks, finding the word
+  // again in a thirty-page PDF is exactly the work the search was meant to
+  // save.
+  //
+  // What is checked is not only that something is marked but that the whole
+  // file was walked.  Marks on the page landed on alone would prove nothing —
+  // the list already said which page to look at — so the scan has to have
+  // reached pages the reader is not on, which shows up as hits on more than
+  // one page.
+  let marked = { hits: 0, pages: 0, onScreen: 0, box: 0 }
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 250))
+    marked = JSON.parse(
+      await w.webContents.executeJavaScript(
+        'JSON.stringify({hits:Number(document.documentElement.dataset.findHits||0),'
+        + 'pages:Number(document.documentElement.dataset.findPages||0),'
+        + 'onScreen:document.querySelectorAll(".find-hit").length,'
+        + 'box:document.querySelectorAll(".pdf-find").length})'
+      )
+    )
+    if (marked.hits > 0) break
+  }
+  log('ft term marked in the paper', marked)
+  expect(
+    'opening a hit marks the word in the paper',
+    marked.hits > 0 && marked.onScreen > 0,
+    marked
+  )
+  expect('the whole paper was walked, not only the page landed on', marked.pages > 1, marked)
+  // An orange box on the page with nothing saying which word it belongs to is
+  // worse than no box, so the marks come with the find bar that names them.
+  expect('the marks come with a box saying which word they belong to', marked.box === 1, marked)
+  // And they must not cost the reader the page: the hit named one, and the
+  // scan coming across an earlier occurrence is not a reason to be moved to
+  // it.  Read after the scan has finished, which is the only moment it could
+  // have moved anything.
+  const stillAt = await w.webContents.executeJavaScript(
+    'document.querySelector(".pdf-bar input").value'
+  )
+  log('page after the scan', { want: wantPage, got: stillAt })
+  expect(
+    'marking the word leaves the reader on the hit they opened',
+    Number(stillAt) === wantPage,
+    { want: wantPage, got: stillAt }
+  )
+  // Shutting the box has to take its marks with it, otherwise the page keeps
+  // a highlight nothing accounts for.
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=document.querySelector(\'.pdf-find button[title^="关闭"]\');'
+    + 'if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 500))
+  const afterClose = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({hits:Number(document.documentElement.dataset.findHits||0),'
+      + 'onScreen:document.querySelectorAll(".find-hit").length,'
+      + 'box:document.querySelectorAll(".pdf-find").length})'
+    )
+  )
+  log('after closing the find box', afterClose)
+  expect(
+    'shutting the box takes its marks with it',
+    afterClose.box === 0 && afterClose.onScreen === 0 && afterClose.hits === 0,
+    afterClose
+  )
   await w.webContents.executeJavaScript(
     '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
     + '.find(x=>x.textContent.trim()==="返回列表");if(b)b.click();return 1})()'
