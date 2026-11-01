@@ -62,6 +62,16 @@ import { parseAny, type Entry } from './lib/import'
 
 
 /**
+ * How two titles are ordered when the sorted column cannot separate them.
+ *
+ * One collator for the life of the app, not `String.prototype.localeCompare`
+ * per comparison: the latter builds a collator every time it is called, and
+ * over a library of a few thousand papers a single sort reaches it tens of
+ * thousands of times.  Same order, a great deal less work.
+ */
+const TITLE_ORDER = new Intl.Collator(undefined, { numeric: false, sensitivity: 'variant' })
+
+/**
  * One step of undo.  `run` is a closure rather than a description of the
  * change, because the operations being undone are all cloud calls whose
  * inverse is another cloud call; there is no shared state to diff against.
@@ -587,6 +597,14 @@ export default function App() {
     return rolled
   }, [docs, folders, tree])
 
+  /**
+   * One collator for the whole run.
+   *
+   * `String.prototype.localeCompare` builds a collator on every call, and
+   * the tie-break below reaches it once per comparison -- tens of thousands
+   * of times over a library this size, every keystroke.  Building it once
+   * is the whole difference.
+   */
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     let out = docs
@@ -611,12 +629,17 @@ export default function App() {
       if (key === 'created') return d.created ?? ''
       return d.year ?? 0
     }
-    return [...out].sort((a, b) => {
-      const x = val(a)
-      const y = val(b)
-      if (x === y) return (a.title ?? '').localeCompare(b.title ?? '')
-      return (x < y ? -1 : 1) * dir
+    // The key is taken once per document and carried through the sort.
+    // Calling `val` from inside the comparator is the expensive way round:
+    // it runs about n·log n times rather than n, and each of those builds
+    // a lower-cased string that is then thrown away.  Over five thousand
+    // papers that is the difference between one pass and twelve.
+    const rows = out.map((d) => ({ d, v: val(d) }))
+    rows.sort((a, b) => {
+      if (a.v === b.v) return TITLE_ORDER.compare(a.d.title ?? '', b.d.title ?? '')
+      return (a.v < b.v ? -1 : 1) * dir
     })
+    return rows.map((r) => r.d)
   }, [docs, folderId, query, sort, filters, haystack])
 
   /**
@@ -633,8 +656,16 @@ export default function App() {
       base = base.filter((d) => (d.folder_uuids ?? []).some((f) => ids.has(f)))
     }
     if (q) base = base.filter((d) => (haystack.get(d.id) ?? '').includes(q))
+    // One walk, counting as it goes.  `base.filter(FILTER_TEST[k]).length`
+    // builds a fresh array of every surviving paper for each switch and then
+    // throws it away after reading one number off it -- five arrays of a few
+    // thousand entries, allocated and discarded on every keystroke, which the
+    // collector then has to account for.
     const out = {} as Record<ListFilter, number>
-    for (const k of LIST_FILTERS) out[k] = base.filter(FILTER_TEST[k]).length
+    for (const k of LIST_FILTERS) out[k] = 0
+    for (const d of base) {
+      for (const k of LIST_FILTERS) if (FILTER_TEST[k](d)) out[k]++
+    }
     return out
   }, [docs, folderId, query, haystack, tree])
 

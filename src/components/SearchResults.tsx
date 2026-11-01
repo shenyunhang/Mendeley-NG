@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Doc } from '../../shared/types'
-import { matchDoc, type Part } from '../lib/match'
+import { matchDoc, type DocMatch, type Part } from '../lib/match'
 
 interface Props {
   docs: Doc[]
@@ -85,11 +85,27 @@ export default function SearchResults({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardH])
 
+  /**
+   * The match for one card, built the first time that card is asked for.
+   *
+   * Building all of them up front is the obvious way to write this and the
+   * expensive one: a card costs a pass over every searchable field, abstract
+   * included, and only the twenty-odd on screen are ever drawn.  Building
+   * them per card makes a scroll free after the first pass, because the
+   * cache outlives the render that filled it.
+   */
   const q = query.trim()
-  const matches = useMemo(
-    () => docs.map((d) => matchDoc(d, q, noteMap[d.id])),
-    [docs, q, noteMap]
-  )
+  const matchAt = useMemo(() => {
+    const cache = new Map<string, DocMatch>()
+    return (i: number): DocMatch => {
+      const d = docs[i]
+      const hit = cache.get(d.id)
+      if (hit) return hit
+      const made = matchDoc(d, q, noteMap[d.id])
+      cache.set(d.id, made)
+      return made
+    }
+  }, [docs, q, noteMap])
 
   return (
     <div className="res-wrap" ref={parentRef}>
@@ -99,7 +115,7 @@ export default function SearchResults({
         <div style={{ height: v.getTotalSize(), position: 'relative' }}>
           {v.getVirtualItems().map((vi) => {
             const d = docs[vi.index]
-            const m = matches[vi.index]
+            const m = matchAt(vi.index)
             const picked = multi.includes(d.id)
             return (
               <div
