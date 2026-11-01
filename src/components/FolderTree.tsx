@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Folder, SavedSearch } from '../../shared/types'
 import { buildTree, isSelfOrDescendant } from '../lib/tree'
 
@@ -21,6 +21,13 @@ interface Props {
   onDelete?: (id: string) => void
   /** a folder dropped onto another folder becomes its child */
   onMove?: (id: string, parentId: string | null) => void
+  /**
+   * Ask for the rename box on `id`.  Carries a counter rather than being a
+   * plain id, because pressing F2 twice in a row has to be two requests: with
+   * an id alone the second press would find the state unchanged and the box
+   * would not come back after the first one was dismissed.
+   */
+  renameRequest?: { id: string; n: number } | null
 }
 
 /**
@@ -56,7 +63,8 @@ export default function FolderTree({
   onDrop,
   onRename,
   onDelete,
-  onMove
+  onMove,
+  renameRequest
 }: Props) {
   const [filter, setFilter] = useState('')
   const [dragOver, setDragOver] = useState<string | null>(null)
@@ -85,6 +93,24 @@ export default function FolderTree({
     for (const r of tree.roots) visit(r, 0)
     return out
   }, [tree, filter, collapsed])
+
+  // The request arrives from a key press handled somewhere else, so it is
+  // answered here rather than in the event: the box belongs to a row and only
+  // this component knows which row that is.  A folder currently filtered out
+  // of the column is not offered for renaming either — there would be nowhere
+  // to put the box, and a box that opens somewhere else is worse than none.
+  useEffect(() => {
+    if (!renameRequest) return
+    const f = folders.find((x) => x.id === renameRequest.id)
+    if (!f) return
+    if (!rows.some((r) => r.folder.id === f.id)) return
+    setDraft(f.name)
+    setEditing(f.id)
+    // `rows` is deliberately not a dependency: it is derived state, and
+    // re-running this because the column changed would reopen the box over a
+    // reader who had just closed it
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renameRequest])
 
   const commitRename = (id: string) => {
     const name = draft.trim()

@@ -881,6 +881,88 @@ async function runSmoke() {
   await clickAll()
   await wait(400)
 
+  // F2 is the key the rest of the desktop uses for "rename this", and a
+  // folder is the only thing here that has a name to change.  Until now the
+  // tree only offered it behind a pencil button hidden in a row until the row
+  // is hovered, so the gesture the reader already knows from Explorer did
+  // nothing.  What is checked is the wiring — the box opens on the folder
+  // that is open, pre-filled with the name it already has — and not the API
+  // call: giving a real folder a new name is not a smoke run's business.
+  const f2Name = (folderNames as string[]).find((n) => n && !n.includes('全部文献')) ?? ''
+  await w.webContents.executeJavaScript(
+    '(()=>{const f=[...document.querySelectorAll(".folder-row")]'
+    + '.find(e=>((e.querySelector(".name")||{}).textContent||"")==='
+    + JSON.stringify(f2Name) + ');if(f)f.click();return 1})()'
+  )
+  await wait(400)
+  // dispatched on whatever has the focus, because that is what the shortcut
+  // is refused on: a press aimed at a text field belongs to the text field
+  const f2Press = () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const el=document.activeElement||document.body;'
+      + 'el.dispatchEvent(new KeyboardEvent("keydown",{key:"F2",bubbles:true,cancelable:true}));'
+      + 'return 1})()'
+    )
+  await f2Press()
+  await wait(400)
+  const f2Box = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({box:document.querySelectorAll(".folder-row .rename").length,'
+      + 'value:(document.querySelector(".folder-row .rename")||{}).value||null})'
+    )
+  )
+  log('F2 on a folder', { name: f2Name, ...f2Box })
+  expect(
+    'F2 opens the rename box on the folder that is open',
+    f2Box.box === 1 && f2Box.value === f2Name,
+    { f2Name, f2Box }
+  )
+  // Escape has to put it away without renaming: a box that can only be left
+  // by committing turns the key into a trap
+  await w.webContents.executeJavaScript(
+    '(()=>{const i=document.querySelector(".folder-row .rename");'
+    + 'if(i)i.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));'
+    + 'return 1})()'
+  )
+  await wait(300)
+  const f2After = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({box:document.querySelectorAll(".folder-row .rename").length,'
+      + 'name:((document.querySelector(".folder-row.sel .name")||{}).textContent||null)})'
+    )
+  )
+  log('F2 dismissed', f2After)
+  expect(
+    'Escape leaves the box without renaming',
+    f2After.box === 0 && f2After.name === f2Name,
+    f2After
+  )
+  // A press meant for somewhere else must not rename a folder.  With the
+  // whole library open there is no folder to name, and while the search box
+  // holds the key the reader is typing rather than asking.
+  await clickAll()
+  await wait(300)
+  await f2Press()
+  await wait(300)
+  const f2None = await w.webContents.executeJavaScript(
+    'document.querySelectorAll(".folder-row .rename").length'
+  )
+  expect('F2 with no folder open does nothing', Number(f2None) === 0, f2None)
+  await w.webContents.executeJavaScript(
+    '(()=>{const i=document.querySelector(".toolbar input");if(i)i.focus();return 1})()'
+  )
+  await f2Press()
+  await wait(300)
+  const f2Typing = await w.webContents.executeJavaScript(
+    'document.querySelectorAll(".folder-row .rename").length'
+  )
+  expect('F2 while typing in the search box does nothing', Number(f2Typing) === 0, f2Typing)
+  await w.webContents.executeJavaScript(
+    '(()=>{const a=document.activeElement;if(a&&a.blur)a.blur();return 1})()'
+  )
+  await clickAll()
+  await wait(300)
+
   // Column widths.  The drag is tracked on the window, which only starts
   // listening after the press has been rendered, so a press, a move and a
   // release are three separate steps with a wait between each.  A column that

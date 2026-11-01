@@ -136,6 +136,13 @@ export default function App() {
   const [lib, setLib] = useState<Library | null>(null)
   const [folders, setFolders] = useState<Folder[]>([])
   const [folderId, setFolderId] = useState<string | null>(null)
+  /**
+   * F2 asks for the rename box on the selected folder.  The counter is what
+   * makes a second press a second request: with the id alone, pressing F2
+   * again after dismissing the box would leave the state unchanged and the
+   * box would not come back.
+   */
+  const [renameReq, setRenameReq] = useState<{ id: string; n: number } | null>(null)
   const [query, setQuery] = useState('')
   const [selId, setSelId] = useState<string | null>(null)
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(DEFAULT_SORT)
@@ -398,6 +405,20 @@ export default function App() {
       // Ctrl+A is the one shortcut with a meaning inside a text field, and
       // that meaning wins there: what is being asked for is the text that was
       // typed, not every paper in the library.
+      // F2 is the key the rest of the desktop uses for "rename this", and a
+      // folder is the only thing here that has a name and can be given
+      // another.  It is refused while a text field or a button owns the key,
+      // and while the focus sits anywhere but the sidebar: a press meant for
+      // the document list must not rename whatever folder happens to be open.
+      if (e.key === 'F2') {
+        const a = document.activeElement as HTMLElement | null
+        const inTree = !a || a === document.body || !!a.closest?.('.pane-left')
+        if (!claimed && folderId && inTree) {
+          e.preventDefault()
+          setRenameReq((r) => ({ id: folderId, n: (r?.n ?? 0) + 1 }))
+        }
+        return
+      }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
         e.preventDefault()
@@ -472,8 +493,9 @@ export default function App() {
     return () => window.removeEventListener('keydown', h)
     // settings and showCols are read here, so the listener has to be rebuilt
     // when either moves: a closure captured at mount would still see them
-    // as false and Esc would do nothing at all
-  }, [bumpFont, settings, showCols, showFilters])
+    // as false and Esc would do nothing at all.  folderId is read by F2 for
+    // the same reason.
+  }, [bumpFont, settings, showCols, showFilters, folderId])
 
   /** `full` re-pulls the whole library.  Incremental is the default because a
    *  5.6k-document pull takes long enough to be annoying, but deletions are
@@ -1948,6 +1970,7 @@ export default function App() {
               setFolders((fs) => fs.map((x) => (x.id === fid ? f : x)))
               setLib((l) => (l ? { ...l, folders: l.folders.map((x) => (x.id === fid ? f : x)) } : l))
             }}
+            renameRequest={renameReq}
             onDelete={async (fid) => {
               const f = folders.find((x) => x.id === fid)
               const kids = (tree.subtree.get(fid) ?? [fid]).length - 1
