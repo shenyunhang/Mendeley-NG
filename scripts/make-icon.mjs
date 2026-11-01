@@ -23,51 +23,60 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 /* ---------------------------------------------------------------- the mark */
 
 /**
- * One strip of paper, folded twice, into an N.
+ * A sheet of paper rolled up, with its free end still sticking out.
  *
- * The mark is the program's initial and the program's subject at the same
- * time: the strip is continuous, so the N is not a letter laid on top of a
- * document, it is a document that happens to be folded that way.  You read
- * the letter first and the paper second, which is the whole point of it.
+ * The two marks before this were both a coloured rounded square with a white
+ * shape on it, which is what nearly every program draws, and the second was
+ * also a letter — which Zotero had already done.  This one is only itself:
+ * there is no tile, so what is recognised at 16 px is the outline of the
+ * thing rather than a container with something sitting in it.
  *
- * Nothing else shares the tile.  At 16 px a mark carrying two ideas turns
- * to mud, and a page, a fold and three lines of text — which is what was
- * here before — is four.
+ * It is a sheet being rolled rather than a document, a folder or a book,
+ * because the coil is what paper does and nothing else does, and because the
+ * free end is half of the meaning: without it the roll is a spring.
  *
- * The one exception is the strip's own underside: the same strip shifted
- * down and right and washed dark, which is there to give the paper
- * thickness, not to say anything of its own.
- *
- * The tile runs from the light-theme accent to the dark-theme accent, so
- * the icon and the UI agree about what colour this program is.
+ * The colour runs *along* the sheet rather than across the canvas, so what
+ * you see is the winding — violet in the tight core, the program's own blue
+ * through the middle of the roll, teal as it opens out, and amber on the end
+ * that is still out in the light.  A gradient across the canvas would light
+ * the coil like a rendering of a solid, and lose the sense of one long thing
+ * wound up.
  */
-const TILE = { from: [0x4a, 0x9e, 0xff], to: [0x0b, 0x62, 0xd6], r: 112 }
-const SHEET = '#f5faff'
-/** The middle leg, turned away from the light, a shade off the two uprights. */
-const TURNED = '#d9e8fb'
-const UNDER = { dx: 16, dy: 20, ink: [0x04, 0x26, 0x59], mix: 0.5 }
+const ROLL = {
+  /**
+   * How many times the sheet goes round.  Enough to read as a coil and not
+   * as a hook: the gap left between two turns is (rOut - rIn) / turns less
+   * the thickness of the sheet, and past about two turns that gap is gone by
+   * 32 px, where the coil would close up into a disc.
+   */
+  turns: 1.6,
+  rIn: 64,
+  rOut: 184,
+  /** Half the thickness of the sheet. */
+  half: 25,
+  /** How far the free end runs on past the roll. */
+  tail: 138,
+  /** How far the free end turns away from the roll as it runs on.  Left at
+   *  zero it carries on along the tangent and hugs the outside of the coil,
+   *  which is what made the first attempt look like a hook rather than like
+   *  an end that has come loose. */
+  spread: 1.2,
+  /** Where the outer end sits, chosen so the free end leaves towards the
+   *  upper right, the one corner that leaves room for it, and so the mark
+   *  balances on the canvas. */
+  at: Math.PI * 0.39
+}
 
-/** Centreline of the strip: up the left, down the diagonal, up the right. */
-const FOLD = [
-  [168, 384],
-  [168, 128],
-  [344, 384],
-  [344, 128]
+/** The colours along the sheet, from the tight core to the free end. */
+const RAMP = [
+  [0.0, [0x7b, 0x3f, 0xf2]],
+  [0.38, [0x3f, 0x8c, 0xf0]],
+  [0.72, [0x16, 0xc8, 0xb8]],
+  [1.0, [0xff, 0xb0, 0x2e]]
 ]
-/** Half the width of the strip. */
-const HALF = 36
 
-/* -------------------------------------------------------------- rasterising */
-
-const hex = (h) => [
-  parseInt(h.slice(1, 3), 16),
-  parseInt(h.slice(3, 5), 16),
-  parseInt(h.slice(5, 7), 16)
-]
-
-const toHex = (c) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('')
-
-const shift = (pts, dx, dy) => pts.map(([x, y]) => [x + dx, y + dy])
+/** Clear space kept around the mark on every side. */
+const MARGIN = 16
 
 const unit = ([x, y]) => {
   const l = Math.hypot(x, y)
@@ -77,79 +86,201 @@ const unit = ([x, y]) => {
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1]]
 
 /**
- * Where a strip creases when it is folded at `at`: the crease runs across the
- * strip along d_out - d_in, and `n` is the normal pointing at the leg after
- * the fold.  Take a square corner as the check — a strip travelling up that
- * leaves travelling right creases along the diagonal, which is what a ribbon
- * bent round a corner actually does.
+ * The centreline: an Archimedean spiral out from the core, then the free end.
+ *
+ * The end leaves the roll along the tangent it already had — there is a crease
+ * in the mark if it does not — and then turns away from the coil, gently at
+ * first so that the join has no corner in it, and gently again at the last so
+ * that the end is straight by the time it stops.  Left carrying on along the
+ * tangent it would hug the outside of the coil, which is what made the first
+ * attempt look like a hook rather than like an end that has come loose.
  */
-const crease = (before, at, after) => {
-  const din = unit(sub(at, before))
-  const dout = unit(sub(after, at))
-  const along = unit([dout[0] - din[0], dout[1] - din[1]])
-  return { n: [along[1], -along[0]], at }
-}
-
-/** Keep the half of `poly` that a crease leaves on the far side of. */
-const clipHalf = (poly, { n, at }) => {
-  const side = (p) => (p[0] - at[0]) * n[0] + (p[1] - at[1]) * n[1]
-  const out = []
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i]
-    const b = poly[(i + 1) % poly.length]
-    const da = side(a)
-    const db = side(b)
-    if (da >= 0) out.push(a)
-    if (da >= 0 !== db >= 0) {
-      const t = da / (da - db)
-      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t])
-    }
+function rollPath() {
+  const T = ROLL.turns * Math.PI * 2
+  const k = (ROLL.rOut - ROLL.rIn) / T
+  const n = 140
+  const pts = []
+  for (let i = 0; i <= n; i++) {
+    const th = (i / n) * T
+    const r = ROLL.rIn + k * th
+    const a = ROLL.at + th
+    pts.push([Math.cos(a) * r, Math.sin(a) * r])
   }
-  return out
-}
-
-const inRoundRect = (x, y, x0, y0, x1, y1, r) => {
-  if (x < x0 || x > x1 || y < y0 || y > y1) return false
-  const cx = Math.min(Math.max(x, x0 + r), x1 - r)
-  const cy = Math.min(Math.max(y, y0 + r), y1 - r)
-  const dx = x - cx
-  const dy = y - cy
-  return dx * dx + dy * dy <= r * r
-}
-
-const inPolygon = (pts, x, y) => {
-  let inside = false
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-    const [xi, yi] = pts[i]
-    const [xj, yj] = pts[j]
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  const tip = pts[pts.length - 1]
+  const dir = unit(sub(tip, pts[pts.length - 2]))
+  const a0 = Math.atan2(dir[1], dir[0])
+  const step = ROLL.tail / 24
+  let x = tip[0]
+  let y = tip[1]
+  for (let i = 1; i <= 24; i++) {
+    const u = i / 24
+    const ang = a0 - ROLL.spread * u * u * (3 - 2 * u)
+    x += Math.cos(ang) * step
+    y += Math.sin(ang) * step
+    pts.push([x, y])
   }
-  return inside
+  return pts
 }
 
 /**
- * Distance from a point to a segment, and so: is the point within h of the
- * polyline.  That is exactly what an SVG stroke of width 2h with round caps
- * and round joins covers, which is why the vector and the rasters agree
- * without either of them knowing about the other's idea of a stroke.
+ * The first and the last stretch of the line, each as a single segment.
+ *
+ * A stroke bulges past its end by half the thickness less however long the
+ * end segment is, so with segments as short as these are it would bulge by
+ * nearly the whole thickness and the ends would come out round.  Both ends
+ * of the line are very nearly straight over that distance -- the spiral
+ * turns by a fifth of a radian in it, and the free end has stopped turning
+ * by then -- so each end can be one segment, and one long enough that there
+ * is nothing left to bulge by.  What is left of the bulge is what makes the
+ * ends of the sheet read as cut.
  */
-const distToSegment = (x, y, ax, ay, bx, by) => {
-  const dx = bx - ax
-  const dy = by - ay
-  const l2 = dx * dx + dy * dy
-  let t = l2 === 0 ? 0 : ((x - ax) * dx + (y - ay) * dy) / l2
-  t = t < 0 ? 0 : t > 1 ? 1 : t
-  const qx = ax + t * dx - x
-  const qy = ay + t * dy - y
-  return Math.sqrt(qx * qx + qy * qy)
+const squareEnds = (pts) => {
+  const first = pts[0]
+  const last = pts[pts.length - 1]
+  const away = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1])
+  let i = 1
+  while (i < pts.length - 2 && away(first, pts[i]) < ROLL.half) i++
+  let j = pts.length - 2
+  while (j > i && away(last, pts[j]) < ROLL.half) j--
+  return [first, ...pts.slice(i, j + 1), last]
 }
 
-const inStroke = (pts, x, y, h) => {
-  for (let i = 1; i < pts.length; i++) {
-    if (distToSegment(x, y, pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]) <= h) return true
+/**
+ * Scaled to leave `MARGIN` clear all round and centred on the ink, so the
+ * numbers above can be changed without having to work out afresh where the
+ * mark ends up.
+ *
+ * Centred halfway between the middle of the box and the middle of the ink.
+ * The box alone puts the coil off to one side, with a bare corner opposite
+ * the free end; the ink alone puts the free end hard against the edge and
+ * leaves the same bare corner, larger, on the other side.  Halfway between
+ * them keeps the mark as large as the box allows and still puts most of the
+ * ink near the middle.  The ink is spread evenly along the sheet, so the
+ * middle of the ink is the middle of the centreline taken by length.
+ */
+const CANVAS = (() => {
+  const raw = squareEnds(rollPath())
+  const len = []
+  let total = 0
+  for (let i = 1; i < raw.length; i++) {
+    const l = Math.hypot(raw[i][0] - raw[i - 1][0], raw[i][1] - raw[i - 1][1])
+    len.push(l)
+    total += l
   }
-  return false
+  let gx = 0
+  let gy = 0
+  for (let i = 0; i < raw.length; i++) {
+    const w = ((i > 0 ? len[i - 1] : 0) + (i < len.length ? len[i] : 0)) / 2
+    gx += raw[i][0] * w
+    gy += raw[i][1] * w
+  }
+  gx /= total
+  gy /= total
+  let x0 = Infinity
+  let y0 = Infinity
+  let x1 = -Infinity
+  let y1 = -Infinity
+  for (const [x, y] of raw) {
+    x0 = Math.min(x0, x - ROLL.half)
+    y0 = Math.min(y0, y - ROLL.half)
+    x1 = Math.max(x1, x + ROLL.half)
+    y1 = Math.max(y1, y + ROLL.half)
+  }
+  gx = (gx + (x0 + x1) / 2) / 2
+  gy = (gy + (y0 + y1) / 2) / 2
+  const s = (256 - MARGIN) / Math.max(gx - x0, x1 - gx, gy - y0, y1 - gy)
+  return {
+    half: ROLL.half * s,
+    pts: raw.map(([x, y]) => [256 + (x - gx) * s, 256 + (y - gy) * s])
+  }
+})()
+
+const HALF = CANVAS.half
+const PATH = CANVAS.pts
+
+/** The sheet as segments, each carrying how far along the sheet it starts. */
+const SEG = []
+let TOTAL = 0
+for (let i = 1; i < PATH.length; i++) {
+  const [ax, ay] = PATH[i - 1]
+  const [bx, by] = PATH[i]
+  const len = Math.hypot(bx - ax, by - ay)
+  SEG.push({ ax, ay, bx, by, len, at: TOTAL })
+  TOTAL += len
 }
+
+/**
+ * Which segments can reach into each cell of a grid laid over the canvas.
+ *
+ * The sheet is 250 segments long and asking about every one of them for
+ * every sample of every pixel is a hundred times the work the mark used to
+ * cost, back when it was three straight lines.  A segment can only matter to
+ * a sample if it comes within half the thickness of that sample's cell, so
+ * the candidates are worked out once per cell and the loop below looks at
+ * nothing else.
+ */
+const GRID = 24
+const CELLS = (() => {
+  const cells = Array.from({ length: GRID * GRID }, () => [])
+  const w = 512 / GRID
+  for (let s = 0; s < SEG.length; s++) {
+    const g = SEG[s]
+    const cx0 = Math.max(0, Math.floor((Math.min(g.ax, g.bx) - HALF) / w))
+    const cx1 = Math.min(GRID - 1, Math.floor((Math.max(g.ax, g.bx) + HALF) / w))
+    const cy0 = Math.max(0, Math.floor((Math.min(g.ay, g.by) - HALF) / w))
+    const cy1 = Math.min(GRID - 1, Math.floor((Math.max(g.ay, g.by) + HALF) / w))
+    for (let cy = cy0; cy <= cy1; cy++) {
+      for (let cx = cx0; cx <= cx1; cx++) cells[cy * GRID + cx].push(s)
+    }
+  }
+  return cells
+})()
+
+/**
+ * Whether a point is on the sheet, and how far along the sheet it is.
+ *
+ * The sheet is everything within half the thickness of the centreline, which
+ * is what an SVG stroke of that width covers with round caps and joins, and
+ * is why the vector and the ten rasters agree without either of them knowing
+ * how the other draws a stroke.  Past the first and the last segment there is
+ * nothing, which is the square end the two pieces at the ends are drawn with.
+ */
+function nearest(x, y) {
+  const cx = Math.min(GRID - 1, Math.max(0, Math.floor((x * GRID) / 512)))
+  const cy = Math.min(GRID - 1, Math.max(0, Math.floor((y * GRID) / 512)))
+  let best = Infinity
+  let along = 0
+  for (const s of CELLS[cy * GRID + cx]) {
+    const g = SEG[s]
+    const dx = g.bx - g.ax
+    const dy = g.by - g.ay
+    const l2 = dx * dx + dy * dy
+    let t = l2 === 0 ? 0 : ((x - g.ax) * dx + (y - g.ay) * dy) / l2
+    if (s === 0 && t < 0) continue
+    if (s === SEG.length - 1 && t > 1) continue
+    t = t < 0 ? 0 : t > 1 ? 1 : t
+    const qx = g.ax + t * dx - x
+    const qy = g.ay + t * dy - y
+    const d = qx * qx + qy * qy
+    if (d < best) {
+      best = d
+      along = g.at + g.len * t
+    }
+  }
+  return { d: Math.sqrt(best), t: along / TOTAL }
+}
+
+const rampAt = (t) => {
+  let i = 1
+  while (i < RAMP.length - 1 && t > RAMP[i][0]) i++
+  const [t0, c0] = RAMP[i - 1]
+  const [t1, c1] = RAMP[i]
+  const f = t1 === t0 ? 0 : Math.min(1, Math.max(0, (t - t0) / (t1 - t0)))
+  return [0, 1, 2].map((j) => c0[j] + (c1[j] - c0[j]) * f)
+}
+
+const toHex = (c) =>
+  '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')
 
 /**
  * Four samples per pixel each way, then an exact area average down.  For an
@@ -158,61 +289,17 @@ const inStroke = (pts, x, y, h) => {
  */
 const SS = 4
 
-const FOLD_UNDER = shift(FOLD, UNDER.dx, UNDER.dy)
-
-/**
- * The middle leg on its own.  Stroked as a pill it reaches exactly to the two
- * creases and no further — a pill of the same width is a subset of the strip
- * it was cut from — so recolouring it shades the turned part of the paper
- * without touching the two uprights.
- */
-const FOLD_MIDDLE = [FOLD[1], FOLD[2]]
-
-/**
- * The two creases as a polygon: the whole canvas cut down to the wedge between
- * them, which is the part of the strip that lies past both folds.  The
- * rasters test against it and the SVG clips to it, so the shade stops on a
- * straight line across the strip rather than on the round cap's curve.
- */
-const TURN = clipHalf(
-  clipHalf(
-    [
-      [-64, -64],
-      [576, -64],
-      [576, 576],
-      [-64, 576]
-    ],
-    crease(FOLD[0], FOLD[1], FOLD[2])
-  ),
-  crease(FOLD[1], FOLD[2], FOLD[3])
-)
-
 function raster(n) {
   const r = n * SS
   const big = new Float64Array(r * r * 4)
-  const tile = TILE
   for (let py = 0; py < r; py++) {
     const y = ((py + 0.5) / r) * 512
     for (let px = 0; px < r; px++) {
       const x = ((px + 0.5) / r) * 512
       const o = (py * r + px) * 4
-      if (!inRoundRect(x, y, 0, 0, 512, 512, tile.r)) continue
-      const t = Math.min(1, (x + y) / 1024)
-      let c = [
-        tile.from[0] + (tile.to[0] - tile.from[0]) * t,
-        tile.from[1] + (tile.to[1] - tile.from[1]) * t,
-        tile.from[2] + (tile.to[2] - tile.from[2]) * t
-      ]
-      if (inStroke(FOLD_UNDER, x, y, HALF)) {
-        const m = UNDER.mix
-        c = [
-          c[0] * (1 - m) + UNDER.ink[0] * m,
-          c[1] * (1 - m) + UNDER.ink[1] * m,
-          c[2] * (1 - m) + UNDER.ink[2] * m
-        ]
-      }
-      if (inStroke(FOLD, x, y, HALF)) c = hex(SHEET)
-      if (inStroke(FOLD_MIDDLE, x, y, HALF) && inPolygon(TURN, x, y)) c = hex(TURNED)
+      const near = nearest(x, y)
+      if (near.d > HALF) continue
+      const c = rampAt(near.t)
       big[o] = c[0]
       big[o + 1] = c[1]
       big[o + 2] = c[2]
@@ -322,29 +409,58 @@ const buildIco = (entries) => {
 
 /* ------------------------------------------------------------------- output */
 
-const pathD = (pts) => pts.map(([x, y], i) => (i ? 'L' : 'M') + x + ' ' + y).join('')
+const pathD = (pts) =>
+  pts.map(([x, y], i) => (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1)).join('')
 
-/** Round caps and round joins, so the path covers what inStroke() covers. */
-const stroke = (pts, col, opacity) =>
-  `<path d="${pathD(pts)}" fill="none" stroke="${col}"` +
-  (opacity === undefined ? '' : ` stroke-opacity="${opacity}"`) +
-  ` stroke-width="${HALF * 2}" stroke-linecap="round" stroke-linejoin="round" />`
+/** Round joins, so a piece covers what nearest() says it covers. */
+const stroke = (pts, col, cap) =>
+  `<path d="${pathD(pts)}" stroke="${col}"` +
+  (cap ? ` stroke-linecap="${cap}"` : '') +
+  ` />`
+
+/**
+ * The sheet cut into short pieces, each with its own colour.
+ *
+ * There is no way to put a gradient *along* a stroke in SVG — a paint server
+ * is a function of the canvas, not of the distance travelled — so the ramp is
+ * applied by hand, one stroked sub-path per piece.  The pieces are drawn with
+ * round caps, so each one laps over the next by the thickness of the sheet
+ * and no seam can open on the outside of a bend.  What that costs is that a
+ * point ends up with the colour of the piece one or two ahead of it, which is
+ * two per cent of the length of the sheet and two per cent of the ramp.
+ *
+ * The two pieces at the ends are drawn with a square cap instead: their inner
+ * end is lapped over by the piece next to them anyway, so the only ends left
+ * showing square are the two cut ends of the sheet.
+ */
+const CHUNKS = 40
+const PIECES = (() => {
+  const per = TOTAL / CHUNKS
+  const out = []
+  let pts = [PATH[0]]
+  let acc = 0
+  let startAt = 0
+  for (let i = 1; i < PATH.length; i++) {
+    pts.push(PATH[i])
+    acc += SEG[i - 1].len
+    if (acc >= per && out.length < CHUNKS - 1) {
+      out.push({ pts, t: (startAt + acc / 2) / TOTAL })
+      startAt += acc
+      pts = [PATH[i]]
+      acc = 0
+    }
+  }
+  // a piece has to be at least two points to be a stroke at all; if the last
+  // one is a single point left over, the piece before it already ends there
+  if (pts.length > 1) out.push({ pts, t: (startAt + acc / 2) / TOTAL })
+  return out
+})()
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Mendeley NG">
   <!-- generated by scripts/make-icon.mjs; edit the shapes there, not here -->
-  <defs>
-    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="${toHex(TILE.from)}" />
-      <stop offset="1" stop-color="${toHex(TILE.to)}" />
-    </linearGradient>
-  </defs>
-  <clipPath id="turn">
-    <polygon points="${TURN.map(([x, y]) => x.toFixed(2) + ',' + y.toFixed(2)).join(' ')}" />
-  </clipPath>
-  <rect width="512" height="512" rx="${TILE.r}" fill="url(#tile)" />
-  ${stroke(FOLD_UNDER, toHex(UNDER.ink), UNDER.mix)}
-  ${stroke(FOLD, SHEET)}
-  <g clip-path="url(#turn)">${stroke(FOLD_MIDDLE, TURNED)}</g>
+  <g fill="none" stroke-width="${HALF * 2}" stroke-linecap="round" stroke-linejoin="round">
+${PIECES.map((p, i) => '  ' + stroke(p.pts, toHex(rampAt(p.t)), i === 0 || i === PIECES.length - 1 ? 'butt' : '')).join('\n')}
+  </g>
 </svg>
 `
 

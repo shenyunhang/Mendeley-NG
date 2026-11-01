@@ -2850,9 +2850,13 @@ async function runSmoke() {
   )
   log('settings', setInfo)
   const si = JSON.parse(setInfo)
+  // Vite inlines an asset under 4 KiB and links to it above that, so the mark
+  // comes back either as a data URL or as a file named after the logo; both
+  // are the mark, and neither should be a stale raster of an older one
   expect(
     'the about section carries the mark',
-    typeof si.mark === 'string' && si.mark.startsWith('data:image/svg'),
+    typeof si.mark === 'string' &&
+      (si.mark.startsWith('data:image/svg') || /logo[^/]*\.svg/.test(si.mark)),
     si.mark
   )
   expect('the settings panel opens', si.open === 1, si)
