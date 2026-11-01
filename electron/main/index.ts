@@ -3067,6 +3067,72 @@ async function runSmoke() {
   await setInput('.toolbar input', '')
   await new Promise((r) => setTimeout(r, 600))
 
+  // Continuous scrolling keeps its own record of what it has painted, and
+  // that record is what a scroll does not repaint everything it passes over.
+  // The record is keyed by page, scale and pixel ratio, and for a long time
+  // by nothing else — so another paper opened at the same zoom found every
+  // page already down as painted, returned before touching a canvas, and put
+  // a black column in front of the reader.  The pages were laid out at their
+  // full height and the scroll bar was the right length; there was simply no
+  // paper on any of them.  A search makes it the ordinary way to read, since
+  // opening one hit after another is exactly switching papers with the zoom
+  // held still.
+  //
+  // What is measured is ink, not existence: the column that failed had all of
+  // its canvases, at their old size, and only reading the pixels tells the
+  // difference between "painted" and "believes it painted".
+  const contInk = () =>
+    w.webContents.executeJavaScript(
+      '(()=>{const e=document.querySelector(".pdf-cont");'
+      + 'const wraps=[...document.querySelectorAll(".pg-wrap")];'
+      + 'let ink=0;'
+      + 'for(const c of wraps.map(w=>w.querySelector("canvas")).filter(Boolean)){'
+      + 'try{if(!c.width||!c.height)continue;'
+      + 'const d=c.getContext("2d").getImageData(0,0,'
+      + 'Math.min(c.width,80),Math.min(c.height,80)).data;'
+      + 'let n=0;for(let i=3;i<d.length;i+=4)if(d[i])n++;'
+      + 'if(n>16)ink++}catch(x){/* a canvas that will not give up its pixels */}}'
+      + 'return JSON.stringify({cont:!!e,wraps:wraps.length,ink:ink,'
+      + 'scrollH:e?Math.round(e.scrollHeight):-1})})()'
+    )
+  const backToList = async () => {
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
+      + '.find(x=>x.textContent.trim()==="返回列表");if(b)b.click();return 1})()'
+    )
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  const openRowWithPdf = (which: number) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const r=[...document.querySelectorAll("div.row")]`
+      + `.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));`
+      + `if(r.length<2)return "too few rows with a pdf";`
+      + `const t=r[Math.min(${which},r.length-1)];t.click();`
+      + `return t.innerText.replace(/\\n/g," | ").slice(0,60)})()`
+    )
+  await openRowWithPdf(0)
+  await new Promise((r) => setTimeout(r, 4000))
+  log('click 连续 (switching papers)', await clickBar('连续'))
+  await new Promise((r) => setTimeout(r, 3000))
+  const inkFirst = JSON.parse(await contInk())
+  log('continuous on the first paper', inkFirst)
+  expect('continuous puts ink on the paper it was turned on for', inkFirst.ink > 0, inkFirst)
+  await backToList()
+  log('switching to another paper', await openRowWithPdf(1))
+  await new Promise((r) => setTimeout(r, 5000))
+  const inkSecond = JSON.parse(await contInk())
+  log('continuous on the next paper', inkSecond)
+  expect(
+    'continuous puts ink on the paper it was switched to',
+    inkSecond.cont && inkSecond.wraps > 0 && inkSecond.ink > 0,
+    inkSecond
+  )
+  // the mode is put back: it lives in the config, and a smoke run has no
+  // business leaving the reader rearranged
+  log('click 连续 (back off)', await clickBar('连续'))
+  await new Promise((r) => setTimeout(r, 1000))
+  await backToList()
+
   // A run that finishes having read nothing is not a library that has never
   // been indexed, and it must not be reported in the same words.  Both leave
   // `indexed` at zero; only one of them has an answer to "why".  Six papers

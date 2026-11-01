@@ -510,9 +510,26 @@ export default function PdfViewer({
   // does not: the key carries the scale, so stale entries simply miss and get
   // pushed out by the LRU below.  Clearing on every scale change used to throw
   // away the neighbours a moment before the user turned to them.
+  //
+  // The continuous column keeps the same kind of record, and needs the same
+  // treatment for a worse reason: its key is page, scale and pixel ratio, with
+  // nothing in it to say which document the paint was of.  Opening another
+  // paper at an unchanged zoom therefore found every page already recorded as
+  // painted, returned before touching a canvas, and left the whole column
+  // black — the scroll bar was there and the pages had their full height, so
+  // nothing looked broken except that there was no paper on any of them.
+  // Single-page mode never showed it, and only by luck: fitting a new paper
+  // moves the scale, which happens to change the key.
   useEffect(() => {
     prefetch.current.clear()
     warming.current.clear()
+    // a bitmap of the paper being left must not land on a canvas that now
+    // belongs to another one
+    contPending.current.forEach((t) => t.cancel())
+    contPending.current.clear()
+    contBusy.current.clear()
+    painted.current.clear()
+    visible.current.clear()
   }, [doc.localPdf])
 
   /** Drop the least recently used entries until the cache fits again. */
