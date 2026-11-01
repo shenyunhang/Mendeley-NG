@@ -169,12 +169,13 @@ textarea:focus {
   flex: 0 1 auto;
 }
 /* and the search box is the other: its width was an arbitrary number, and a
-   box that narrows to 170px is still a search box.  Giving way here is what
+   box that narrows to 150px is still a search box.  Giving way here is what
    keeps the buttons at the far end — font size, theme — reachable without
-   scrolling the bar. */
+   scrolling the bar, which is why this is the number to come back to when a
+   button is added: the sort card cost 51px and this paid for 20 of it. */
 .toolbar > .search {
   flex: 1 1 260px;
-  min-width: 170px;
+  min-width: 150px;
   max-width: 340px;
 }
 .toolbar button,
@@ -970,6 +971,36 @@ td .no-pdf {
 .col-move {
   display: flex;
   gap: 2px;
+}
+/* the sort card: one row per key, the whole row is the press.  A row that
+   only pressed on a small arrow would be a row the reader has to aim at. */
+.sort-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  padding: 3px 4px;
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sort-pick:hover {
+  background: var(--hover);
+}
+/* kept at a fixed width whether or not it holds an arrow, so the labels of
+   the other rows do not shift sideways when the sort moves */
+.sort-arrow {
+  width: 10px;
+  color: var(--accent);
+  font-size: 0.733rem;
+}
+.sort-dir {
+  color: var(--fg-dim);
+  font-size: 0.733rem;
 }
 .col-views .ol-row {
   display: flex;

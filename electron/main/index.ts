@@ -1613,6 +1613,104 @@ async function runSmoke() {
     { wantArrow, wantDir, backState }
   )
 
+  // Sorting is a question about the list, not about one column, so it has to
+  // be askable where there are no headers to press: with a word in the search
+  // box the results come back as cards, and a card has nowhere to put an
+  // arrow.  That gap is the whole reason the card exists.  What is checked is
+  // not that the card opens but that pressing it moves the papers — a menu
+  // that writes a config nobody reads would pass every check except this one.
+  const toolbarBtn = (label: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const b=[...document.querySelectorAll(".toolbar button")]`
+      + `.find(x=>x.textContent.trim()===${JSON.stringify(label)});`
+      + `if(!b)return 0;b.click();return 1})()`
+    )
+  const pickSort = (key: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const b=document.querySelector('.sort-pick[data-sort="${key}"]');`
+      + `if(!b)return 0;b.click();return 1})()`
+    )
+  const sortCardKeys = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(()=>{const c=document.querySelector(".filter-menu");if(!c)return "[]";'
+        + 'return JSON.stringify([...c.querySelectorAll(".sort-pick")]'
+        + '.map(b=>b.dataset.sort))})()'
+      )
+    )
+  /** The years the list is showing, in the order it is showing them.  Works
+   *  for result cards and for full-text rows alike, which is the point: both
+   *  are lists of papers and both have to answer to the same order. */
+  const yearsShown = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(()=>{const es=[...document.querySelectorAll(".res-year")];'
+        + 'const src=es.length?es:[...document.querySelectorAll(".ft-row .ft-meta")];'
+        + 'return JSON.stringify(src.map(e=>'
+        + 'parseInt((e.textContent||"").replace(/[^0-9]/g,"").slice(0,4),10))'
+        + '.filter(n=>n>1900&&n<2100))})()'
+      )
+    )
+  const monotonic = (ys: number[], dir: number) =>
+    ys.length > 1 && ys.every((n, i) => (i === 0 ? true : dir < 0 ? ys[i - 1] >= n : ys[i - 1] <= n))
+  // a value written through the property setter and announced with `input`,
+  // which is what React listens for; typing one character at a time would
+  // also work and would take twenty times as long
+  const typeWord = (v: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const i=document.querySelector(".toolbar input");if(!i)return 0;`
+      + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+      + `set.call(i,${JSON.stringify(v)});`
+      + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+    )
+  expect('the toolbar offers a sort card', (await toolbarBtn('排序')) === 1, '排序')
+  await new Promise((r) => setTimeout(r, 400))
+  const sortKeys = await sortCardKeys()
+  log('sort card keys', sortKeys)
+  expect(
+    'the card can sort by the year and by the date added',
+    sortKeys.includes('year') && sortKeys.includes('created'),
+    sortKeys
+  )
+  expect('the card can be asked for the year', (await pickSort('year')) === 1, 'year')
+  await new Promise((r) => setTimeout(r, 400))
+  const pickedYear = await sortCfg()
+  log('sort after picking 年份', pickedYear)
+  expect('picking a key on the card writes it', pickedYear?.key === 'year', pickedYear)
+  // a year is asked for newest-first: being handed 1974 first is being handed
+  // the answer to a question nobody asked
+  expect('a year starts at the recent end', pickedYear?.dir === -1, pickedYear)
+  await typeWord('the')
+  await new Promise((r) => setTimeout(r, 1200))
+  const yDesc = await yearsShown()
+  log('years, as the search results are ordered', yDesc)
+  expect('search results are ordered by the year that was picked', monotonic(yDesc, -1), yDesc)
+  // The card stays open after a pick, so the second press is another press on
+  // the row, not another press on the button — pressing the button would
+  // close the card and the pick would quietly do nothing, leaving an
+  // assertion that passes because nothing moved.
+  //
+  // Equal years satisfy both directions at once, so what proves the order
+  // turned around is the ends, not the shape: the newest paper is first one
+  // way and the oldest the other.
+  expect('the card is still open for a second press', (await pickSort('year')) === 1, 'year')
+  await new Promise((r) => setTimeout(r, 1200))
+  const flipped = await sortCfg()
+  const yAsc = await yearsShown()
+  log('years after pressing it again', { flipped, yAsc })
+  expect('pressing the same key again turns it around', monotonic(yAsc, 1), yAsc)
+  expect(
+    'turning it around really moves the papers',
+    flipped?.dir === 1 && yAsc[0] < yDesc[0],
+    { newest: yDesc[0], oldest: yAsc[0], flipped }
+  )
+  // The full-text list gets the same check further down, once the index
+  // exists.  It cannot be done here: entering 全文 makes the main process
+  // read the index, and the check further down plants an index from an older
+  // version on disk *before* anything reads it — a read here wins and that
+  // one then finds its file ignored.
+  await setSortAndReload(sort0)
+
   // The file naming template.  Only its preview is exercised: actually
   // renaming moves files on disk, so the confirmation is answered with 取消
   // and the template is put back afterwards.
@@ -3058,6 +3156,61 @@ async function runSmoke() {
     awayPane.empty === null && (awayPane.pdf === true || awayPane.det === true),
     awayPane
   )
+  // Full-text results are a list of papers too, and a control labelled 排序
+  // has to mean the same thing whichever list it is looking at.  Ordered by
+  // year, because the order the index happens to hold — the order the papers
+  // were read in — is the one order that cannot come out right by accident.
+  const ftYears = async () =>
+    JSON.parse(
+      await w.webContents.executeJavaScript(
+        'JSON.stringify([...document.querySelectorAll(".ft-row .ft-meta")]'
+        + '.map(e=>parseInt((e.textContent||"").replace(/[^0-9]/g,"").slice(0,4),10))'
+        + '.filter(n=>n>1900&&n<2100))'
+      )
+    )
+  const openSort = async () => {
+    const n = await w.webContents.executeJavaScript(
+      'document.querySelectorAll(".sort-pick").length'
+    )
+    // pressing the button while the card is up would close it, and the press
+    // on a row that followed would quietly do nothing
+    if (Number(n) > 0) return
+    await toolbarBtn('排序')
+    await new Promise((r) => setTimeout(r, 350))
+  }
+  await openSort()
+  await pickSort('year')
+  await new Promise((r) => setTimeout(r, 800))
+  const ftNewest = await ftYears()
+  log('full-text results, newest first', ftNewest)
+  expect('the full-text list has rows to order', ftNewest.length > 1, ftNewest)
+  await pickSort('year')
+  await new Promise((r) => setTimeout(r, 800))
+  const ftOldest = await ftYears()
+  log('full-text results, oldest first', ftOldest)
+  expect(
+    'full-text results answer to the same order',
+    ftOldest.length > 1 && ftOldest[0] < ftNewest[0],
+    { newest: ftNewest[0], oldest: ftOldest[0] }
+  )
+  // The sort is put back the way the run found it, and without a reload:
+  // the checks that follow read the full-text panel, which a reload would
+  // close.  One press picks the key at its own direction; a second one flips
+  // it, which is what it takes when the direction wanted is the other one.
+  const wantSort = sort0 ?? { key: 'year', dir: -1 }
+  await pickSort(wantSort.key)
+  await new Promise((r) => setTimeout(r, 400))
+  if ((await sortCfg())?.dir !== wantSort.dir) {
+    await pickSort(wantSort.key)
+    await new Promise((r) => setTimeout(r, 400))
+  }
+  log('sort put back', await sortCfg())
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=document.querySelector(\'.filter-menu button[title="关闭"]\');'
+    + 'if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 300))
+
   // back to the catalogue, and the word put back the way the run found it
   await w.webContents.executeJavaScript(
     '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'

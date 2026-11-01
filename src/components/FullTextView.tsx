@@ -1,10 +1,16 @@
 import { useMemo } from 'react'
 import type { Doc, FtHit, FtStatus } from '../../shared/types'
+import { compareDocs, type SortKey } from '../lib/columns'
 
 interface Props {
   query: string
   hits: FtHit[]
   docs: Doc[]
+  /** How the reader has asked for papers to be ordered.  The same answer
+   *  governs this list as the catalogue's: a hit is a place inside a paper,
+   *  but what is being listed is still papers, and a control that says 排序
+   *  has to mean the same thing whichever list it is looking at. */
+  sort: { key: SortKey; dir: 1 | -1 }
   status: FtStatus | null
   onClose: () => void
   onOpen: (d: Doc, page: number) => void
@@ -22,6 +28,7 @@ export default function FullTextView({
   query,
   hits,
   docs,
+  sort,
   status,
   onClose,
   onOpen,
@@ -35,7 +42,10 @@ export default function FullTextView({
     return m
   }, [docs])
 
-  // one row per document, with every page it matched on
+  // One row per document, with every page it matched on, in the order the
+  // reader asked for.  Without this a hit comes out in the order it happens
+  // to sit in the index file, which is the order the papers were read in and
+  // means nothing to anybody looking at the list.
   const groups = useMemo(() => {
     const m = new Map<string, FtHit[]>()
     for (const h of hits) {
@@ -43,8 +53,13 @@ export default function FullTextView({
       if (list) list.push(h)
       else m.set(h.docId, [h])
     }
-    return [...m.entries()]
-  }, [hits])
+    const withDoc = [...m.entries()].map(([id, hs]) => ({ id, hs, d: byId.get(id) }))
+    withDoc.sort((a, b) => {
+      if (!a.d || !b.d) return a.d ? -1 : b.d ? 1 : 0
+      return compareDocs(a.d, b.d, sort.key, sort.dir)
+    })
+    return withDoc
+  }, [hits, byId, sort])
 
   const building = status?.building
   const pct =
@@ -232,8 +247,7 @@ export default function FullTextView({
               正文里没找到「{query}」。注意只索引了每篇的前 {status.pages} 页。
             </div>
           ) : (
-            groups.map(([id, list]) => {
-              const d = byId.get(id)
+            groups.map(({ id, hs: list, d }) => {
               return (
                 <div key={id} className="ft-row">
                   <div

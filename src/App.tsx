@@ -23,13 +23,17 @@ import DocTable from './components/DocTable'
 import SearchResults from './components/SearchResults'
 import ColumnPicker from './components/ColumnPicker'
 import FilterMenu from './components/FilterMenu'
+import SortMenu from './components/SortMenu'
 import MenuButton from './components/MenuButton'
 import FullTextView from './components/FullTextView'
 import {
   DEFAULT_SORT,
+  SORT_DEFAULT_DIR,
+  TITLE_ORDER,
   migrateCols,
   normaliseCols,
   normaliseSort,
+  sortValue,
   type ColKey,
   type SortKey
 } from './lib/columns'
@@ -60,16 +64,6 @@ import { buildTree, byName } from './lib/tree'
 import { findDuplicates, type DupeGroup } from './lib/dupes'
 import { parseAny, type Entry } from './lib/import'
 
-
-/**
- * How two titles are ordered when the sorted column cannot separate them.
- *
- * One collator for the life of the app, not `String.prototype.localeCompare`
- * per comparison: the latter builds a collator every time it is called, and
- * over a library of a few thousand papers a single sort reaches it tens of
- * thousands of times.  Same order, a great deal less work.
- */
-const TITLE_ORDER = new Intl.Collator(undefined, { numeric: false, sensitivity: 'variant' })
 
 /**
  * One step of undo.  `run` is a closure rather than a description of the
@@ -234,6 +228,7 @@ export default function App() {
   const [colWidths, setColWidths] = useState<Record<string, number>>({})
   const [views, setViews] = useState<SavedView[]>([])
   const [showCols, setShowCols] = useState(false)
+  const [showSort, setShowSort] = useState(false)
   const [nameTemplate, setNameTemplate] = useState(DEFAULT_PDF_TEMPLATE)
   const [citeStyle, setCiteStyle] = useState<CiteStyle>(DEFAULT_CITE_STYLE)
   const [ftMode, setFtMode] = useState(false)
@@ -283,6 +278,7 @@ export default function App() {
   // one axis clips on the other.
   const filterBtn = useRef<HTMLButtonElement>(null)
   const colsBtn = useRef<HTMLButtonElement>(null)
+  const sortBtn = useRef<HTMLButtonElement>(null)
   // the keydown listener is installed once, so it has to reach the undo stack
   // through a ref rather than closing over a stale one
   const undoRef = useRef<() => void>(() => {})
@@ -408,6 +404,11 @@ export default function App() {
           setShowCols(false)
           return
         }
+        if (showSort) {
+          e.preventDefault()
+          setShowSort(false)
+          return
+        }
         if (showFilters) {
           e.preventDefault()
           setShowFilters(false)
@@ -524,7 +525,7 @@ export default function App() {
     // when either moves: a closure captured at mount would still see them
     // as false and Esc would do nothing at all.  folderId is read by F2 for
     // the same reason.
-  }, [bumpFont, settings, showCols, showFilters, folderId])
+  }, [bumpFont, settings, showCols, showFilters, showSort, folderId])
 
   /** `full` re-pulls the whole library.  Incremental is the default because a
    *  5.6k-document pull takes long enough to be annoying, but deletions are
@@ -615,20 +616,7 @@ export default function App() {
     }
     if (q) out = out.filter((d) => (haystack.get(d.id) ?? '').includes(q))
     const { key, dir } = sort
-    const val = (d: Doc): string | number => {
-      if (key === 'authors') {
-        const a = d.authors?.[0]
-        return ((a?.last_name ?? '') + ' ' + (a?.first_name ?? '')).trim().toLowerCase()
-      }
-      if (key === 'title') return (d.title ?? '').toLowerCase()
-      if (key === 'source') return (d.source ?? '').toLowerCase()
-      if (key === 'citation_key') return (d.citation_key ?? '').toLowerCase()
-      if (key === 'starred') return d.starred ? 1 : 0
-      // ISO strings compare correctly as strings, and a missing date sorting
-      // first is the least surprising place for it
-      if (key === 'created') return d.created ?? ''
-      return d.year ?? 0
-    }
+    const val = (d: Doc): string | number => sortValue(d, key)
     // The key is taken once per document and carried through the sort.
     // Calling `val` from inside the comparator is the expensive way round:
     // it runs about n·log n times rather than n, and each of those builds
@@ -787,10 +775,18 @@ export default function App() {
    * betrayal that makes a tool feel like it is not listening.  Pressing the
    * same header again flips the direction rather than starting over, which
    * is the only reason a second press is ever needed.
+   *
+   * A key nobody has pressed yet starts in the direction that key is usually
+   * wanted in — newest first for a year or a date, A→Z for a word.  Asking
+   * for the year and getting 1974 first is being handed the answer to a
+   * question nobody asked, and the second press it then costs to put right
+   * is the same small betrayal one line up.
    */
   const sortBy = (k: SortKey) => {
     const next: { key: SortKey; dir: 1 | -1 } =
-      sort.key === k ? { key: k, dir: (sort.dir * -1) as 1 | -1 } : { key: k, dir: 1 }
+      sort.key === k
+        ? { key: k, dir: (sort.dir * -1) as 1 | -1 }
+        : { key: k, dir: SORT_DEFAULT_DIR[k] }
     setSort(next)
     window.api.setConfig({ sort: next })
   }
@@ -1857,6 +1853,24 @@ export default function App() {
         </div>
         <div style={{ position: 'relative', display: 'inline-flex' }}>
           <button
+            ref={sortBtn}
+            className={showSort ? 'primary' : ''}
+            onClick={() => setShowSort((v) => !v)}
+            title="按哪个字段排，以及从哪一头开始读"
+          >
+            排序
+          </button>
+          {showSort && (
+            <SortMenu
+              anchor={sortBtn}
+              sort={sort}
+              onPick={sortBy}
+              onClose={() => setShowSort(false)}
+            />
+          )}
+        </div>
+        <div style={{ position: 'relative', display: 'inline-flex' }}>
+          <button
             ref={colsBtn}
             className={showCols ? 'primary' : ''}
             onClick={() => setShowCols((v) => !v)}
@@ -2096,6 +2110,7 @@ export default function App() {
             query={ftQuery}
             hits={ftHits}
             docs={docs}
+            sort={sort}
             status={ftStat}
             onClose={() => setFtMode(false)}
             onBuild={async (rebuild) => {

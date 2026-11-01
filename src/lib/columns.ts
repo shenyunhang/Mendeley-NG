@@ -49,6 +49,95 @@ export function normaliseSort(c: unknown): { key: SortKey; dir: 1 | -1 } {
   return { key, dir: s.dir === -1 ? -1 : 1 }
 }
 
+/** How each key reads in a menu.  A menu cannot borrow the column's own
+ *  label: two of these are not columns (`starred` rides on the star column),
+ *  and the sort menu has to be usable when the column it belongs to is the
+ *  one the reader chose not to show. */
+export const SORT_LABEL: Record<SortKey, string> = {
+  title: '标题',
+  authors: '第一作者',
+  year: '年份',
+  source: '发表处',
+  citation_key: '引用键',
+  starred: '星标',
+  created: '添加时间'
+}
+
+/** What each direction means, said the way the reader would say it.  An
+ *  arrow on its own is a convention; "新的在前" is an answer. */
+export const SORT_DIR_TEXT: Record<SortKey, [string, string]> = {
+  title: ['A → Z', 'Z → A'],
+  authors: ['A → Z', 'Z → A'],
+  year: ['旧的在前', '新的在前'],
+  source: ['A → Z', 'Z → A'],
+  citation_key: ['A → Z', 'Z → A'],
+  starred: ['没星的在前', '有星的在前'],
+  created: ['最早添加的在前', '最近添加的在前']
+}
+
+/** The direction a key is picked at, before anybody has flipped it.
+ *
+ *  Everything used to start ascending, which is right for a word and wrong
+ *  for a date: asking to sort by year and being given 1974 first is being
+ *  given the answer to a question nobody asked.  Newest-first is what
+ *  "最近添加" and a shelf of recent papers both imply.
+ */
+export const SORT_DEFAULT_DIR: Record<SortKey, 1 | -1> = {
+  title: 1,
+  authors: 1,
+  year: -1,
+  source: 1,
+  citation_key: 1,
+  starred: -1,
+  created: -1
+}
+
+/**
+ * One collator for the whole run.
+ *
+ * `String.prototype.localeCompare` builds one on every call, and the
+ * tie-break below reaches it once per comparison — tens of thousands of
+ * times over a library this size, on every keystroke.
+ */
+export const TITLE_ORDER = new Intl.Collator(undefined, {
+  numeric: false,
+  sensitivity: 'variant'
+})
+
+/** What one document sorts on under one key.  Numbers and strings never mix
+ *  within a key, so the comparison below can stay a plain `<`. */
+export function sortValue(d: Doc, key: SortKey): string | number {
+  if (key === 'authors') {
+    const a = d.authors?.[0]
+    return ((a?.last_name ?? '') + ' ' + (a?.first_name ?? '')).trim().toLowerCase()
+  }
+  if (key === 'title') return (d.title ?? '').toLowerCase()
+  if (key === 'source') return (d.source ?? '').toLowerCase()
+  if (key === 'citation_key') return (d.citation_key ?? '').toLowerCase()
+  if (key === 'starred') return d.starred ? 1 : 0
+  // ISO strings compare correctly as strings, and a paper with no date
+  // sorting first is the least surprising place for it
+  if (key === 'created') return d.created ?? ''
+  return d.year ?? 0
+}
+
+/**
+ * Two documents under one key.  Equal keys fall back to the title, so that
+ * the four hundred papers from the same year come out in an order a reader
+ * can predict instead of in whatever order the array happened to be in.
+ */
+export function compareDocs(
+  a: Doc,
+  b: Doc,
+  key: SortKey,
+  dir: 1 | -1
+): number {
+  const va = sortValue(a, key)
+  const vb = sortValue(b, key)
+  if (va === vb) return TITLE_ORDER.compare(a.title ?? '', b.title ?? '')
+  return (va < vb ? -1 : 1) * dir
+}
+
 export interface ColumnDef {
   key: ColKey
   label: string
