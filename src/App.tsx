@@ -204,6 +204,18 @@ export default function App() {
   const [ftQuery, setFtQuery] = useState('')
   const [ftHits, setFtHits] = useState<FtHit[]>([])
   const [ftStat, setFtStat] = useState<FtStatus | null>(null)
+  /**
+   * Bumped whenever the corpus finishes changing, so that a search which came
+   * back empty gets asked again.
+   *
+   * A search is only run when the words change, so building the index after
+   * searching leaves the old answer on the screen: "正文里没找到" stays there
+   * over a library that has since been read in full, and the reader is left
+   * to conclude that the word is not in their papers.  The words did not
+   * change, so only the index finishing can be what prompts the second look.
+   */
+  const [ftEpoch, setFtEpoch] = useState(0)
+  const ftWasBuilding = useRef(false)
   /** Page to open the reader at.  The nonce re-triggers a jump to the same
    *  page on the same document, which a bare number could not. */
   const [jump, setJump] = useState<{ page: number; nonce: number } | null>(null)
@@ -280,7 +292,14 @@ export default function App() {
     window.api.loadNotes().then((n) => setNoteMap(n ?? {})).catch(() => {})
     const off = window.api.onSyncStatus(setStatus)
     const offUpd = window.api.onUpdateState(setUpd)
-    const offFt = window.api.onFtProgress(setFtStat)
+    // Progress arriving with `building` turned off is the run having ended;
+    // the edge, rather than every update, because a build reports progress
+    // once per paper and a search is not wanted a thousand times over.
+    const offFt = window.api.onFtProgress((s) => {
+      setFtStat(s)
+      if (ftWasBuilding.current && !s.building) setFtEpoch((e) => e + 1)
+      ftWasBuilding.current = !!s.building
+    })
     return () => {
       off()
       offUpd()
@@ -602,7 +621,7 @@ export default function App() {
       window.api.ftSearch(q).then(setFtHits).catch(() => setFtHits([]))
     }, 250)
     return () => clearTimeout(t)
-  }, [ftMode, ftQuery])
+  }, [ftMode, ftQuery, ftEpoch])
 
   const selected = useMemo(
     () => filtered.find((d) => d.id === selId) ?? null,
@@ -1998,7 +2017,14 @@ export default function App() {
                 })
                 if (!go) return
               }
-              window.api.ftBuild(rebuild).then(setFtStat)
+              // The answer to `ftBuild` is the status the run starts with, not
+              // the one it ends with, so the "was building" flag is set from
+              // here as well as from the progress below: a run short enough
+              // never to report progress still has to end the search's wait.
+              window.api.ftBuild(rebuild).then((s) => {
+                setFtStat(s)
+                ftWasBuilding.current = !!s.building
+              })
             }}
             onClear={async () => {
               const go = await askConfirm({
@@ -2007,7 +2033,12 @@ export default function App() {
                 ok: '删除索引'
               })
               if (!go) return
-              window.api.ftClear().then(setFtStat)
+              // the results go too: they are hits into text that is no longer
+              // there, and leaving them up reads as a search that worked
+              window.api.ftClear().then((s) => {
+                setFtStat(s)
+                setFtHits([])
+              })
             }}
             onCancel={() => window.api.ftCancel().then(setFtStat)}
             onOpen={(d, p) => {

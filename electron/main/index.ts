@@ -2539,6 +2539,29 @@ async function runSmoke() {
       (ftEmpty.btns ?? []).some((t: string) => /建索引/.test(t)),
     ftEmpty
   )
+  // The word is typed *before* the index exists, which is the order it
+  // happens in: search, get nothing back, press 建索引, wait.  A search is
+  // only run when the words change, so unless the index finishing is what
+  // runs it again, the answer left on screen is the one from before the
+  // build — "正文里没找到" over a library that has since been read whole.
+  await w.webContents.executeJavaScript(
+    '(()=>{const i=document.querySelector(".toolbar input");'
+    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+    + 'set.call(i,"the");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 1000))
+  const ftBefore = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({rows:document.querySelectorAll(".ft-row").length,'
+      + 'empty:(document.querySelector(".pane-mid .empty")||{}).textContent||null})'
+    )
+  )
+  log('ft searched before the index exists', ftBefore)
+  expect(
+    'a search made before the index exists comes back empty',
+    ftBefore.rows === 0,
+    ftBefore
+  )
   await w.webContents.executeJavaScript(
     '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
     + '.find(x=>x.textContent.trim()==="建索引");if(!b)return 0;b.click();return 1})()'
@@ -2578,11 +2601,9 @@ async function runSmoke() {
     ftCancelStat.indexed === ftStat1.indexed && !ftCancelStat.building,
     { ftCancelStat, ftStat1 }
   )
-  await w.webContents.executeJavaScript(
-    '(()=>{const i=document.querySelector(".toolbar input");'
-    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
-    + 'set.call(i,"the");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()'
-  )
+  // No word is typed here.  The one typed above is still in the box; if rows
+  // appear now it is because the finished index was what ran the search
+  // again, which is the whole of what is being checked.
   await new Promise((r) => setTimeout(r, 1200))
   const ftRows = await w.webContents.executeJavaScript(
     'JSON.stringify({rows:document.querySelectorAll(".ft-row").length,'
@@ -2592,7 +2613,11 @@ async function runSmoke() {
   )
   log('ft results', ftRows)
   const ftOut = JSON.parse(ftRows)
-  expect('full text finds hits', ftOut.rows > 0 && ftOut.hits > 0, ftOut)
+  expect(
+    'the search runs again once the index exists',
+    ftOut.rows > 0 && ftOut.hits > 0,
+    ftOut
+  )
   expect('a hit carries a page number', /^p\d+$/.test(ftOut.pages[0] ?? ''), ftOut.pages)
   // opening a hit has to land on the page the hit named
   const wantPage = Number((ftOut.pages[0] ?? 'p1').slice(1))
