@@ -87,6 +87,48 @@ const RAMP = [
   [1.0, [0xe8, 0x24, 0x3c]]
 ]
 
+/**
+ * What makes the sheet a bamboo-slip scroll rather than a sheet.
+ *
+ * A 简 is a row of narrow slips held side by side by cords threaded across
+ * them, and both of those are things the geometry here already knows: the
+ * slips are gaps cut across the run of the sheet, which is what `t` measures,
+ * and the cords are thin lines that follow the sheet at a fixed offset to one
+ * side of its centre, which is what a signed distance gives.
+ *
+ * The gaps are only a fifth of the pitch.  At 16 px a gap is a third of a
+ * pixel, so what is recognised there is still one coiled thing; the slips are
+ * for the sizes where there is room to see them, which is also how a real
+ * scroll reads from across a room.
+ */
+const SLIP = {
+  /** How far along the sheet one slip runs, and how wide the gap after it. */
+  w: 36,
+  gap: 10
+}
+
+/**
+ * The two cords, as a fraction of the half-thickness out from the centreline.
+ *
+ * Two, because a slip scroll is held by two and a single cord reads as a
+ * crease.  Halfway out, so that what is left is a middle band as wide as the
+ * two outer ones put together, which is where the cords of a real 简 sit.
+ *
+ * Six across a sheet fifty-four wide, which is a ninth of it each: wide
+ * enough to still be there at a hundred and twenty-eight, where the sheet is
+ * thirteen pixels across and the cord one and a half, and narrow enough that
+ * the mark at sixteen -- where the whole sheet is under two pixels and the
+ * cord a fifth of one -- keeps the brightness it had before there were cords.
+ *
+ * They run the length of the sheet including across the gaps, which is the
+ * whole point of them: they are what the slips are strung on.
+ */
+const CORD = {
+  at: 0.5,
+  w: 5,
+  col: [0x66, 0x43, 0x22]
+}
+
 /** Clear space kept around the mark on every side. */
 const MARGIN = 16
 
@@ -106,11 +148,20 @@ const sub = (a, b) => [a[0] - b[0], a[1] - b[1]]
  * that the end is straight by the time it stops.  Left carrying on along the
  * tangent it would hug the outside of the coil, which is what made the first
  * attempt look like a hook rather than like an end that has come loose.
+ *
+ * Sampled at 64 points, which is a ninth of a radian a step and leaves the
+ * coil out of true by half a unit at the outside of the last turn -- a third
+ * of a pixel at the largest size this is ever drawn, and the same polyline is
+ * what the rasteriser measures against, so the vector and the rasters agree
+ * exactly.  It is worth saying why it is not more: the whole centreline is
+ * written into the vector file twice over, once for the sheet and once for
+ * the masks that cut the slips and the cords into it, and the sample count is
+ * what that costs.
  */
 function rollPath() {
   const T = ROLL.turns * Math.PI * 2
   const k = (ROLL.rOut - ROLL.rIn) / T
-  const n = 140
+  const n = 64
   const pts = []
   for (let i = 0; i <= n; i++) {
     const th = (i / n) * T
@@ -262,6 +313,9 @@ function nearest(x, y) {
   const cy = Math.min(GRID - 1, Math.max(0, Math.floor((y * GRID) / 512)))
   let best = Infinity
   let along = 0
+  // signed, so the two cords can be told apart: which side of the centreline
+  // a point is on is what puts one cord above it and the other below
+  let side = 0
   for (const s of CELLS[cy * GRID + cx]) {
     const g = SEG[s]
     const dx = g.bx - g.ax
@@ -277,9 +331,28 @@ function nearest(x, y) {
     if (d < best) {
       best = d
       along = g.at + g.len * t
+      side = dx * (y - g.ay) - dy * (x - g.ax)
     }
   }
-  return { d: Math.sqrt(best), t: along / TOTAL }
+  const d = Math.sqrt(best)
+  return { d, t: along / TOTAL, side: side >= 0 ? d : -d }
+}
+
+/**
+ * Whether this point is on one of the cords.
+ *
+ * Asked before anything else, because the cords lie on top of the slips and
+ * run across the gaps between them: a cord that stopped at every gap would be
+ * a row of dashes rather than the thing holding the row together.
+ */
+function onCord(side) {
+  return Math.abs(Math.abs(side) - CORD.at * HALF) < CORD.w / 2
+}
+
+/** Whether this point is in the gap between two slips. */
+function inGap(t) {
+  const u = (t * TOTAL) % (SLIP.w + SLIP.gap)
+  return u > SLIP.w
 }
 
 const rampAt = (t) => {
@@ -311,7 +384,10 @@ function raster(n) {
       const o = (py * r + px) * 4
       const near = nearest(x, y)
       if (near.d > HALF) continue
-      const c = rampAt(near.t)
+      // the cords lie on top of the slips and over the gaps alike, so they
+      // are asked about before the sheet is; a gap does not interrupt one
+      if (inGap(near.t) && !onCord(near.side)) continue
+      const c = onCord(near.side) ? CORD.col : rampAt(near.t)
       big[o] = c[0]
       big[o + 1] = c[1]
       big[o + 2] = c[2]
@@ -445,7 +521,7 @@ const stroke = (pts, col, cap) =>
  * end is lapped over by the piece next to them anyway, so the only ends left
  * showing square are the two cut ends of the sheet.
  */
-const CHUNKS = 40
+const CHUNKS = 28
 const PIECES = (() => {
   const per = TOTAL / CHUNKS
   const out = []
@@ -468,10 +544,39 @@ const PIECES = (() => {
   return out
 })()
 
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Mendeley NG">
+/**
+ * The whole centreline as one path, which the two masks below are cut from.
+ *
+ * Both the gaps between the slips and the cords are things that repeat along
+ * the sheet, and a dash pattern is measured along a path in exactly the way
+ * `t` is here, so one copy of the centreline and four dashes say what a
+ * hundred cut pieces would.  That is what keeps this file inside the four
+ * kilobytes Vite inlines: the geometry is written once and referred to, not
+ * written again for every slip.
+ *
+ * The cords are the band left when a narrower stroke of the same path is
+ * taken back out of a wider one -- which is the same test `onCord` makes,
+ * a distance from the centreline, and so needs no offset polyline of its
+ * own.  Everything is drawn with butt caps here, so that the cords and the
+ * dashes stop where the cut ends of the sheet do.
+ */
+const D = pathD(PATH)
+const W_SHEET = (HALF * 2).toFixed(1)
+const W_CORD = (2 * (CORD.at * HALF + CORD.w / 2)).toFixed(1)
+const W_CORD_IN = (2 * (CORD.at * HALF - CORD.w / 2)).toFixed(1)
+
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Mendeley NG" fill="none" stroke-linejoin="round" stroke-linecap="butt">
   <!-- generated by scripts/make-icon.mjs; edit the shapes there, not here -->
-  <g fill="none" stroke-width="${HALF * 2}" stroke-linecap="round" stroke-linejoin="round">
+  <defs>
+    <path id="sheet" d="${D}"/>
+    <mask id="slips" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512"><use href="#sheet" stroke="#fff" stroke-width="${W_SHEET}" stroke-dasharray="${SLIP.w} ${SLIP.gap}"/></mask>
+    <mask id="cords" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512"><use href="#sheet" stroke="#fff" stroke-width="${W_CORD}"/><use href="#sheet" stroke="#000" stroke-width="${W_CORD_IN}"/></mask>
+  </defs>
+  <g stroke-width="${W_SHEET}">
+    <g mask="url(#slips)" stroke-linecap="round">
 ${PIECES.map((p, i) => '  ' + stroke(p.pts, toHex(rampAt(p.t)), i === 0 || i === PIECES.length - 1 ? 'butt' : '')).join('\n')}
+    </g>
+    <g mask="url(#cords)"><use href="#sheet" stroke="${toHex(CORD.col)}" stroke-width="${W_CORD}"/></g>
   </g>
 </svg>
 `
