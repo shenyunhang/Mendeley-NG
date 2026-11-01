@@ -207,8 +207,14 @@ export interface FtStatus {
    * difference between "the word is not in the library" and "the word is in
    * this one paper, which has no text layer", and only the second one is
    * something the reader can act on.
+   *
+   * Not optional, because a status is never produced without it: a run that
+   * read everything has an empty list, and a library that was never indexed
+   * has an empty list too.  Leaving it optional let a branch treat "no
+   * reasons recorded" and "no reasons shown" as the same question, which is
+   * how a finished run came to be described as one that never happened.
    */
-  skipped?: { name: string; why: string }[]
+  skipped: { name: string; why: string }[]
   /**
    * True when an index exists on disk but was written by a different version
    * of the app and cannot be read.  Without it an update looks like it threw

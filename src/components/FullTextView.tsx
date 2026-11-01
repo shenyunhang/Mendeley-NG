@@ -52,6 +52,27 @@ export default function FullTextView({
       ? Math.round((status.done / status.total) * 100)
       : 0
 
+  /**
+   * Which papers did not make it, and why.  "5237 / 5245" on its own cannot
+   * answer the question a reader actually has when a search comes back
+   * empty: is the word not in the library, or is it in this one paper that
+   * has no text layer?  Only the second one is something they can do
+   * anything about.
+   */
+  const skipNote = status?.skipped.length ? (
+    <div className="ft-skipped">
+      <span>{status.skipped.length} 篇没能进索引，搜不到的词可能就在其中：</span>
+      {status.skipped.slice(0, 6).map((s) => (
+        <span key={s.name} className="ft-skip" title={s.why}>
+          {s.name} · {s.why}
+        </span>
+      ))}
+      {status.skipped.length > 6 ? (
+        <span className="ft-skip">等 {status.skipped.length} 篇</span>
+      ) : null}
+    </div>
+  ) : null
+
   return (
     <div className="pane pane-mid">
       <div className="pane-head">
@@ -120,6 +141,15 @@ export default function FullTextView({
         some of the library — which is the one that looks like "the search
         cannot find it" rather than "it was never indexed".
       */}
+      {/*
+        A run that finished having read nothing used to land on "还没有索引",
+        the same words as a library that has never been indexed.  Those are
+        not the same thing at all: one is a reader who has been told to wait
+        six more minutes for a build they already did, and the other is a
+        reader who has been told nothing about why every paper failed.  When
+        the run is over and there is nothing to show, the reasons are the
+        answer, however unflattering they are.
+      */}
       {!building && status && !status.total ? (
         <div className="empty">
           <p>没有可索引的 PDF。</p>
@@ -127,6 +157,20 @@ export default function FullTextView({
             库里还没有带本地 PDF 的文献。设好 PDF 目录、把文件同步或下载下来之后，
             正文才有东西可读。
           </p>
+        </div>
+      ) : !building && status && !status.indexed && status.done > 0 && status.skipped.length ? (
+        <div className="empty">
+          <p>读完了，但一篇正文都没读出来。</p>
+          <p className="sub">
+            下面是最前面几篇失败的原因。如果条条都是「文件不在原处」，
+            是 PDF 目录变了、或者文件被挪走了——去设置里重新指一次目录再同步；
+            如果条条都是「PDF 打不开」或「读超时」，那是 pdf.js 在这台机器上起不来，
+            重跑一遍通常没用。扫描件没有文本层是正常的，不是故障。
+          </p>
+          {skipNote}
+          <button style={{ marginTop: 10 }} onClick={() => onBuild(true)}>
+            重建索引
+          </button>
         </div>
       ) : !status?.indexed && !building ? (
         <div className="empty">
@@ -150,25 +194,8 @@ export default function FullTextView({
             </button>
           ) : null}
         </div>
-      ) : !building && status?.skipped?.length ? (
-        // Which papers did not make it, and why.  "5237 / 5245" on its own
-        // cannot answer the question a reader actually has when a search
-        // comes back empty: is the word not in the library, or is it in this
-        // one paper that has no text layer?  Only the second one is
-        // something they can do anything about.
-        <div className="ft-skipped">
-          <span>
-            {status.skipped.length} 篇没能进索引，搜不到的词可能就在其中：
-          </span>
-          {status.skipped.slice(0, 4).map((s) => (
-            <span key={s.name} className="ft-skip" title={s.why}>
-              {s.name} · {s.why}
-            </span>
-          ))}
-          {status.skipped.length > 4 ? (
-            <span className="ft-skip">等 {status.skipped.length} 篇</span>
-          ) : null}
-        </div>
+      ) : !building && status?.skipped.length ? (
+        skipNote
       ) : status && status.indexed < status.total && !building ? (
         <div className="setup-hint">
           <span>

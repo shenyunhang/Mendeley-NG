@@ -513,6 +513,13 @@ export async function ftBuild(
           st = fs.statSync(d.localPdf as string)
         } catch {
           progress.done++
+          // A file that is not there counts as unread, and has to be said:
+          // if every path in the library is stale the run finishes having
+          // read nothing, and "还没有索引" is the last thing that should
+          // greet somebody who just watched it finish.
+          if (skipped.length < MAX_SKIPPED) {
+            skipped.push({ name: path.basename(d.localPdf ?? ''), why: '文件不在原处' })
+          }
           continue
         }
         const prev = fresh.entries[d.id]

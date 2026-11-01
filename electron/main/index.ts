@@ -2718,6 +2718,87 @@ async function runSmoke() {
   )
   await new Promise((r) => setTimeout(r, 400))
 
+  // A run that finishes having read nothing is not a library that has never
+  // been indexed, and it must not be reported in the same words.  Both leave
+  // `indexed` at zero; only one of them has an answer to "why".  Six papers
+  // whose PDF is no longer where the library thinks it is is the ordinary
+  // shape of it: the directory was moved, a disk was renamed, the files were
+  // tidied away.  Every one of them fails the stat, so the run ends having
+  // counted six papers and read none — and what used to greet that was
+  // "还没有索引", inviting the reader to spend the same minutes again.
+  const staleDir = path.join(app.getPath('temp'), `mendeley-ng-ft-gone-${Date.now()}`)
+  const staleDocs = ftDocs()
+    .filter((d) => d.localPdf)
+    .slice(0, 6)
+    .map((d) => ({ ...d, localPdf: path.join(staleDir, `${d.id}.pdf`) }))
+  let staleInfo: {
+    ok: boolean
+    indexed?: number
+    done?: number
+    skipped?: number
+    why?: string
+    said?: string | null
+    reasons?: string[]
+  } = { ok: false }
+  if (staleDocs.length >= 3) {
+    ftClear()
+    const staleStat = await ftBuild(staleDocs, () => undefined, true)
+    staleInfo = {
+      ok: true,
+      indexed: staleStat.indexed,
+      done: staleStat.done,
+      skipped: staleStat.skipped.length,
+      why: staleStat.skipped[0]?.why ?? ''
+    }
+    // the panel asks for a status when it is opened, so leaving the pane and
+    // coming back is what makes it pick up a run that ended this way
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+      + '.find(x=>x.textContent.trim()==="全文");if(b)b.click();return 1})()'
+    )
+    await new Promise((r) => setTimeout(r, 700))
+    const stalePanel = JSON.parse(
+      await w.webContents.executeJavaScript(
+        'JSON.stringify({text:(document.querySelector(".pane-mid .empty")||{}).textContent||null,'
+        + 'reasons:[...document.querySelectorAll(".ft-skipped .ft-skip")].map(s=>s.textContent)})'
+      )
+    )
+    staleInfo.said = stalePanel.text
+    staleInfo.reasons = stalePanel.reasons
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
+      + '.find(x=>x.textContent.trim()==="返回列表");if(b)b.click();return 1})()'
+    )
+    await new Promise((r) => setTimeout(r, 400))
+  }
+  log('a run that read nothing', staleInfo)
+  expect(
+    'a run that read nothing is finished rather than unstarted',
+    staleInfo.ok === true &&
+      staleInfo.indexed === 0 &&
+      (staleInfo.done ?? 0) > 0 &&
+      (staleInfo.skipped ?? 0) > 0,
+    staleInfo
+  )
+  expect(
+    'a paper whose file is gone is skipped with a reason',
+    staleInfo.why === '文件不在原处',
+    staleInfo
+  )
+  expect(
+    'the panel reports the run that finished, not an unindexed library',
+    /读完了，但一篇正文都没读出来/.test(staleInfo.said ?? '') &&
+      !/还没有索引/.test(staleInfo.said ?? ''),
+    staleInfo
+  )
+  expect(
+    'the reason reaches the screen',
+    (staleInfo.reasons ?? []).some((t) => /文件不在原处/.test(t)),
+    staleInfo.reasons
+  )
+  ftClear()
+  fs.rmSync(staleDir, { recursive: true, force: true })
+
   // An interrupted run is the ordinary case, not the exception: reading 5245
   // papers takes minutes and nobody leaves the app open for all of it.  What
   // an unfinished batch leaves is text past the end of what the entry table
