@@ -20,6 +20,7 @@ import AddByIdView from './components/AddByIdView'
 import AskDialog from './components/AskDialog'
 import ConfirmDialog from './components/ConfirmDialog'
 import DocTable from './components/DocTable'
+import SearchResults from './components/SearchResults'
 import ColumnPicker from './components/ColumnPicker'
 import FilterMenu from './components/FilterMenu'
 import MenuButton from './components/MenuButton'
@@ -2331,27 +2332,57 @@ export default function App() {
             </div>
           )}
           {batchMsg && <div className="pdf-msg">{batchMsg}</div>}
-          <DocTable
-            docs={filtered}
-            fontSize={fontSize}
-            cols={cols}
-            colWidths={colWidths}
-            onColWidth={setColWidth}
-            onColMove={moveCol}
-            sort={sort}
-            onSort={sortBy}
-            multi={multi}
-            selectedId={selId}
-            empty={emptyState}
-            onContextMenu={(d, e) => {
-              e.preventDefault()
-              setMenu({ x: e.clientX, y: e.clientY, docId: d.id })
-            }}
-            onToggleStar={(d) => {
-              setFlags(d, { starred: !d.starred }).catch((e) => setErr('改星标失败：' + String(e)))
-            }}
-            onSelect={onRowSelect}
-          />
+          {/*
+            While there is something in the search box, the middle pane answers
+            why each paper is on the list rather than just that it is.  A table
+            can only say the second thing: the same fifty rows come back for a
+            word in the title and for a word that appears once in the abstract,
+            and the reader has to open them one at a time to tell which.
+
+            The table is for comparing one column across many papers; these
+            cards are for reading one paper at a time.  Both are wanted, so the
+            query is what decides, and clearing the box gives the table back.
+          */}
+          {query.trim() ? (
+            <SearchResults
+              docs={filtered}
+              query={query}
+              noteMap={noteMap}
+              fontSize={fontSize}
+              multi={multi}
+              selectedId={selId}
+              empty={emptyState}
+              onContextMenu={(d, e) => {
+                e.preventDefault()
+                setMenu({ x: e.clientX, y: e.clientY, docId: d.id })
+              }}
+              onSelect={onRowSelect}
+            />
+          ) : (
+            <DocTable
+              docs={filtered}
+              fontSize={fontSize}
+              cols={cols}
+              colWidths={colWidths}
+              onColWidth={setColWidth}
+              onColMove={moveCol}
+              sort={sort}
+              onSort={sortBy}
+              multi={multi}
+              selectedId={selId}
+              empty={emptyState}
+              onContextMenu={(d, e) => {
+                e.preventDefault()
+                setMenu({ x: e.clientX, y: e.clientY, docId: d.id })
+              }}
+              onToggleStar={(d) => {
+                setFlags(d, { starred: !d.starred }).catch((e) =>
+                  setErr('改星标失败：' + String(e))
+                )
+              }}
+              onSelect={onRowSelect}
+            />
+          )}
         </div>
         )}
 

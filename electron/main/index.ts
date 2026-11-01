@@ -2528,7 +2528,9 @@ async function runSmoke() {
       + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
       + 'set.call(i,"smoke test note");i.dispatchEvent(new Event("input",{bubbles:true}));'
       + 'await new Promise(r=>setTimeout(r,500));'
-      + 'const rows=document.querySelectorAll("div.row").length;'
+      // a search swaps the table for a card list; both are the same answer to
+      // "was this document found?"
+      + 'const rows=document.querySelectorAll("div.row, div.res-row").length;'
       + 'set.call(i,"");i.dispatchEvent(new Event("input",{bubbles:true}));'
       + 'await new Promise(r=>setTimeout(r,300));'
       + 'return JSON.stringify({rows})})()'
@@ -3156,7 +3158,9 @@ async function runSmoke() {
         + 'const n=t.match(/(\\d+)/);'
         + 'return JSON.stringify({shown:m?+m[1]:0,all:m?+m[2]:0,'
         + 'bar:!!document.querySelector(".batch-bar"),n:n?+n[1]:0,'
-        + 'sel:document.querySelectorAll("div.row.sel").length})})()'
+        // a search swaps the table for a card list, and both are rows: what is
+        // being counted is how many are selected, not which shape they are
+        + 'sel:document.querySelectorAll("div.row.sel, div.res-row.sel").length})})()'
       )
     )
   const typeQuery = (q: string) =>
@@ -3190,10 +3194,12 @@ async function runSmoke() {
     )
   )
   let narrowed = await counts()
+  let usedWord = ''
   for (const word of words) {
     await typeQuery(word.toLowerCase())
     await new Promise((r) => setTimeout(r, 700))
     narrowed = await counts()
+    usedWord = word
     if (narrowed.shown >= 2 && narrowed.shown < narrowed.all) break
   }
   log('after narrowing', narrowed)
@@ -3202,10 +3208,67 @@ async function runSmoke() {
     narrowed.shown >= 2 && narrowed.shown < narrowed.all,
     { words, narrowed }
   )
+
+  // A table can say that a paper matched.  It cannot say why, and "why" is
+  // the reason anybody reads a list of results: the same rows come back for a
+  // word in the title and for a word that appears once in the abstract, and
+  // telling those apart means opening them one at a time.  So a search swaps
+  // the table for cards that show the matched field and a snippet around the
+  // match, with the match marked.
+  const resCards = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({cards:document.querySelectorAll(".res-row").length,'
+      + 'rows:document.querySelectorAll("div.row").length,'
+      + 'marks:document.querySelectorAll(".res-row mark").length,'
+      + 'sameWord:[...document.querySelectorAll(".res-row mark")]'
+      + '.every(m=>(m.textContent||"").toLowerCase()==='
+      + JSON.stringify(usedWord.toLowerCase()) + '),'
+      + 'sample:(document.querySelector(".res-row mark")||{}).textContent||null,'
+      + 'labels:[...document.querySelectorAll(".res-row .res-label")]'
+      + '.slice(0,4).map(e=>e.textContent),'
+      // a card with nothing marked on it is a card that matched and then
+      // declined to say where: the usual cause is the match sitting in a part
+      // of a field the card does not draw, such as the fourth author
+      + 'explained:[...document.querySelectorAll(".res-row")]'
+      + '.filter(c=>c.querySelector("mark")).length,'
+      + 'titles:[...document.querySelectorAll(".res-row .res-title")]'
+      + '.slice(0,2).map(e=>(e.textContent||"").slice(0,60))})'
+    )
+  )
+  log('search results', { word: usedWord, ...resCards })
+  expect(
+    'a search swaps the table for results that say why',
+    resCards.cards > 0 && resCards.rows === 0,
+    resCards
+  )
+  expect(
+    'what matched is marked, and what is marked is the word',
+    resCards.marks > 0 && resCards.sameWord === true,
+    resCards
+  )
+  expect(
+    'a result names the field the match was found in',
+    (resCards.labels ?? []).length > 0,
+    resCards
+  )
+  // every card, not merely some: a reader who has to work out which ones the
+  // search actually found will not trust the ones that did say
+  expect(
+    'every result says where it matched',
+    resCards.explained === resCards.cards,
+    resCards
+  )
+  expect(
+    'the title is still on the card',
+    (resCards.titles ?? []).length > 0 &&
+      (resCards.titles as string[]).every((t) => t.trim().length > 0),
+    resCards
+  )
   // opened after narrowing, so that what Esc is asked to leave alone is a row
   // that is actually on screen
   await w.webContents.executeJavaScript(
-    '(()=>{const r=document.querySelector("div.row");if(!r)return 0;r.click();return 1})()'
+    '(()=>{const r=document.querySelector("div.row, div.res-row");'
+    + 'if(!r)return 0;r.click();return 1})()'
   )
   await new Promise((r) => setTimeout(r, 400))
   await keyOn('window', 'a', true)
@@ -3232,6 +3295,23 @@ async function runSmoke() {
   await keyOn('window', 'Escape', false)
   await typeQuery('')
   await new Promise((r) => setTimeout(r, 800))
+  // The cards are a way of reading a search, not a replacement for the table:
+  // a query is what decides, so emptying the box has to hand the table back,
+  // columns and all.  A reader who searched once and then lost their columns
+  // would have no way to say what went missing.
+  const backToTable = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({rows:document.querySelectorAll("div.row").length,'
+      + 'cards:document.querySelectorAll(".res-row").length,'
+      + 'heads:document.querySelectorAll(".col-head [data-col]").length})'
+    )
+  )
+  log('after clearing the search', backToTable)
+  expect(
+    'clearing the search hands the table back',
+    backToTable.rows > 0 && backToTable.cards === 0 && backToTable.heads > 3,
+    backToTable
+  )
 
   // Settings.  Everything the app remembers used to live in four corners of
   // the toolbar; this checks that the panel gathers them and that changing the

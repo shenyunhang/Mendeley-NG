@@ -36,6 +36,8 @@
   --star-on: #ffd43b;
   --star-off: #4d4d4d;
   --row-h: 2rem;
+  /* one search result: a title, the authors, and up to two matched fields */
+  --res-h: 5.2rem;
   color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei',
     'PingFang SC', sans-serif;
@@ -1068,6 +1070,92 @@ td .no-pdf {
    as the one being read rather than as one of the batch */
 .row.sel {
   background: var(--accent-dim);
+}
+
+/* Search results: one card per paper, showing why it matched.
+   The height is fixed and the matched fields are capped at two, because a
+   card that grew to fit every match would stop being something you can scan
+   down — and the rest of the fields are one click away in the details pane. */
+.res-wrap {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.res-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--row-line);
+  overflow: hidden;
+  cursor: default;
+}
+.res-row:hover {
+  background: var(--hover);
+}
+.res-row.multi {
+  background: var(--multi);
+}
+.res-row.sel {
+  background: var(--accent-dim);
+}
+.res-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.res-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.res-year {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+  font-variant-numeric: tabular-nums;
+}
+.res-authors {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+}
+.res-src {
+  color: var(--fg-dim);
+}
+.res-field {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+}
+/* the field a match was found in, so "the word is in the abstract" and "the
+   word is in the title" do not look like the same answer */
+.res-label {
+  margin-right: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--msg-bg);
+  color: var(--fg);
+  font-size: 0.733rem;
+}
+/* A match is marked rather than coloured: the hit has to be findable inside
+   a line of prose, and a reader who is skimming for the word is skimming for
+   the shape of it, not for a tint. */
+.res-row mark {
+  background: #ffe066;
+  color: #1a1a1a;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+:root[data-theme='light'] .res-row mark {
+  background: #ffe066;
+  color: #222;
 }
 
 .batch-bar {
