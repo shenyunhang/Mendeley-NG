@@ -37,10 +37,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
  *
  * The colour runs *along* the sheet rather than across the canvas, so what
  * you see is the winding — violet in the tight core, the program's own blue
- * through the middle of the roll, teal as it opens out, and amber on the end
- * that is still out in the light.  A gradient across the canvas would light
- * the coil like a rendering of a solid, and lose the sense of one long thing
- * wound up.
+ * through the middle of the roll, teal as it opens out, amber on the end that
+ * is still out in the light, and red on the last of it.  A gradient across
+ * the canvas would light the coil like a rendering of a solid, and lose the
+ * sense of one long thing wound up.  Red goes at the end rather than in the
+ * core because the end is what the eye is already on, and because a warm end
+ * on a cool coil is the one place a hot colour does not read as a warning.
  */
 const ROLL = {
   /**
@@ -67,12 +69,22 @@ const ROLL = {
   at: Math.PI * 0.39
 }
 
-/** The colours along the sheet, from the tight core to the free end. */
+/**
+ * The colours along the sheet, from the tight core to the free end.
+ *
+ * The last stretch is warm all the way and ends red.  The free end is only a
+ * tenth of the sheet, so a red placed anywhere but on it would be a smear;
+ * here the whole of the end that is out of the roll is red, and the amber
+ * before it is what keeps it from looking like a warning light.  One warm end
+ * against a cool coil is also what stops six colours reading as a rainbow.
+ */
 const RAMP = [
   [0.0, [0x7b, 0x3f, 0xf2]],
-  [0.38, [0x3f, 0x8c, 0xf0]],
-  [0.72, [0x16, 0xc8, 0xb8]],
-  [1.0, [0xff, 0xb0, 0x2e]]
+  [0.28, [0x3f, 0x8c, 0xf0]],
+  [0.5, [0x16, 0xc8, 0xb8]],
+  [0.66, [0xff, 0xb0, 0x2e]],
+  [0.82, [0xfb, 0x5a, 0x1e]],
+  [1.0, [0xe8, 0x24, 0x3c]]
 ]
 
 /** Clear space kept around the mark on every side. */
