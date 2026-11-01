@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Doc, Folder, MetaCandidate } from '../../shared/types'
 import { byName } from '../lib/tree'
+import { DOC_TYPES, DOC_TYPE_LABELS } from '../lib/doctypes'
 
 interface Props {
   doc: Doc
@@ -55,7 +56,14 @@ export default function DetailsPanel({
     source: '',
     citation_key: '',
     doi: '',
-    abstract: ''
+    abstract: '',
+    type: '',
+    volume: '',
+    issue: '',
+    pages: '',
+    publisher: '',
+    url: '',
+    keywords: ''
   })
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -74,7 +82,20 @@ export default function DetailsPanel({
       source: doc.source ?? '',
       citation_key: doc.citation_key ?? '',
       doi: doiOf(doc),
-      abstract: doc.abstract ?? ''
+      abstract: doc.abstract ?? '',
+      // a type the API's vocabulary does not contain would come back from a
+      // select as if it were the first entry, which is a different type than
+      // the paper has; it is left blank instead, and blank is a choice the
+      // reader can make on purpose
+      type: DOC_TYPES.includes((doc.type ?? '') as (typeof DOC_TYPES)[number])
+        ? (doc.type as string)
+        : '',
+      volume: doc.volume ?? '',
+      issue: doc.issue ?? '',
+      pages: doc.pages ?? '',
+      publisher: doc.publisher ?? '',
+      url: doc.url ?? '',
+      keywords: (doc.keywords ?? []).join(', ')
     })
     setMsg(null)
     setCands(null)
@@ -96,7 +117,13 @@ export default function DetailsPanel({
     form.source !== (doc.source ?? '') ||
     form.citation_key !== (doc.citation_key ?? '') ||
     form.doi !== doiOf(doc) ||
-    form.abstract !== (doc.abstract ?? '')
+    form.abstract !== (doc.abstract ?? '') ||
+    form.volume !== (doc.volume ?? '') ||
+    form.issue !== (doc.issue ?? '') ||
+    form.pages !== (doc.pages ?? '') ||
+    form.publisher !== (doc.publisher ?? '') ||
+    form.url !== (doc.url ?? '') ||
+    form.keywords !== (doc.keywords ?? []).join(', ')
 
   const save = async () => {
     setSaving(true)
@@ -114,6 +141,18 @@ export default function DetailsPanel({
       body.identifiers = { ...(doc.identifiers ?? {}), doi: form.doi.trim() }
     }
     if (form.abstract.trim()) body.abstract = form.abstract.trim()
+    // the rest of the citation: what a reference list actually prints.  Volume
+    // and pages are what a reader comes back to the panel for, and having to
+    // open the PDF to find them is the whole reason a details panel exists.
+    body.volume = form.volume
+    body.issue = form.issue
+    body.pages = form.pages
+    body.publisher = form.publisher
+    body.url = form.url
+    body.keywords = form.keywords
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
     try {
       const updated = await window.api.patchDoc(doc.id, body)
       onSaved({ ...doc, ...updated })
@@ -267,6 +306,78 @@ export default function DetailsPanel({
               onChange={(e) => setForm({ ...form, doi: e.target.value })}
             />
           </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>类型</label>
+            {/* patched the moment it is picked: it is a choice from a fixed
+                vocabulary, so there is nothing to type and nothing to confirm,
+                and making the reader press 保存 for a dropdown would be
+                ceremony.  The vocabulary is the API's, not ours — a value
+                outside it is rejected outright, which is why this is a select
+                and not a text box. */}
+            <select
+              value={form.type}
+              onChange={(e) => {
+                const t = e.target.value
+                setForm({ ...form, type: t })
+                if (t) void setFlags({ type: t })
+              }}
+            >
+              <option value="">（未设）</option>
+              {DOC_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {DOC_TYPE_LABELS[t] ?? t}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field" style={{ flex: '0 0 64px' }}>
+            <label>卷</label>
+            <input
+              value={form.volume}
+              onChange={(e) => setForm({ ...form, volume: e.target.value })}
+            />
+          </div>
+          <div className="field" style={{ flex: '0 0 64px' }}>
+            <label>期</label>
+            <input
+              value={form.issue}
+              onChange={(e) => setForm({ ...form, issue: e.target.value })}
+            />
+          </div>
+          <div className="field" style={{ flex: '0 0 84px' }}>
+            <label>页码</label>
+            <input
+              value={form.pages}
+              placeholder="1–12"
+              onChange={(e) => setForm({ ...form, pages: e.target.value })}
+            />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>出版社 / 机构</label>
+            <input
+              value={form.publisher}
+              onChange={(e) => setForm({ ...form, publisher: e.target.value })}
+            />
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>关键词（逗号分隔）</label>
+            <input
+              value={form.keywords}
+              onChange={(e) => setForm({ ...form, keywords: e.target.value })}
+            />
+          </div>
+        </div>
+        <div className="field">
+          <label>链接</label>
+          <input
+            value={form.url}
+            placeholder="https://…"
+            onChange={(e) => setForm({ ...form, url: e.target.value })}
+          />
         </div>
         <div className="field">
           <label>标签（逗号分隔）</label>

@@ -2697,6 +2697,49 @@ async function runSmoke() {
     + '.find(x=>x.textContent.trim()==="详情");if(b)b.click();return 1})()'
   )
   await new Promise((r) => setTimeout(r, 300))
+  // What a reference list actually prints.  The panel used to offer seven
+  // fields, and the volume, the issue, the pages, the publisher, the link and
+  // the keywords were not among them — so finding the volume of a paper meant
+  // opening its PDF, which is the thing a details panel exists to save.
+  //
+  // The type is the one that must not be a text box: the API takes a fixed
+  // vocabulary and rejects anything outside it, so offering a free field here
+  // would hand the reader a way to write a value the cloud will refuse.  What
+  // is checked is therefore not only that the field is there but that what it
+  // offers is that vocabulary.
+  const detFields = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const fs=[...document.querySelectorAll(".details .field")];'
+      + 'const lab=f=>{const l=f.querySelector("label");return l?(l.textContent||"").trim():""};'
+      + 'const at=n=>fs.find(f=>lab(f)===n);'
+      + 'const kind=n=>{const f=at(n);if(!f)return null;'
+      + 'const s=f.querySelector("select");'
+      + 'return {has:!!(f.querySelector("input")||s),select:!!s,'
+      + 'opts:s?[...s.options].map(o=>o.value):null}};'
+      + 'return JSON.stringify({labels:fs.map(lab),type:kind("类型"),'
+      + 'volume:!!at("卷"),issue:!!at("期"),pages:!!at("页码"),'
+      + 'publisher:!!at("出版社 / 机构"),keywords:!!at("关键词（逗号分隔）"),'
+      + 'url:!!at("链接")})})()'
+    )
+  )
+  log('details fields', detFields)
+  expect(
+    'the panel carries the rest of the citation',
+    detFields.volume &&
+      detFields.issue &&
+      detFields.pages &&
+      detFields.publisher &&
+      detFields.keywords &&
+      detFields.url,
+    detFields
+  )
+  expect(
+    'the type is chosen from the vocabulary the API accepts',
+    !!detFields.type?.select &&
+      ['journal', 'thesis', 'generic'].every((t) => (detFields.type?.opts ?? []).includes(t)) &&
+      (detFields.type?.opts ?? []).length === 14,
+    detFields.type
+  )
   const setNote = (v: string) =>
     w.webContents.executeJavaScript(
       `(()=>{const t=document.querySelector("textarea.note-box");if(!t)return "no notes box";`
