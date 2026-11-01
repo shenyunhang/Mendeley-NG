@@ -663,9 +663,22 @@ export default function App() {
     return () => clearTimeout(t)
   }, [ftMode, ftQuery, ftEpoch])
 
+  /**
+   * The row the right-hand pane is showing, which is not always a row the
+   * left-hand pane is listing.
+   *
+   * Full-text search answers from the whole corpus, not from what the current
+   * query and folder happen to narrow the catalogue to: a paper found by a
+   * word in its body is very often not in `filtered` at all, because that
+   * word is in its text and not in its title.  Looking only there left the
+   * pane empty after the click that was supposed to fill it — the hit was
+   * selected, the selection resolved to nothing, and the pane asked to be
+   * given a paper again.  A view that can offer a paper has to be able to
+   * show it.
+   */
   const selected = useMemo(
-    () => filtered.find((d) => d.id === selId) ?? null,
-    [filtered, selId]
+    () => filtered.find((d) => d.id === selId) ?? docs.find((d) => d.id === selId) ?? null,
+    [filtered, docs, selId]
   )
 
   /** Saving a search captures the three things that shape the list: the text,
@@ -2088,7 +2101,11 @@ export default function App() {
             onCancel={() => window.api.ftCancel().then(setFtStat)}
             onOpen={(d, p) => {
               setSelId(d.id)
-              setRightTab('pdf')
+              // A hit is a hit into a file that was read, but the file can
+              // still have gone since: the index keeps text for a paper whose
+              // PDF was moved or deleted, and sending the pane to a reader
+              // with nothing in it is worse than sending it to the details.
+              setRightTab(d.localPdf ? 'pdf' : 'details')
               setJump({ page: p, nonce: Date.now() })
             }}
           />

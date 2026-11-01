@@ -2834,6 +2834,73 @@ async function runSmoke() {
   )
   await new Promise((r) => setTimeout(r, 400))
 
+  // A hit is not necessarily a row in the catalogue.  Full-text search
+  // answers from the whole corpus, so the paper it finds is very often one
+  // the catalogue query does not list: the word is in that paper's text and
+  // not in its title.  The right-hand pane resolved the selection against the
+  // filtered list alone, so clicking such a hit selected a paper the pane
+  // could not find, and the pane went back to asking to be given one — the
+  // click appeared to do nothing.
+  //
+  // Reproduced by narrowing the catalogue to nothing and then opening a hit:
+  // whatever paper the hit belongs to, it is not in the list.  The word in
+  // the full-text box is left alone, so the hits are still there.
+  const setInput = (sel: string, v: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const i=document.querySelector(${JSON.stringify(sel)});if(!i)return 0;`
+      + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+      + `set.call(i,${JSON.stringify(v)});`
+      + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+    )
+  await setInput('.toolbar input', 'zzzzqqq')
+  await new Promise((r) => setTimeout(r, 800))
+  const narrowRows = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({rows:document.querySelectorAll("div.row").length,'
+      + 'q:document.querySelector(".toolbar input").value})'
+    )
+  )
+  log('catalogue narrowed', narrowRows)
+  expect('the word narrows the catalogue to nothing', narrowRows.rows === 0, narrowRows)
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+    + '.find(x=>x.textContent.trim()==="全文");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 1500))
+  const away = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({hits:document.querySelectorAll(".ft-hit").length,'
+      + 'word:document.querySelector(".toolbar input").value})'
+    )
+  )
+  log('hits while the catalogue lists nothing', away)
+  expect('the hits survive a catalogue that lists nothing', away.hits > 0, away)
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=document.querySelector(".ft-hit");if(r)r.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 2000))
+  const awayPane = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({empty:(document.querySelector(".pane-right .empty")||{}).textContent||null,'
+      + 'pdf:!!document.querySelector(".pdf-bar input"),'
+      + 'det:!!document.querySelector(".pane-right .det, .pane-right .details, .pane-right table")})'
+    )
+  )
+  log('pane after opening a hit the catalogue does not list', awayPane)
+  expect(
+    'opening a hit fills the pane even when the catalogue does not list it',
+    awayPane.empty === null && (awayPane.pdf === true || awayPane.det === true),
+    awayPane
+  )
+  // back to the catalogue, and the word put back the way the run found it
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
+    + '.find(x=>x.textContent.trim()==="返回列表");if(b)b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  await setInput('.toolbar input', '')
+  await new Promise((r) => setTimeout(r, 600))
+
   // A run that finishes having read nothing is not a library that has never
   // been indexed, and it must not be reported in the same words.  Both leave
   // `indexed` at zero; only one of them has an answer to "why".  Six papers
