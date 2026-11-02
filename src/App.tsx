@@ -54,7 +54,7 @@ import SetupGuide from './components/SetupGuide'
 import Splitter from './components/Splitter'
 import Toolbar from './components/Toolbar'
 import { extractIds } from './lib/pdfmeta'
-import { toBibtex, toEndnoteXml, toRis } from './lib/export'
+import { toBibtex, toEndnoteXml, toNotesMarkdown, toRis } from './lib/export'
 import { buildTree, byName } from './lib/tree'
 import { useConfig } from './lib/hooks/useConfig'
 import { useFullText } from './lib/hooks/useFullText'
@@ -1582,6 +1582,45 @@ export default function App() {
   const exportEndnote = () => void exportAs('xml')
 
   /**
+   * The notes, separately from the bibliography.
+   *
+   * They are the one thing in here with no other copy: Mendeley has no
+   * endpoint for them, so they live in a local file the bibliography exporters
+   * never read.  A library whose papers can all be exported but whose reading
+   * cannot is not the library being in the reader's hands — the papers are
+   * fetchable again and the reading is not.
+   */
+  const exportNotes = async () => {
+    const withNotes = target.filter((d) => (noteMap[d.id] ?? '').trim())
+    if (!withNotes.length) return
+    const r = await window.api.saveText(
+      'notes.md',
+      toNotesMarkdown(withNotes, noteMap),
+      '笔记（Markdown）',
+      'md'
+    )
+    if (r.error) setErr(`导出失败：${r.error}`)
+    else if (r.path) {
+      setBatchMsg(`已导出 ${withNotes.length} 条笔记到 ${r.path}`)
+      setTimeout(() => setBatchMsg(null), 6000)
+    }
+  }
+  /** Whether there is anything to export, so the item can say so rather than
+   *  writing an empty file.
+   *
+   *  Recomputed on every keystroke, because it depends on `target`.  Most
+   *  libraries have no notes at all, and walking several thousand rows to
+   *  decide whether one menu item is greyed out is not a thing to do once per
+   *  character typed — so the empty case answers without looking at the list.
+   */
+  const canExportNotes = useMemo(() => {
+    const ids = Object.keys(noteMap)
+    if (!ids.length) return false
+    const have = new Set(ids)
+    return target.some((d) => have.has(d.id))
+  }, [target, noteMap])
+
+  /**
    * Put a formatted citation on the clipboard.  This is the single most
    * frequent thing a reference manager is for — pick a paper, paste it into
    * the manuscript — and it used to need a whole-file export and a search.
@@ -1694,6 +1733,8 @@ export default function App() {
         onExportBib={exportBib}
         onExportRis={exportRis}
         onExportEndnote={exportEndnote}
+        onExportNotes={() => void exportNotes()}
+        canExportNotes={canExportNotes}
         docs={docs}
         filtered={filtered}
         target={target}

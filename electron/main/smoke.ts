@@ -13,6 +13,11 @@ import {
   saveConfig
 } from './store'
 import { PROJECT_URL, type Doc } from '../../shared/types'
+// This one lives with the renderer, but it is a pure function with no DOM in
+// it, and the note it carries is the only data in the app that exists nowhere
+// else — a claim about being able to take your library with you is worth one
+// import across the boundary to have checked on every run.
+import { toNotesMarkdown } from '../../src/lib/export'
 import { sync } from './library'
 import {
   ftAdd,
@@ -1804,6 +1809,37 @@ export async function runSmoke() {
   ;(dialog as unknown as { showSaveDialog: unknown }).showSaveDialog = realSaveDialog
   fs.rmSync(exportDir, { recursive: true, force: true })
   saveConfig({ ...loadConfig(), exportDir: undefined })
+
+  // A note is the only data in the app with no other copy: Mendeley has no
+  // /notes endpoint, so it lives in one local file that no bibliography
+  // exporter looks at.  Losing the cache costs a resync and losing a PDF costs
+  // a download; losing this costs the reading.
+  //
+  // It cannot be driven through the menu here — that would mean writing a note
+  // into the reader's library, which a smoke run has no business doing — so
+  // the function is handed a note of its own.  What has to hold is that the
+  // text survives the trip out, that the paper is identifiable once it is
+  // somewhere else, and that a paper with no note is left out entirely.
+  const notesMd = toNotesMarkdown(
+    [
+      { id: 'n1', title: 'A Paper With A Note', year: 2024, citation_key: 'note2024a' },
+      { id: 'n2', title: 'A Paper Without One', year: 2023 }
+    ] as Doc[],
+    { n1: 'the reading note\nsecond line' }
+  )
+  log('notes export', notesMd)
+  expect(
+    'a note can leave in a form anything can open',
+    /second line/.test(notesMd) &&
+      /A Paper With A Note/.test(notesMd) &&
+      /note2024a/.test(notesMd),
+    notesMd.slice(0, 140)
+  )
+  expect(
+    'and a paper with nothing written on it is left out',
+    !/A Paper Without One/.test(notesMd),
+    notesMd.slice(0, 140)
+  )
 
   const shot = async (name: string) => {
     const p = path.join(app.getPath('temp'), 'mendeley-ng-' + name + '.png')

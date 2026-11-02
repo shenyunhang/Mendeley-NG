@@ -62,6 +62,10 @@ interface Props {
   onExportBib: () => void
   onExportRis: () => void
   onExportEndnote: () => void
+  /** Notes are exported separately: they are not on a `Doc`, no bibliography
+   *  format carries them, and Mendeley has nowhere to keep a copy. */
+  onExportNotes: () => void
+  canExportNotes: boolean
 
   /**
    * Reading is one of the two things the program is for, so it has a button
@@ -241,12 +245,24 @@ export default function Toolbar(p: Props) {
       </button>
       <MenuButton
         label="导出"
-        title="把当前筛选结果写成 BibTeX / RIS / EndNote XML"
+        title="把当前筛选结果写成 BibTeX / RIS / EndNote XML，或把写在上面的笔记导出成 Markdown"
         disabled={!p.filtered.length}
         items={[
           { label: 'BibTeX', run: p.onExportBib },
           { label: 'RIS', run: p.onExportRis },
-          { label: 'EndNote XML', run: p.onExportEndnote }
+          { label: 'EndNote XML', run: p.onExportEndnote },
+          {
+            label: '笔记（Markdown）',
+            disabled: !p.canExportNotes,
+            // said out loud because the disabled state alone does not say why:
+            // a note is the one thing here with no other copy, so the way out
+            // has to exist, and has to be visible even when there is nothing
+            // to carry
+            title: p.canExportNotes
+              ? '笔记只存在本机（Mendeley 没有 /notes 接口），这是把它们带走的方式'
+              : '当前这些文献没有写笔记',
+            run: p.onExportNotes
+          }
         ]}
       />
       <span className="cite-box">

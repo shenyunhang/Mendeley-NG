@@ -70,6 +70,47 @@ export function toBibtex(docs: Doc[]): string {
     .join('\n\n')
 }
 
+const authorsLine = (d: Doc): string =>
+  (d.authors ?? [])
+    .map((a) => [a.first_name, a.last_name].filter(Boolean).join(' '))
+    .filter(Boolean)
+    .join('; ')
+
+/**
+ * The notes, as Markdown.
+ *
+ * This is the only data in the app that exists nowhere else.  Mendeley has no
+ * /notes endpoint, so a note written here lives in one JSON file on one
+ * machine, and the three bibliography exporters never see it: they take
+ * `Doc[]` and a `Doc` has no note on it.  Losing the cache costs a resync and
+ * losing a PDF costs a download; losing this costs the reading, which is the
+ * one thing that cannot be fetched again.
+ *
+ * Markdown rather than a fourth bibliography format because nothing imports
+ * notes — they get read, pasted into a manuscript, or grepped.  Text that
+ * survives being opened in anything is the whole point.
+ */
+export function toNotesMarkdown(docs: Doc[], notes: Record<string, string>): string {
+  const kept = docs.filter((d) => (notes[d.id] ?? '').trim())
+  const head = ['# 笔记导出', '', `${kept.length} 条 · ${new Date().toISOString().slice(0, 10)}`]
+  const body = kept.map((d) => {
+    const lines = [`## ${d.title ?? '(无标题)'}`, '']
+    // enough to find the paper again in another program, and no more: this
+    // file is for reading the notes, not for replacing the bibliography
+    const meta: [string, string | undefined | null][] = [
+      ['作者', authorsLine(d)],
+      ['年份', d.year != null ? String(d.year) : ''],
+      ['发表处', d.source],
+      ['citation key', d.citation_key],
+      ['DOI', d.identifiers?.doi ?? d.doi]
+    ]
+    for (const [k, v] of meta) if (v) lines.push(`- ${k}：${v}`)
+    lines.push('', (notes[d.id] ?? '').trim())
+    return lines.join('\n')
+  })
+  return head.join('\n') + '\n\n' + body.join('\n\n---\n\n')
+}
+
 export function toRis(docs: Doc[]): string {
   const ty = (d: Doc): string => {
     const t = (d.type ?? '').toLowerCase()
