@@ -13,9 +13,13 @@ import type { FtHit, FtStatus } from '../../../shared/types'
  * It also owns the one subscription the rest of the app has no opinion about:
  * index progress arrives whether or not anybody asked, and it is what decides
  * that a search already on screen has to be run again.
+ *
+ * Whether this panel is the one being read is *not* its business and is
+ * passed in.  It used to own that flag too, and then the flag had to be kept
+ * in step with the eight-way ternary that decided what the middle of the
+ * window was; now the view says it, and there is one answer.
  */
-export function useFullText() {
-  const [ftMode, setFtMode] = useState(false)
+export function useFullText(active: boolean) {
   const [ftQuery, setFtQuery] = useState('')
   const [ftHits, setFtHits] = useState<FtHit[]>([])
   const [ftStat, setFtStat] = useState<FtStatus | null>(null)
@@ -75,7 +79,7 @@ export function useFullText() {
   // The search runs in the main process against the whole corpus, so it is
   // debounced: typing a word should not start one scan per keystroke.
   useEffect(() => {
-    if (!ftMode) return
+    if (!active) return
     const q = ftQuery.trim()
     if (q.length < 2) {
       setFtHits([])
@@ -85,11 +89,9 @@ export function useFullText() {
       window.api.ftSearch(q).then(setFtHits).catch(() => setFtHits([]))
     }, 250)
     return () => clearTimeout(t)
-  }, [ftMode, ftQuery, ftEpoch])
+  }, [active, ftQuery, ftEpoch])
 
   return {
-    ftMode,
-    setFtMode,
     ftQuery,
     setFtQuery,
     ftHits,

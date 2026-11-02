@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  Annotation,
   Doc,
   Folder,
   FtHit,
@@ -68,8 +67,9 @@ import { useConfig } from './lib/hooks/useConfig'
 import { useFullText } from './lib/hooks/useFullText'
 import { useUndo } from './lib/hooks/useUndo'
 import { useLibrary } from './lib/hooks/useLibrary'
-import { findDuplicates, type DupeGroup } from './lib/dupes'
+import { findDuplicates } from './lib/dupes'
 import { parseAny, type Entry } from './lib/import'
+import { LIBRARY, type View } from './lib/view'
 
 
 /**
@@ -143,8 +143,11 @@ export default function App() {
   const [rightTab, setRightTab] = useState<'pdf' | 'details'>('details')
   const [err, setErr] = useState<string | null>(null)
   const [upd, setUpd] = useState<UpdateState | null>(null)
-  const [trash, setTrash] = useState<Doc[] | null>(null)
-  const [dupes, setDupes] = useState<DupeGroup[] | null>(null)
+  // What the middle of the window is.  Six separate pieces of state used to
+  // decide that between them, and the one that was non-null won, which meant
+  // every new screen had to be slotted into a chain of ternaries and given a
+  // precedence against screens it had nothing to do with.  See lib/view.ts.
+  const [view, setView] = useState<View>(LIBRARY)
   // first, because the library decides whether to start a sync on from
   // `syncOnStart` and cannot be asked twice
   const {
@@ -192,8 +195,6 @@ export default function App() {
     sync: doSync,
     markToken
   } = useLibrary(syncOnStart, setErr)
-  const [importing, setImporting] = useState<Entry[] | null>(null)
-  const [adding, setAdding] = useState(false)
   const [filters, setFilters] = useState<ListFilter[]>([])
   const [showFilters, setShowFilters] = useState(false)
   const toggleFilter = (k: ListFilter) =>
@@ -236,8 +237,6 @@ export default function App() {
   const [showCols, setShowCols] = useState(false)
   const [showSort, setShowSort] = useState(false)
   const {
-    ftMode,
-    setFtMode,
     ftQuery,
     setFtQuery,
     ftHits,
@@ -248,16 +247,14 @@ export default function App() {
     build: buildIndex,
     cancel: cancelIndex,
     clear: clearIndex
-  } = useFullText()
+    // the panel is searched only while it is the one on screen, and that is
+    // the view's answer to give, not the search's
+  } = useFullText(view.kind === 'fulltext')
   /** Page to open the reader at.  The nonce re-triggers a jump to the same
    *  page on the same document, which a bare number could not. */
   const [jump, setJump] = useState<{ page: number; nonce: number } | null>(null)
   /** The open row menu, positioned where the right click landed. */
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string } | null>(null)
-  /** Every annotation in the store, for the cross-document list.  Loaded when
-   *  the list is opened rather than kept in step: annotations are written by
-   *  the reader, and a copy that goes stale would silently hide new ones. */
-  const [allAnns, setAllAnns] = useState<Annotation[] | null>(null)
   const [batchEdit, setBatchEdit] = useState(false)
   const [settings, setSettings] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -948,7 +945,7 @@ export default function App() {
           its title or abstract, and the answer is in the same toolbar.  Saying
           so is worth more than the count of what did not match.
         */}
-        {query.trim() && !ftMode ? (
+        {query.trim() && view.kind !== 'fulltext' ? (
           <p className="sub">
             搜的是书目字段：标题、作者、期刊、摘要、标签和你写的笔记。
             要搜 PDF 正文，点工具栏的「全文」
@@ -962,7 +959,7 @@ export default function App() {
         ) : null}
       </div>
     )
-  }, [docs.length, query, folderId, folders, filters, ftMode, ftStat, clearFilters])
+  }, [docs.length, query, folderId, folders, filters, view.kind, ftStat, clearFilters])
 
   const [batchMsg, setBatchMsg] = useState<string | null>(null)
 
@@ -1362,7 +1359,8 @@ export default function App() {
    * is opened rather than tracking it: the reader writes annotations on its
    * own, and a cached copy would quietly hide anything marked since.
    */
-  const openNotes = async () => setAllAnns(await window.api.loadAnnotations())
+  const openNotes = async () =>
+    setView({ kind: 'annotations', anns: await window.api.loadAnnotations() })
 
   const deleteAnnotation = async (id: string) => {
     const all = await window.api.loadAnnotations()
@@ -1380,7 +1378,7 @@ export default function App() {
     if (!go) return
     const next = all.filter((a) => a.id !== id)
     await window.api.saveAnnotations(next)
-    setAllAnns(next)
+    setView((v) => (v.kind === 'annotations' ? { ...v, anns: next } : v))
     // the cloud copy is deleted after the local one is safely written, and a
     // failure there leaves a stray cloud highlight rather than a lost local one
     if (gone?.remoteId) {
@@ -1706,14 +1704,14 @@ export default function App() {
             const files = await window.api.openRefFiles()
             const all: Entry[] = []
             for (const f of files) all.push(...parseAny(f.name, f.text))
-            setImporting(all)
+            setView({ kind: 'import', entries: all })
           }}
           title="导入 BibTeX / RIS / EndNote XML"
         >
           导入文献
         </button>
         <button
-          onClick={() => setAdding(true)}
+          onClick={() => setView({ kind: 'add' })}
           title="按 DOI / arXiv id / 标题添加条目，不需要 PDF"
         >
           按标识符添加
@@ -1753,7 +1751,7 @@ export default function App() {
               label: '查重',
               disabled: !docs.length,
               title: '按 DOI / arXiv id / 标题找重复条目',
-              run: () => setDupes(findDuplicates(docs))
+              run: () => setView({ kind: 'dupes', groups: findDuplicates(docs) })
             },
             {
               label: '全部标注',
@@ -1764,7 +1762,7 @@ export default function App() {
               label: '回收站',
               title: '浏览回收站并恢复',
               run: () => {
-                void window.api.listTrash().then(setTrash)
+                void window.api.listTrash().then((docs) => setView({ kind: 'trash', docs }))
               }
             },
             {
@@ -1850,19 +1848,21 @@ export default function App() {
           className="search"
           ref={searchRef}
           placeholder={
-            ftMode
+            view.kind === 'fulltext'
               ? '搜索 PDF 正文（只索引每篇前几页）  (Ctrl+F)'
               : '搜索标题 / 作者 / 期刊 / 摘要 / 标签 / 笔记  (Ctrl+F)'
           }
           title="标题、作者、期刊、citation key、DOI、摘要、类型、关键词、标签，以及这篇上写的本地笔记"
-          value={ftMode ? ftQuery : query}
-          onChange={(e) => (ftMode ? setFtQuery(e.target.value) : setQuery(e.target.value))}
+          value={view.kind === 'fulltext' ? ftQuery : query}
+          onChange={(e) =>
+            (view.kind === 'fulltext' ? setFtQuery : setQuery)(e.target.value)
+          }
         />
         <button
-          className={ftMode ? 'primary' : ''}
+          className={view.kind === 'fulltext' ? 'primary' : ''}
           onClick={async () => {
-            const next = !ftMode
-            setFtMode(next)
+            const next = view.kind !== 'fulltext'
+            setView(next ? { kind: 'fulltext' } : LIBRARY)
             if (next) {
               const s = await window.api.ftStatus()
               setFtStat(s)
@@ -2039,35 +2039,35 @@ export default function App() {
           title="拖动改变文件夹栏宽度，双击复位"
         />
 
-        {adding ? (
+        {view.kind === 'add' ? (
           <AddByIdView
             docs={docs}
-            onClose={() => setAdding(false)}
+            onClose={() => setView(LIBRARY)}
             onAdded={(created) => {
               if (created.length) {
                 setLib((l) => (l ? { ...l, docs: [...l.docs, ...created] } : l))
               }
             }}
           />
-        ) : importing ? (
+        ) : view.kind === 'import' ? (
           <ImportView
-            entries={importing}
+            entries={view.entries}
             docs={docs}
-            onClose={() => setImporting(null)}
+            onClose={() => setView(LIBRARY)}
             onImported={(created) => {
               if (created.length) {
                 setLib((l) => (l ? { ...l, docs: [...l.docs, ...created] } : l))
               }
             }}
           />
-        ) : ftMode ? (
+        ) : view.kind === 'fulltext' ? (
           <FullTextView
             query={ftQuery}
             hits={ftHits}
             docs={docs}
             sort={sort}
             status={ftStat}
-            onClose={() => setFtMode(false)}
+            onClose={() => setView(LIBRARY)}
             onBuild={async (rebuild) => {
               if (rebuild) {
                 const go = await askConfirm({
@@ -2099,13 +2099,13 @@ export default function App() {
               setJump({ page: p, nonce: Date.now() })
             }}
           />
-        ) : allAnns ? (
+        ) : view.kind === 'annotations' ? (
           <NotesView
-            anns={allAnns}
+            anns={view.anns}
             docs={docs}
-            onClose={() => setAllAnns(null)}
+            onClose={() => setView(LIBRARY)}
             onOpen={(d, p) => {
-              setAllAnns(null)
+              setView(LIBRARY)
               setSelId(d.id)
               setRightTab(d.localPdf ? 'pdf' : 'details')
               setJump({ page: p, nonce: Date.now() })
@@ -2119,9 +2119,9 @@ export default function App() {
               )
             }
           />
-        ) : dupes ? (
+        ) : view.kind === 'dupes' ? (
           <DupesView
-            groups={dupes}
+            groups={view.groups}
             ignored={dupeIgnores}
             onIgnore={(ids) => {
               const next = [...dupeIgnores, ids]
@@ -2137,7 +2137,7 @@ export default function App() {
               setDupeIgnores(next)
               window.api.setConfig({ dupeIgnores: next })
             }}
-            onClose={() => setDupes(null)}
+            onClose={() => setView(LIBRARY)}
             onMerge={async (g, keeper) => {
               const others = g.docs.filter((d) => d.id !== keeper.id)
               const go = await askConfirm({
@@ -2203,11 +2203,13 @@ export default function App() {
                     }
                   : l
               )
-              setDupes((p) => (p ? p.filter((x) => x.key !== g.key) : p))
+              setView((v) =>
+                v.kind === 'dupes' ? { ...v, groups: v.groups.filter((x) => x.key !== g.key) } : v
+              )
               pushUndo(`合并 ${others.length} 条`, async () => {
                 await revertFields(keeper.id, prev)
                 for (const o of others) await readmit(o)
-                setDupes((p) => (p ? [...p, g] : p))
+                setView((v) => (v.kind === 'dupes' ? { ...v, groups: [...v.groups, g] } : v))
               })
             }}
           />
@@ -2225,16 +2227,18 @@ export default function App() {
             onSync={() => void doSync(false)}
             onDismiss={() => setSetupDone(true)}
           />
-        ) : trash ? (
+        ) : view.kind === 'trash' ? (
           <TrashView
-            docs={trash}
-            onClose={() => setTrash(null)}
+            docs={view.docs}
+            onClose={() => setView(LIBRARY)}
             onRestore={async (id) => {
               await window.api.restoreDoc(id)
-              setTrash((t) => (t ? t.filter((d) => d.id !== id) : t))
+              setView((v) =>
+                v.kind === 'trash' ? { ...v, docs: v.docs.filter((d) => d.id !== id) } : v
+              )
             }}
             onPurge={async (id) => {
-              const d = trash.find((x) => x.id === id)
+              const d = view.docs.find((x) => x.id === id)
               const go = await askConfirm({
                 title: `彻底删除「${d?.title || '无标题'}」？`,
                 body: '此操作不可恢复，云端那条记录也会一并删掉。',
@@ -2242,7 +2246,9 @@ export default function App() {
               })
               if (!go) return
               await window.api.purgeDoc(id)
-              setTrash((t) => (t ? t.filter((x) => x.id !== id) : t))
+              setView((v) =>
+                v.kind === 'trash' ? { ...v, docs: v.docs.filter((x) => x.id !== id) } : v
+              )
             }}
           />
         ) : (
@@ -2517,7 +2523,7 @@ export default function App() {
               // the word in the search box, whichever of the two modes typed
               // it: a hit in the list is a claim about the paper, and the
               // paper is where it has to be checkable
-              hitQuery={ftMode ? ftQuery : query}
+              hitQuery={view.kind === 'fulltext' ? ftQuery : query}
               confirm={askConfirm}
               onLocalPdf={(id, p) =>
                 setLib((l) =>
