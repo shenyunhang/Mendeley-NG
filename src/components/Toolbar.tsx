@@ -80,6 +80,9 @@ interface Props {
   onQuery: (q: string) => void
   ftQuery: string
   onFtQuery: (q: string) => void
+  /** End the search: empty the box and come back out of full-text mode.
+   *  Folders and filters are not touched — they are not in this box. */
+  onClearSearch: () => void
   onFtStatus: (s: FtStatus) => void
   filters: ListFilter[]
   filterCounts: Record<ListFilter, number>
@@ -137,6 +140,12 @@ export default function Toolbar(p: Props) {
   const filterBtn = useRef<HTMLButtonElement>(null)
   const sortBtn = useRef<HTMLButtonElement>(null)
   const colsBtn = useRef<HTMLButtonElement>(null)
+
+  const searching = p.view.kind === 'fulltext' ? p.ftQuery : p.query
+  // In full-text mode the × is offered with an empty box too: what is being
+  // left is the mode, and the way out of it used to be finding the same
+  // toggle that got in.
+  const showClear = p.view.kind === 'fulltext' || searching.length > 0
 
   const more: MenuItem[] = [
     {
@@ -338,18 +347,34 @@ export default function Toolbar(p: Props) {
           />
         )}
       </div>
-      <input
-        className="search"
-        ref={p.searchRef}
-        placeholder={
-          p.view.kind === 'fulltext'
-            ? '搜索 PDF 正文（只索引每篇前几页）  (Ctrl+F)'
-            : '搜索标题 / 作者 / 期刊 / 摘要 / 标签 / 笔记  (Ctrl+F)'
-        }
-        title="标题、作者、期刊、citation key、DOI、摘要、类型、关键词、标签，以及这篇上写的本地笔记"
-        value={p.view.kind === 'fulltext' ? p.ftQuery : p.query}
-        onChange={(e) => (p.view.kind === 'fulltext' ? p.onFtQuery : p.onQuery)(e.target.value)}
-      />
+      {/* the box and its × are one flex item on purpose: two of them would add
+          a gap of their own and push the buttons at the far end of the bar */}
+      <div className="search-wrap">
+        <input
+          className="search"
+          ref={p.searchRef}
+          placeholder={
+            p.view.kind === 'fulltext'
+              ? '搜索 PDF 正文（只索引每篇前几页）  (Ctrl+F)'
+              : '搜索标题 / 作者 / 期刊 / 摘要 / 标签 / 笔记  (Ctrl+F)'
+          }
+          title="标题、作者、期刊、citation key、DOI、摘要、类型、关键词、标签，以及这篇上写的本地笔记"
+          value={p.view.kind === 'fulltext' ? p.ftQuery : p.query}
+          onChange={(e) => (p.view.kind === 'fulltext' ? p.onFtQuery : p.onQuery)(e.target.value)}
+          // room for the ×, so a long term does not run underneath it
+          style={showClear ? { paddingRight: 24 } : undefined}
+        />
+        {showClear && (
+          <button
+            className="search-clear"
+            title={p.view.kind === 'fulltext' ? '退出全文搜索，回到书目字段' : '清空搜索'}
+            aria-label="清空搜索"
+            onClick={p.onClearSearch}
+          >
+            ×
+          </button>
+        )}
+      </div>
       <button
         className={p.view.kind === 'fulltext' ? 'primary' : ''}
         onClick={async () => {

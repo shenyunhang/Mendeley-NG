@@ -1030,6 +1030,54 @@ export async function runSmoke() {
   // turns an empty search box into null
   expect('clearing brings the library back', restored.rows > 0 && !restored.q, restored)
 
+  // A search had no way to end it from where it was typed.  The exits were
+  // selecting the word and deleting it, or — when the search happened to find
+  // nothing — a button in the empty panel, which is precisely the case where
+  // it is least needed: a search that worked left the reader in a card list
+  // with nothing to click.
+  await w.webContents.executeJavaScript(
+    '(()=>{const i=document.querySelector(".toolbar input");'
+    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+    + 'set.call(i,"acid");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 500))
+  const xShown = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({x:document.querySelectorAll(".search-clear").length,'
+      + 'q:document.querySelector(".toolbar input").value})'
+    )
+  )
+  log('search box holding a word', xShown)
+  expect(
+    'the box offers a way out once there is a word in it',
+    xShown.x === 1 && !!xShown.q,
+    xShown
+  )
+
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=document.querySelector(".search-clear");if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 500))
+  const xGone = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({x:document.querySelectorAll(".search-clear").length,'
+      + 'q:(document.querySelector(".toolbar input")||{}).value||null,'
+      + 'rows:document.querySelectorAll("div.row").length,'
+      + 'focused:document.activeElement===document.querySelector(".toolbar input")})'
+    )
+  )
+  log('after the ×', xGone)
+  // `rows > 0` is the point: with a word in the box the middle pane is cards,
+  // so rows coming back is what "normal mode" means.
+  expect(
+    'pressing it ends the search and gives the library back',
+    xGone.x === 0 && !xGone.q && xGone.rows > 0,
+    xGone
+  )
+  // the click would otherwise leave nothing focused at all, and the next key
+  // press would go nowhere
+  expect('and the box keeps the focus', xGone.focused === true, xGone)
+
   // shift-click selection, checked without any of the batch actions that
   // would write to the library
   log(
@@ -3305,6 +3353,13 @@ export async function runSmoke() {
   )
   log('hits while the catalogue lists nothing', away)
   expect('the hits survive a catalogue that lists nothing', away.hits > 0, away)
+  // Full-text is a mode of the same box, so it gets the same way out — and it
+  // is offered with an empty box too, because what is being left is the mode,
+  // whose only other exit is the toggle that got in.
+  const xInFt = await w.webContents.executeJavaScript(
+    'document.querySelectorAll(".search-clear").length'
+  )
+  expect('the way out is offered in full-text mode as well', xInFt === 1, xInFt)
   await w.webContents.executeJavaScript(
     '(()=>{const r=document.querySelector(".ft-hit");if(r)r.click();return 1})()'
   )

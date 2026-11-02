@@ -177,10 +177,44 @@ textarea:focus {
    That one is worth a note: a status squeezed to zero width still costs a
    gap, because gaps belong to the bar and not to the child, so a line that
    has nothing to say was still ten pixels of overflow. */
-.toolbar > .search {
+.toolbar > .search-wrap {
   flex: 1 1 260px;
   min-width: 140px;
   max-width: 340px;
+  /* the × sits on top of the box rather than beside it: a second flex item
+     would bring a second gap, and gaps are what push the buttons at the far
+     end of the bar off the row */
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.search-wrap > .search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* the × is nearly invisible until the box is aimed at: a mark drawn at full
+   strength would be the brightest thing on the bar while meaning "nothing
+   is being searched for" */
+.search-clear {
+  position: absolute;
+  right: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.search-clear:hover {
+  background: var(--btn-hover);
+  color: var(--fg);
 }
 .toolbar button,
 .toolbar select {

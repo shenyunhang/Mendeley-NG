@@ -900,6 +900,25 @@ export default function App() {
   }, [])
 
   /**
+   * What the × in the search box does.
+   *
+   * It ends the search and nothing else: the folder and the filter switches
+   * stay where they are, because they are not in this box and a reader who
+   * cleared a typo did not ask to be moved out of a folder.  Full-text mode is
+   * left as well — it is a mode of this box, and the way out of it used to be
+   * pressing the same 「全文」 toggle that got in.
+   */
+  const clearSearch = useCallback(() => {
+    setQuery('')
+    setFtQuery('')
+    setActiveSearch(null)
+    setView((v) => (v.kind === 'fulltext' ? LIBRARY : v))
+    // focus goes back to the box: the reader was typing in it a moment ago and
+    // a click on the × leaves nothing focused at all otherwise
+    searchRef.current?.focus()
+  }, [setFtQuery])
+
+  /**
    * What the empty table says.  "没有匹配的文献" covered an empty library, a
    * filter that excluded everything and a search that hit nothing, which are
    * three different situations and — for the last two — have three different
@@ -1690,6 +1709,7 @@ export default function App() {
         onQuery={setQuery}
         ftQuery={ftQuery}
         onFtQuery={setFtQuery}
+        onClearSearch={clearSearch}
         onFtStatus={setFtStat}
         filters={filters}
         filterCounts={filterCounts}
