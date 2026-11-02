@@ -32,6 +32,7 @@ import {
 import { PrefetchCache } from '../lib/pdfcache'
 import { selectionRects } from '../lib/pdfsel'
 import { drawTextLayer } from '../lib/pdftext'
+import type { LinkBox } from '../lib/pdflinks'
 import { useContinuousPages } from '../lib/hooks/useContinuousPages'
 import { usePdfFind } from '../lib/hooks/usePdfFind'
 import { usePdfLinks } from '../lib/hooks/usePdfLinks'
@@ -825,11 +826,28 @@ export default function PdfViewer({
   const revealRef = useRef(reveal)
   revealRef.current = reveal
 
+  const built = useRef<{
+    links: Record<number, LinkBox[]>
+    marking: boolean
+    out: Record<number, ReactNode>
+  }>({ links: {}, marking: false, out: {} })
+
   const linkLayers = useMemo(() => {
+    const last = built.current
     const out: Record<number, ReactNode> = {}
     for (const k of Object.keys(links)) {
       const n = Number(k)
       if (!links[n].length) continue
+      // A batch of pages arriving must not rebuild every page that was
+      // already built.  The links of the pages already done are the very
+      // same array, so handing their elements straight back is both correct
+      // and the whole point: rebuilding a thousand anchors while somebody is
+      // typing is what put a keystroke at 181ms in continuous mode, where
+      // the pages are walked in batches in the background.
+      if (last.out[n] !== undefined && last.links[n] === links[n] && last.marking === marking) {
+        out[n] = last.out[n]
+        continue
+      }
       out[n] = links[n].map((l, i) => (
         <a
           key={`l-${i}`}
@@ -854,6 +872,7 @@ export default function PdfViewer({
         />
       ))
     }
+    built.current = { links, marking, out }
     return out
   }, [links, marking])
 
