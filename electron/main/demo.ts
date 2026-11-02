@@ -72,6 +72,16 @@ export async function runDemo() {
   // rather than on the reader: that is the half of the app the list hides.
   await pick('A Small Study of Very Large Tables')
   await wait(600)
+  // An input's value is not in its textContent, so nothing that reads this pane
+  // — the smoke run included — would notice a pane full of empty fields.  These
+  // pictures are the only check there is, so the run says what the fields hold.
+  log(
+    'detail fields',
+    await run(
+      'JSON.stringify([...document.querySelectorAll(".pane-right input")]'
+      + '.map(i=>i.value).slice(0,4))'
+    )
+  )
   await shot('01-library-dark')
 
   // The first paper, by name rather than by position: the order of the list
