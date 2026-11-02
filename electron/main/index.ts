@@ -15,7 +15,7 @@ import { createWindow, getWin } from './window'
 import { initFt } from './ftops'
 import { registerIpc, setDemoMode } from './ipc'
 import { runDemo } from './demo'
-import { runSmoke } from './smoke'
+import { restoreSmokeConfig, runSmoke } from './smoke'
 import { runPerf } from './perf'
 
 const alone = !wantsSingleInstance(process.argv) || app.requestSingleInstanceLock()
@@ -52,8 +52,14 @@ app.whenReady().then(() => {
   }
 
   if (process.argv.includes('--smoke')) {
+    // a run that threw still has to hand the config back: the next run starts
+    // from whatever this one left, and one crash would otherwise read as a
+    // dozen failures of things that are not broken.  A run that got to its
+    // own last line already put it back, and calling this again changes
+    // nothing.
     runSmoke().catch((e) => {
       console.log('[smoke] crashed', String(e))
+      restoreSmokeConfig()
       app.exit(1)
     })
     return

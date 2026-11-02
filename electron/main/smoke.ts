@@ -38,6 +38,49 @@ import {
   setWin
 } from './window'
 /**
+ * The config as the run found it, kept at module scope so that a run which
+ * never reaches its last line can still put it back.
+ *
+ * It is written down the moment it is read rather than at the end, because
+ * the end is exactly what a crash skips.  A run that died half way used to
+ * leave the column layout half-changed and the sort pointing at whatever the
+ * last press picked; the next run then started from that, and one red line
+ * became a dozen more, each a symptom of the first and none saying so.
+ */
+let cfgSnapshot: Record<string, unknown> | null = null
+
+/**
+ * Put back the keys the run is free to change, whether it finished or not.
+ * Safe to call twice: a run that got to its own last line already did this,
+ * and the caller cannot tell.
+ */
+export function restoreSmokeConfig() {
+  if (!cfgSnapshot) return
+  const putBack = [
+    'cols',
+    'sort',
+    'fontSize',
+    'citeStyle',
+    'pdfNameTemplate',
+    'pdfContinuous',
+    'ftPages',
+    'dupeIgnores',
+    'paneLeft',
+    'paneRight'
+  ] as const
+  const end = loadConfig() as unknown as Record<string, unknown>
+  for (const k of putBack) {
+    if (cfgSnapshot[k] !== undefined) end[k] = cfgSnapshot[k]
+    else delete end[k]
+  }
+  saveConfig(end as never)
+  console.log(
+    '[smoke] config put back',
+    putBack.map((k) => `${k}:${cfgSnapshot![k] === undefined ? '-' : 'set'}`).join(' ')
+  )
+}
+
+/**
  * `--smoke` runs the whole stack headlessly and writes a screenshot, which is
  * the only way to confirm both the sync pipeline and the high-DPI rendering
  * from a command line.  It is a development aid, never used by the packaged app.
@@ -961,6 +1004,7 @@ export async function runSmoke() {
       '(async()=>JSON.stringify(await window.api.getConfig()))()'
     )
   )
+  cfgSnapshot = cfg0 as Record<string, unknown>
   const headCols = () =>
     w.webContents.executeJavaScript(
       'JSON.stringify([...document.querySelectorAll(".col-head > div")].map(d=>d.dataset.col))'
@@ -4352,26 +4396,7 @@ export async function runSmoke() {
   // press happened to pick; the next run then started from that, and one red
   // line became a dozen more, each a symptom of the first and none of them
   // saying so.  Put back here, where every path out of the run goes past.
-  const putBack = [
-    'cols',
-    'sort',
-    'fontSize',
-    'citeStyle',
-    'pdfNameTemplate',
-    'pdfContinuous',
-    'ftPages',
-    'dupeIgnores',
-    'paneLeft',
-    'paneRight'
-  ] as const
-  const end = loadConfig() as unknown as Record<string, unknown>
-  const start = cfg0 as unknown as Record<string, unknown>
-  for (const k of putBack) {
-    if (start[k] !== undefined) end[k] = start[k]
-    else delete end[k]
-  }
-  saveConfig(end as never)
-  log('config put back', putBack.map((k) => `${k}:${start[k] === undefined ? '-' : 'set'}`).join(' '))
+  restoreSmokeConfig()
 
   if (fails.length) {
     log('FAILED CHECKS', fails.join(' | '))
