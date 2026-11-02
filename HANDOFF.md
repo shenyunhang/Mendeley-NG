@@ -111,16 +111,39 @@ npm run demo        # 造一份虚构的库，截取 README 里的四张图
 ## 4. 结构
 
 ```
-electron/main/mendeley.ts   Mendeley REST 客户端（UA、content-type、401 重试都在这）
-electron/main/store.ts      本地缓存：文献 / 文件夹 / 标注 / 配置
-electron/main/pdfindex.ts   把 "作者 - 年份 - 标题.pdf" 匹配回云端条目
-electron/main/index.ts      主进程、IPC、mendeley:// 协议、--smoke 自检、--demo 截图
+electron/main/
+  index.ts        入口，只管启动：一个窗口、是不是第二个实例、这次是哪一种启动
+  window.ts       窗口的创建与记忆（bounds / 最大化），以及往渲染器推状态
+  library.ts      API 客户端与 sync（增量水印、PDF 挂载、缓存合并）
+  instance.ts     单实例锁与第二次点击该做什么
+  ftops.ts        全文索引的驱动层：哪些篇要索引、补一篇、起一次构建
+  fulltext.ts     索引本身：读 PDF、写 entry、应答查询
+  mendeley.ts     Mendeley REST 客户端（UA、content-type、401 重试都在这）
+  store.ts        本地缓存：文献 / 文件夹 / 标注 / 配置
+  pdfindex.ts     把 "作者 - 年份 - 标题.pdf" 匹配回云端条目
+  pdfname.ts      命名模板的展开（下载、导入、批量改名三处共用）
+  lookup.ts       按标识符 / 标题找元数据
+  updater.ts      检查更新与下载
+  ipc/
+    index.ts      按域汇总注册
+    library.ts    library:* / config:* / app:version
+    system.ts     clipboard / dialog:* / shell / pdf:reveal
+    docs.ts       doc:* / folder:* / trash:* / meta:*
+    marks.ts      annotations:* / notes:* / reading:*
+    files.ts      pdf:download / pdf:rename / ft:*
+  smoke.ts        --smoke 自检（四千多行，自成一体，只在开发时跑）
+  perf.ts         --perf 测量
+  demo.ts         --demo 截图
 electron/preload/index.ts   contextBridge，只暴露白名单方法
 src/                        renderer
 shared/types.ts             main / preload / renderer 三端共享类型
 scripts/                    start.mjs 启动器、demo.mjs 假库与截图、get-token.mjs、check-api.mjs、hooks/
 docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
 ```
+
+`index.ts` 曾经过五千六百行：入口、窗口、同步、四十多个 IPC 通道，外加四千三百行的自检脚本。
+现在它只有八十几行，做的事情是"决定这次是哪一种启动"。**改主进程时先想清楚该落在哪个文件**——
+新加一个 IPC 通道是"它属于哪个域"的问题，不是"插到列表哪里"的问题。
 
 `--demo` 与 `--smoke` 同源但方向相反：自检要真实数据才测得准，**截图要假数据才敢公开**。
 `scripts/demo.mjs` 造 18 篇虚构文献（含它自己拼出来的 PDF）、写进 `.demo/`，
@@ -983,6 +1006,18 @@ SetupGuide、批量进度、拖列宽、拖列换顺序、添加时间默认列�
 - **107 库里有但白名单里没有的值，要留空而不是顶成第一项**：`select` 遇到不在选项里的
   value 会显示成第一项，那是一个**这篇并没有**的类型。留空 + 一个「（未设）」选项。
 
+
+- **冒烟结束时无论如何都要把配置放回去**：只在中途各处复原是不够的——任何一处失败
+  会让后面的复原根本跑不到，于是下一轮从半改过的状态开始，一条红变成十几条红，而且
+  每一条都看不出是上一轮的病。现在 `runSmoke` 的出口前把 `cols` / `sort` / `fontSize` /
+  `citeStyle` / `pdfNameTemplate` / `pdfContinuous` / `ftPages` / `paneLeft` / `paneRight`
+  一次写回 `cfg0`。真踩到过：一次偶发的"列顺序没复原"让下一轮连"没有带 PDF 的行"
+  一起红。
+
+- **"点一个键 / 点一个列头会给什么方向"这类断言，不能去猜当前排的是什么**：取决于
+  当前是否已按该键排着——是则翻向，否则选向。而"当前排着什么"会被前面的检查改掉，
+  连拖一列经过列头都可能顺手点中它。**先摆一个已知值再按**（列头那处用
+  `setSortAndReload({key:'year',dir:-1})`，排序卡片和全文两处先点 `title`）。
 - **108 自动同步要等 `hasToken` 的**答案**，不是等它的真值**：`hasToken` 初值是 `null`
   （"还不知道"），写成 `if (!hasToken) return` 会在答案回来之前就否掉一次，而答案
   到达时 effect 重跑又被 `startedSync` ref 挡住——于是永远不拉。判据是 `hasToken !== true`。
