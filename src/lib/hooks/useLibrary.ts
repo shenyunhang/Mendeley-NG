@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Folder, Library, SyncStatus } from '../../../shared/types'
+import { describeSyncFailure } from '../offline'
 
 /**
  * The library, and the two ways it arrives.
@@ -48,16 +49,20 @@ export function useLibrary(syncOnStart: boolean, onError: (message: string | nul
       onError(null)
       const r = await window.api.sync(full)
       if (r && 'error' in r) {
-        // the banner no longer says "sync failed" on every message, so the one
-        // that is about syncing has to say so itself
-        onError('同步失败：' + r.error + '　（可能需要导入 token.json）')
+        // Read the failure before reporting it.  "同步失败，可能需要导入 token"
+        // was the same sentence for a dead network as for an expired
+        // credential, and it never mentioned the library still on screen —
+        // which is the thing a reader who has just lost the cloud wants to be
+        // told.  This program was built so that losing it does not lose the
+        // papers, and the message now says so.
+        onError(describeSyncFailure(r.error, lib?.docs.length ?? 0).text)
       } else if (r) {
         setLib({ docs: r.docs, folders: r.folders, syncedAt: new Date().toISOString() })
         setFolders(r.folders)
       }
       setBusy(false)
     },
-    [onError]
+    [onError, lib]
   )
 
   /**

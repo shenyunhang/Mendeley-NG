@@ -16,6 +16,7 @@
     "electron/**/*.ts",
     "shared/**/*.ts",
     "electron.vite.config.ts",
-    "src/lib/export.ts"
+    "src/lib/export.ts",
+    "src/lib/offline.ts"
   ]
 }

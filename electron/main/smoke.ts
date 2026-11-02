@@ -23,6 +23,7 @@ import {
   toExitReadme,
   toNotesMarkdown
 } from '../../src/lib/export'
+import { describeSyncFailure } from '../../src/lib/offline'
 import { sync } from './library'
 import {
   ftAdd,
@@ -1389,6 +1390,7 @@ export async function runSmoke() {
       )
     )
   const colsBeforeMove = await colsConfig()
+  log('cols before move', colsBeforeMove)
   const k0 = await headKeys()
   // which column carries the sort arrow, by name and not by position: the
   // reorder moves the arrow with its column, so comparing positions would
@@ -1461,7 +1463,21 @@ export async function runSmoke() {
     k1[2] === k0[3] && k1[3] === k0[2] && k1.length === k0.length,
     { k0, k1 }
   )
-  const cfgCols1 = await colsConfig()
+  // What has to hold is that the order on screen reaches disk.  Reading the
+  // config the instant the mouse came up was reporting a stale value — one
+  // written earlier in the run — as a failure, and a red that means nothing
+  // trains everybody to ignore reds.  Waiting for it to match, with a bound,
+  // keeps the check and drops the race: if it never matches, it still fails.
+  const cfgCols1 = JSON.parse(
+    String(
+      (await until(
+        '(async()=>{const c=await window.api.getConfig();'
+          + 'return JSON.stringify(c.cols||null)})()',
+        (v) => v === JSON.stringify(k1),
+        4000
+      )) ?? 'null'
+    )
+  ) as string[] | null
   log('cols after', cfgCols1)
   expect(
     'the new order is remembered',
@@ -1930,6 +1946,37 @@ export async function runSmoke() {
     'and a mark whose paper has gone from the library still gets out',
     /orphan words/.test(annsMd) && /已不在库中/.test(annsMd),
     annsMd.slice(0, 400)
+  )
+
+  // Losing the cloud is the one thing this program was built to survive, and
+  // the message shown when it happens used to be the same sentence for every
+  // cause, advising a token import even for a dead network — and never saying
+  // that the library on screen is still there.  A reader who has just lost
+  // Mendeley is not asking "what broke", they are asking "did I lose my
+  // papers", and the answer has to be in the message.
+  const netFail = describeSyncFailure('fetch failed', 5648)
+  const authFail = describeSyncFailure('token refresh failed: 401 unauthorized', 5648)
+  const otherFail = describeSyncFailure('GET /documents -> 500 oops', 5648)
+  log('sync failures', { netFail, authFail, otherFail })
+  expect(
+    'a dead network is not reported as a bad token',
+    netFail.kind === 'network' && !/token/.test(netFail.text),
+    netFail
+  )
+  expect(
+    'and it says the library is still here, in numbers',
+    /本地这 5648 篇照常能用/.test(netFail.text) && /不经过网络/.test(netFail.text),
+    netFail.text
+  )
+  expect(
+    'an expired credential says what to do about it',
+    authFail.kind === 'auth' && /重新授权/.test(authFail.text),
+    authFail
+  )
+  expect(
+    'every one of them says the papers are still here',
+    [netFail, authFail, otherFail].every((f) => /照常能用/.test(f.text)),
+    otherFail.text
   )
 
   // The way out as one action.  Four exports the reader has to know about and
