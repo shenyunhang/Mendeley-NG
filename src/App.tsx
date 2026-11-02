@@ -1,13 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   Doc,
-  Folder,
-  FtHit,
-  FtStatus,
-  Library,
   SavedSearch,
   SavedView,
-  SyncStatus,
   UpdateState
 } from '../shared/types'
 import { DEFAULT_FT_PAGES, DEFAULT_PDF_TEMPLATE } from '../shared/types'
@@ -20,9 +15,6 @@ import AskDialog from './components/AskDialog'
 import ConfirmDialog from './components/ConfirmDialog'
 import DocTable from './components/DocTable'
 import SearchResults from './components/SearchResults'
-import ColumnPicker from './components/ColumnPicker'
-import FilterMenu from './components/FilterMenu'
-import SortMenu from './components/SortMenu'
 import MenuButton from './components/MenuButton'
 import FullTextView from './components/FullTextView'
 import {
@@ -51,7 +43,7 @@ import {
   LIST_FILTERS,
   type ListFilter
 } from './lib/filters'
-import { CITE_STYLES, formatCitation, isCiteStyle, type CiteStyle } from './lib/cite'
+import { formatCitation, isCiteStyle, type CiteStyle } from './lib/cite'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
 import RowMenu, { type RowMenuItem } from './components/RowMenu'
@@ -60,6 +52,7 @@ import BatchEdit, { type BatchOp } from './components/BatchEdit'
 import Settings from './components/Settings'
 import SetupGuide from './components/SetupGuide'
 import Splitter from './components/Splitter'
+import Toolbar from './components/Toolbar'
 import { extractIds } from './lib/pdfmeta'
 import { toBibtex, toEndnoteXml, toRis } from './lib/export'
 import { buildTree, byName } from './lib/tree'
@@ -67,40 +60,8 @@ import { useConfig } from './lib/hooks/useConfig'
 import { useFullText } from './lib/hooks/useFullText'
 import { useUndo } from './lib/hooks/useUndo'
 import { useLibrary } from './lib/hooks/useLibrary'
-import { findDuplicates } from './lib/dupes'
-import { parseAny, type Entry } from './lib/import'
 import { LIBRARY, type View } from './lib/view'
 
-
-/**
- * Toolbar wording for each updater phase; null means "say nothing".
- *
- * Every phase names the version that is running, and the ones that have a
- * version to offer name that too.  "已是最新版本" without a number answers a
- * question nobody asked — compared to what? — and a reader who was told a
- * build is fixed has no way to tell whether the number in front of them is
- * the fixed one or the one they reported.
- */
-const UPD_TEXT: Record<UpdateState['phase'], ((s: UpdateState) => string) | null> = {
-  idle: null,
-  checking: (s) => (s.current ? `检查更新…（当前 ${s.current}）` : '检查更新…'),
-  available: (s) =>
-    s.current && s.version
-      ? `新版本 ${s.version}（当前 ${s.current}），开始下载`
-      : `发现新版本 ${s.version ?? ''}，开始下载`,
-  // the answer to "am I on the fixed one?" is the number, not the adjective
-  'not-available': (s) => (s.current ? `已是最新版本（当前 ${s.current}）` : '已是最新版本'),
-  downloading: (s) =>
-    s.version ? `下载 ${s.version} ${s.percent ?? 0}%` : `下载中 ${s.percent ?? 0}%`,
-  downloaded: (s) =>
-    s.version && s.current
-      ? `${s.version} 已就绪（当前 ${s.current}），重启安装`
-      : s.version
-        ? `${s.version} 已就绪，重启安装`
-        : '安装并重启…',
-  error: (s) => `更新失败：${s.message ?? '未知错误'}`,
-  unsupported: (s) => s.message ?? '当前环境不支持更新'
-}
 
 /**
  * Everything the search box looks at, in one lower-cased string.  Shared
@@ -196,9 +157,15 @@ export default function App() {
     markToken
   } = useLibrary(syncOnStart, setErr)
   const [filters, setFilters] = useState<ListFilter[]>([])
-  const [showFilters, setShowFilters] = useState(false)
   const toggleFilter = (k: ListFilter) =>
     setFilters((f) => (f.includes(k) ? f.filter((x) => x !== k) : [...f, k]))
+  // Which card the toolbar has open lives here even though only the toolbar
+  // draws them: Esc closes one layer per press, in a fixed order that runs
+  // from the settings sheet down to the selection, and a row that dismissed
+  // its own card without knowing what was above it would close two at once.
+  const [showFilters, setShowFilters] = useState(false)
+  const [showSort, setShowSort] = useState(false)
+  const [showCols, setShowCols] = useState(false)
   const [multi, setMulti] = useState<string[]>([])
   const lastIdx = useRef<number | null>(null)
   const [activeSearch, setActiveSearch] = useState<string | null>(null)
@@ -234,8 +201,6 @@ export default function App() {
    * question has come back would flash the guide at everyone on startup.
    */
   const [setupDone, setSetupDone] = useState(false)
-  const [showCols, setShowCols] = useState(false)
-  const [showSort, setShowSort] = useState(false)
   const {
     ftQuery,
     setFtQuery,
@@ -265,9 +230,6 @@ export default function App() {
   // The two cards that hang off the bar are placed against these, not against
   // their own parents: the bar may scroll sideways, and a box that scrolls on
   // one axis clips on the other.
-  const filterBtn = useRef<HTMLButtonElement>(null)
-  const colsBtn = useRef<HTMLButtonElement>(null)
-  const sortBtn = useRef<HTMLButtonElement>(null)
   // the keydown listener is installed once, so it has to reach the undo stack
   // through a ref rather than closing over a stale one
   /** Same reason, for the table navigation: the listener outlives every
@@ -294,6 +256,17 @@ export default function App() {
     const t = setTimeout(() => window.api.installUpdate(), 700)
     return () => clearTimeout(t)
   }, [upd?.phase])
+
+  /** Opening the trash and switching the theme, named because the toolbar
+   *  asks for them rather than doing them. */
+  const openTrash = () => {
+    void window.api.listTrash().then((docs) => setView({ kind: 'trash', docs }))
+  }
+  const toggleTheme = () => {
+    const next = theme === 'light' ? 'dark' : 'light'
+    setTheme(next)
+    void window.api.setConfig({ theme: next })
+  }
 
   // Look for an update without being asked.  Nothing did this before, so the
   // app stayed at whatever version it was installed at while releases piled
@@ -1651,275 +1624,63 @@ export default function App() {
       }}
       onDrop={onDrop}
     >
-      <div className="toolbar">
-        <button className="primary" onClick={() => doSync(false)} disabled={busy}>
-          {busy ? '同步中…' : '同步云端'}
-        </button>
-        <button
-          onClick={() => doSync(true)}
-          disabled={busy}
-          title="忽略上次同步时间，重新拉全库；也是发现云端删除的唯一办法"
-        >
-          全量
-        </button>
-        <MenuButton
-          label="导出"
-          title="把当前筛选结果写成 BibTeX / RIS / EndNote XML"
-          disabled={!filtered.length}
-          items={[
-            { label: 'BibTeX', run: exportBib },
-            { label: 'RIS', run: exportRis },
-            { label: 'EndNote XML', run: exportEndnote }
-          ]}
-        />
-        <span className="cite-box">
-          <button
-            onClick={() => copyCitation(target)}
-            disabled={!target.length}
-            title="把选中条目的格式化引文复制到剪贴板  (Ctrl+Shift+C)"
-          >
-            复制引文
-          </button>
-          <select
-            value={citeStyle}
-            onChange={(e) => {
-              const s = e.target.value
-              if (!isCiteStyle(s)) return
-              setCiteStyle(s)
-              void window.api.setConfig({ citeStyle: s })
-            }}
-            title="引文样式"
-          >
-            {CITE_STYLES.map((c) => (
-              <option key={c.key} value={c.key} title={c.sample}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-        </span>
-
-
-        <button
-          onClick={async () => {
-            const files = await window.api.openRefFiles()
-            const all: Entry[] = []
-            for (const f of files) all.push(...parseAny(f.name, f.text))
-            setView({ kind: 'import', entries: all })
-          }}
-          title="导入 BibTeX / RIS / EndNote XML"
-        >
-          导入文献
-        </button>
-        <button
-          onClick={() => setView({ kind: 'add' })}
-          title="按 DOI / arXiv id / 标题添加条目，不需要 PDF"
-        >
-          按标识符添加
-        </button>
-        <button onClick={() => setSettings(true)} title="主题、字号、PDF 目录、命名模板、全文索引">
-          设置
-        </button>
-        <MenuButton
-          label="更多"
-          primary={upd?.phase === 'available'}
-          title="不常用的命令：导入 token、检查更新、查重、全部标注、回收站、保存搜索"
-          items={[
-            {
-              label: '导入 token',
-              title: '选择 get-token 生成的 token.json',
-              run: () => {
-                void window.api.importToken().then((r) => {
-                  if (r?.ok) return doSync()
-                  if (r) setErr('导入 token 失败：' + (r.error ?? '未选择文件'))
-                })
-              }
-            },
-            {
-              label: upd?.phase === 'available' ? `更新到 ${upd.version}` : '检查更新',
-              disabled: !!upd && ['checking', 'downloading', 'downloaded'].includes(upd.phase),
-              title: upd?.current
-                ? `当前 ${upd.current}。从 GitHub Releases 拉取最新版本并自动安装重启`
-                : '从 GitHub Releases 拉取最新版本并自动安装重启',
-              run: () => {
-                void window.api.checkUpdate().then((r) => {
-                  if (r?.unsupported || r?.error || !r?.available) return
-                  void window.api.downloadUpdate()
-                })
-              }
-            },
-            {
-              label: '查重',
-              disabled: !docs.length,
-              title: '按 DOI / arXiv id / 标题找重复条目',
-              run: () => setView({ kind: 'dupes', groups: findDuplicates(docs) })
-            },
-            {
-              label: '全部标注',
-              title: '列出全部标注，跨所有文献，点一条直接翻到那一页',
-              run: () => void openNotes()
-            },
-            {
-              label: '回收站',
-              title: '浏览回收站并恢复',
-              run: () => {
-                void window.api.listTrash().then((docs) => setView({ kind: 'trash', docs }))
-              }
-            },
-            {
-              label: '保存搜索',
-              disabled: !query.trim() && !folderId && !filters.length,
-              title: '把当前的文件夹 + 搜索词 + 筛选存成一个虚拟文件夹',
-              run: saveSearch
-            }
-          ]}
-        />
-        <button
-          onClick={doUndo}
-          disabled={!undo.length}
-          title={
-            undo.length
-              ? `撤销：${undo[undo.length - 1].label}  (Ctrl+Z)`
-              : '没有可撤销的操作'
-          }
-        >
-          撤销
-        </button>
-        <div style={{ position: 'relative', display: 'inline-flex' }}>
-          <button
-            ref={filterBtn}
-            className={filters.length ? 'primary' : ''}
-            onClick={() => setShowFilters((v) => !v)}
-            title="按星标 / 未读 / 有没有 PDF / 归没归文件夹来收窄列表"
-          >
-            筛选{filters.length ? `（${filters.length}）` : ''}
-          </button>
-          {showFilters && (
-            <FilterMenu
-              anchor={filterBtn}
-              on={filters}
-              counts={filterCounts}
-              onToggle={toggleFilter}
-              onClear={() => setFilters([])}
-              onClose={() => setShowFilters(false)}
-            />
-          )}
-        </div>
-        <div style={{ position: 'relative', display: 'inline-flex' }}>
-          <button
-            ref={sortBtn}
-            className={showSort ? 'primary' : ''}
-            onClick={() => setShowSort((v) => !v)}
-            title="按哪个字段排，以及从哪一头开始读"
-          >
-            排序
-          </button>
-          {showSort && (
-            <SortMenu
-              anchor={sortBtn}
-              sort={sort}
-              onPick={sortBy}
-              onClose={() => setShowSort(false)}
-            />
-          )}
-        </div>
-        <div style={{ position: 'relative', display: 'inline-flex' }}>
-          <button
-            ref={colsBtn}
-            className={showCols ? 'primary' : ''}
-            onClick={() => setShowCols((v) => !v)}
-            title="选择要显示哪些列、按什么顺序，并可以存成视图"
-          >
-            列
-          </button>
-          {showCols && (
-            <ColumnPicker
-              anchor={colsBtn}
-              cols={cols}
-              onChange={changeCols}
-              views={views}
-              onSaveView={saveView}
-              onApplyView={applyView}
-              onDeleteView={deleteView}
-              onClose={() => setShowCols(false)}
-            />
-          )}
-        </div>
-        <input
-          className="search"
-          ref={searchRef}
-          placeholder={
-            view.kind === 'fulltext'
-              ? '搜索 PDF 正文（只索引每篇前几页）  (Ctrl+F)'
-              : '搜索标题 / 作者 / 期刊 / 摘要 / 标签 / 笔记  (Ctrl+F)'
-          }
-          title="标题、作者、期刊、citation key、DOI、摘要、类型、关键词、标签，以及这篇上写的本地笔记"
-          value={view.kind === 'fulltext' ? ftQuery : query}
-          onChange={(e) =>
-            (view.kind === 'fulltext' ? setFtQuery : setQuery)(e.target.value)
-          }
-        />
-        <button
-          className={view.kind === 'fulltext' ? 'primary' : ''}
-          onClick={async () => {
-            const next = view.kind !== 'fulltext'
-            setView(next ? { kind: 'fulltext' } : LIBRARY)
-            if (next) {
-              const s = await window.api.ftStatus()
-              setFtStat(s)
-              if (!ftQuery.trim()) setFtQuery(query.trim())
-            }
-          }}
-          title="按 PDF 正文搜索，而不是只搜书目字段"
-        >
-          全文
-        </button>
-        <span className="grow" />
-        {upd && UPD_TEXT[upd.phase] && (
-          <span
-            className="status"
-            style={{ color: upd.phase === 'error' ? 'var(--err)' : 'var(--accent)' }}
-            // the release notes are the interesting half when there is an
-            // update; the two version numbers are already in the text
-            title={upd.message ?? (upd.current ? `当前版本 ${upd.current}` : '')}
-          >
-            {UPD_TEXT[upd.phase]?.(upd)}
-          </span>
-        )}
-        <button
-          style={{ padding: '3px 9px' }}
-          title="缩小界面字号"
-          onClick={() => bumpFont(-1)}
-        >
-          A−
-        </button>
-        <span className="badge" title="界面字号（CSS px，系统缩放仍会再乘一次）">
-          {fontSize}
-        </span>
-        <button
-          style={{ padding: '3px 9px' }}
-          title="放大界面字号"
-          onClick={() => bumpFont(1)}
-        >
-          A+
-        </button>
-        <button
-          style={{ padding: '3px 9px' }}
-          title={theme === 'light' ? '切到深色' : '切到浅色'}
-          onClick={() => {
-            const next = theme === 'light' ? 'dark' : 'light'
-            setTheme(next)
-            window.api.setConfig({ theme: next })
-          }}
-        >
-          {theme === 'light' ? '☀' : '☾'}
-        </button>
-        {status?.message && (
-          <span className="status" title={status.message}>
-            {status.message}
-          </span>
-        )}
-        <span className="badge">{filtered.length} / {docs.length}</span>
-      </div>
+      <Toolbar
+        searchRef={searchRef}
+        busy={busy}
+        onSync={doSync}
+        status={status}
+        upd={upd}
+        onSettings={() => setSettings(true)}
+        onImportRefs={(entries) => setView({ kind: 'import', entries })}
+        onExportBib={exportBib}
+        onExportRis={exportRis}
+        onExportEndnote={exportEndnote}
+        docs={docs}
+        filtered={filtered}
+        target={target}
+        onCopyCitation={() => void copyCitation(target)}
+        citeStyle={citeStyle}
+        onCiteStyle={(s) => {
+          setCiteStyle(s)
+          void window.api.setConfig({ citeStyle: s })
+        }}
+        view={view}
+        onView={setView}
+        query={query}
+        onQuery={setQuery}
+        ftQuery={ftQuery}
+        onFtQuery={setFtQuery}
+        onFtStatus={setFtStat}
+        filters={filters}
+        filterCounts={filterCounts}
+        onToggleFilter={toggleFilter}
+        onClearFilters={clearFilters}
+        showFilters={showFilters}
+        onShowFilters={setShowFilters}
+        showSort={showSort}
+        onShowSort={setShowSort}
+        showCols={showCols}
+        onShowCols={setShowCols}
+        sort={sort}
+        onSort={sortBy}
+        cols={cols}
+        onCols={changeCols}
+        views={views}
+        onSaveView={saveView}
+        onApplyView={applyView}
+        onDeleteView={deleteView}
+        onUndo={doUndo}
+        undoLabel={undo.length ? undo[undo.length - 1].label : null}
+        onNotes={() => void openNotes()}
+        onTrash={openTrash}
+        canSaveSearch={!!(query.trim() || folderId || filters.length)}
+        onSaveSearch={saveSearch}
+        onErr={setErr}
+        fontSize={fontSize}
+        onFont={bumpFont}
+        theme={theme}
+        onTheme={toggleTheme}
+      />
 
       {err && (
         <div className="err">
