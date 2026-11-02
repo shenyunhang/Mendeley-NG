@@ -33,6 +33,14 @@ const api = {
   readClipboard: () => ipcRenderer.invoke('clipboard:read') as Promise<string>,
   pickPdfDir: () => ipcRenderer.invoke('dialog:pickPdfDir') as Promise<string | null>,
   importToken: () => ipcRenderer.invoke('dialog:importToken') as Promise<{ ok: boolean; error?: string } | null>,
+  /** Sign in to Mendeley in a window the app opens and keep the token.  This
+   *  is the short way in; `importToken` is the way that does not involve
+   *  typing a client_secret into a text box. */
+  authorize: (clientId: string, clientSecret: string) =>
+    ipcRenderer.invoke('auth:authorize', clientId, clientSecret) as Promise<{
+      ok: boolean
+      error?: string
+    }>,
   /** Ask where to put an export, then write it.  `canceled` means the reader
    *  closed the dialog, which is not an error. */
   saveText: (name: string, text: string, kind: string, ext: string) =>

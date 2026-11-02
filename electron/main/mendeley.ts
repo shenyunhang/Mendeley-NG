@@ -425,6 +425,64 @@ export function findToken(): { path: string; tok: Token } | null {
   return null
 }
 
+/**
+ * Swap an authorization code for a token.
+ *
+ * This lives here rather than in auth.ts because the Cloudflare rule is the
+ * same one every request in this file obeys: /oauth/token answers 1010 to
+ * anything without a browser User-Agent, so the header cannot be an
+ * afterthought in one of the two places that call it.
+ */
+export async function exchangeCode(
+  code: string,
+  clientId: string,
+  clientSecret: string,
+  redirectUri: string
+): Promise<Token> {
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization:
+        'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
+      'User-Agent': UA,
+      Accept: '*/*'
+    },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri
+    }).toString()
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    throw new Error(`换 token 失败：${res.status} ${text.slice(0, 200)}`)
+  }
+  const tok = JSON.parse(text) as Token
+  // kept next to the token because refreshing needs them: a client_secret
+  // that was never written down is a re-authorisation a year later
+  tok.client_id = clientId
+  tok.client_secret = clientSecret
+  return tok
+}
+
+/**
+ * Write a token where the app will look for it on the next launch.
+ *
+ * `MENDELEY_TOKEN_PATH` wins when it is set, so a token obtained in the app
+ * lands in the same place `findToken` already searches and the two never
+ * disagree about which file is authoritative.
+ */
+export function saveToken(tok: Token): string {
+  const dest =
+    process.env.MENDELEY_TOKEN_PATH ||
+    path.join(app.getPath('userData'), 'token.json')
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  tok._expires_at = Date.now() / 1000 + (tok.expires_in ?? 3600) - 60
+  fs.writeFileSync(dest, JSON.stringify(tok, null, 2), 'utf-8')
+  return dest
+}
+
 export function importTokenFrom(src: string): { path: string; tok: Token } {
   const tok = JSON.parse(fs.readFileSync(src, 'utf-8')) as Token
   if (!tok.access_token) throw new Error('token file has no access_token')

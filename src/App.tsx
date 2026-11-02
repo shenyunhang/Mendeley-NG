@@ -2032,6 +2032,18 @@ export default function App() {
           <SetupGuide
             step={setup}
             busy={busy}
+            onAuthorize={async (clientId, clientSecret) => {
+              const r = await window.api.authorize(clientId, clientSecret)
+              // "取消了授权" is what closing the window says, and a reader who
+              // closed it knows they closed it; putting it in red under the
+              // fields would read as a failure of something they did right
+              if (r?.ok) {
+                markToken()
+                await doSync()
+                return null
+              }
+              return r?.error && r.error !== '取消了授权' ? r.error : null
+            }}
             onImportToken={async () => {
               const r = await window.api.importToken()
               if (r?.ok) {

@@ -2,6 +2,7 @@ import { app, clipboard, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { importTokenFrom } from '../mendeley'
+import { authorize } from '../auth'
 import { resetClient } from '../library'
 import { DEFAULT_PDF_DIR, loadConfig, saveConfig } from '../store'
 import { getWin } from '../window'
@@ -40,6 +41,21 @@ export function registerSystemIpc() {
       const got = importTokenFrom(r.filePaths[0])
       resetClient(got.path, got.tok)
       return { ok: true }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
+  /**
+   * The other way to end up with a token, and the one the guide now points
+   * at: type the two values from the registration in, sign in once in a
+   * window the app opens, and the token is written where the app looks for
+   * it.  Kept next to `dialog:importToken` because the two are the same
+   * question — how does a token get here — answered two ways.
+   */
+  ipcMain.handle('auth:authorize', async (_e, clientId: string, clientSecret: string) => {
+    try {
+      return await authorize(clientId, clientSecret)
     } catch (e) {
       return { ok: false, error: String(e) }
     }

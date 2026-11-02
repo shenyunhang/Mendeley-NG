@@ -196,6 +196,20 @@ export interface AppConfig {
 
 export const DEFAULT_FT_PAGES = 3
 
+/**
+ * Where Mendeley sends the browser back after authorising.
+ *
+ * It has to match, character for character, what is typed into the registration
+ * form at dev.mendeley.com, which is why it lives here: the guide has to show
+ * the reader the exact string to paste, and the in-app flow has to send the
+ * exact same one.
+ *
+ * Nothing needs to listen on this port.  The in-app flow cancels the
+ * navigation before it is made, and the CLI script only needs the code out of
+ * the address bar.
+ */
+export const OAUTH_REDIRECT = 'http://localhost:8080/'
+
 /** How local PDFs are named unless the user says otherwise.  Shared so the
  *  dialog can offer it as the starting point and main can fall back to it. */
 export const DEFAULT_PDF_TEMPLATE = '{authors} - {year} - {title}'

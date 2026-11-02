@@ -3,25 +3,65 @@
  *
  * The toolbar has an "import token" button and a "sync" button, and for a
  * while that was thought to be enough.  It is not: getting a token means
- * registering an application at dev.mendeley.com, running a script and
- * pasting a code back into a terminal, and none of that is discoverable
- * from a button called 导入 token.  What stood in for instructions was a
- * README the person who needs it has not opened.
+ * registering an application at dev.mendeley.com, and none of that is
+ * discoverable from a button called 导入 token.
  *
- * So the steps are here, in the place where they are needed, and the guide
- * gets out of the way the moment there is a library to show.
+ * It used to continue "running a script and pasting a code back into a
+ * terminal".  Those two steps are gone: the app opens the authorization
+ * window itself and catches the code on the way back, so what is left for
+ * the reader to do is register an application, paste the two values it hands
+ * out, and sign in once.  Registration cannot be removed — Mendeley has no
+ * PKCE, and its implicit flow returns no refresh token — but that is one trip
+ * to a web page rather than a trip to a terminal.
  */
+import { useEffect, useState } from 'react'
+import { OAUTH_REDIRECT } from '../../shared/types'
+
 interface Props {
   /** which thing is missing; one at a time, because three problems at once
    *  is not an instruction */
   step: 'token' | 'sync'
   busy: boolean
+  /** resolves to a message to show next to the fields, or null on success */
+  onAuthorize: (clientId: string, clientSecret: string) => Promise<string | null>
   onImportToken: () => void
   onSync: () => void
   onDismiss: () => void
 }
 
-export default function SetupGuide({ step, busy, onImportToken, onSync, onDismiss }: Props) {
+export default function SetupGuide({
+  step,
+  busy,
+  onAuthorize,
+  onImportToken,
+  onSync,
+  onDismiss
+}: Props) {
+  const [id, setId] = useState('')
+  const [secret, setSecret] = useState('')
+  const [running, setRunning] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const t = setTimeout(() => setCopied(false), 1400)
+    return () => clearTimeout(t)
+  }, [copied])
+
+  const run = async () => {
+    setErr(null)
+    setRunning(true)
+    try {
+      const msg = await onAuthorize(id, secret)
+      if (msg) setErr(msg)
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setRunning(false)
+    }
+  }
+
   return (
     <div className="pane pane-mid">
       <div className="setup">
@@ -35,29 +75,64 @@ export default function SetupGuide({ step, busy, onImportToken, onSync, onDismis
             </p>
             <ol className="steps">
               <li>
-                到 <b>dev.mendeley.com/myapps.html</b> 注册一个应用。
-                Redirect URL 填 <code>http://localhost:8080/</code>。
-                注册完会拿到 <code>client_id</code> 和 <code>client_secret</code>。
+                到 <b>dev.mendeley.com/myapps.html</b> 注册一个应用，Redirect URL 填
+                <code
+                  className="copyable"
+                  title={copied ? '已复制' : '点击复制'}
+                  onClick={() => {
+                    void window.api.copyText(OAUTH_REDIRECT)
+                    setCopied(true)
+                  }}
+                >
+                  {OAUTH_REDIRECT}
+                </code>
+                。注册完会拿到 <code>client_id</code> 和 <code>client_secret</code>。
               </li>
               <li>
-                在项目目录里跑
-                <code>node scripts/get-token.mjs &lt;client_id&gt; &lt;client_secret&gt;</code>
-                。脚本会打印一个授权地址，在浏览器里打开并同意，接着会跳到一个打不开的
-                localhost 地址——<b>这是正常的</b>，那个地址不需要能访问。把地址栏里
-                <code>?code=</code> 后面那一段复制下来粘回命令行。
-              </li>
-              <li>
-                脚本会写出 <code>token.json</code>。点下面这个按钮选中它，会自动开始同步。
+                把这两个值填进下面，点「授权并接入」。会弹一个窗口让你登录并同意，
+                同意完就好了——token 会自动放好，不用再回命令行。
               </li>
             </ol>
-            <div className="setup-actions">
-              <button className="primary" disabled={busy} onClick={onImportToken}>
-                {busy ? '同步中…' : '选择 token.json'}
+            <div className="setup-auth">
+              <input
+                className="setup-id"
+                placeholder="client_id"
+                title="注册应用页面上 Client ID 那一行"
+                spellCheck={false}
+                autoComplete="off"
+                value={id}
+                onChange={(e) => setId(e.target.value)}
+              />
+              {/* Not masked on purpose: it was in plain text on the page it was
+                  copied from, and hiding it here only makes a paste look like
+                  it failed. */}
+              <input
+                className="setup-id"
+                placeholder="client_secret"
+                title="注册应用页面上 Secret 那一行"
+                spellCheck={false}
+                autoComplete="off"
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+              />
+              <button
+                className="primary"
+                disabled={busy || running || !id.trim() || !secret.trim()}
+                onClick={() => void run()}
+              >
+                {running || busy ? '授权中…' : '授权并接入'}
               </button>
+            </div>
+            {err && <p className="setup-err">{err}</p>}
+            <div className="setup-actions">
+              <button onClick={onImportToken}>选择已有的 token.json</button>
               <button onClick={onDismiss}>已经有库了，先看看本地</button>
             </div>
             <p className="foot">
-              要是已经把 token 放好了，就不用导入：应用会自动在
+              不想把 client_secret 粘进输入框，也可以在项目目录里跑
+              <code>node scripts/get-token.mjs &lt;client_id&gt; &lt;client_secret&gt;</code>
+              ——那条路会写出一个 token.json，用上面的按钮选中它就行。
+              已经放好的 token 不用导入：应用会自动在
               <code>&lt;userData&gt;/token.json</code>、
               <code>&lt;userData&gt;/mendeley-token.json</code>，
               以及环境变量 <code>MENDELEY_TOKEN_PATH</code> 指向的位置找。

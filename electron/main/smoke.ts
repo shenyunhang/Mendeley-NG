@@ -908,6 +908,23 @@ export async function runSmoke() {
     setupShown
   )
 
+  // The in-app flow is the short way in, and its one real guard is refusing
+  // to open a window before both values are there: a window that opened, sat
+  // there, and then failed on a network request is worse than a line of text
+  // under the fields.  Calling it with nothing exercises that guard without
+  // opening a window, reaching the network, or changing anything.
+  const authGuard = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>JSON.stringify(await window.api.authorize("","")))()'
+    )
+  )
+  log('authorize guard', authGuard)
+  expect(
+    'authorising without both values is refused instead of opening a window',
+    authGuard?.ok === false && /client_id/.test(authGuard.error ?? ''),
+    authGuard
+  )
+
   // An empty table has to say why.  The usual case is a term that is in the
   // paper but not in its title or abstract, and the answer is in the same
   // toolbar — which is exactly the thing nobody was told.

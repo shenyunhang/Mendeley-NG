@@ -24,6 +24,10 @@ export interface Api {
   readClipboard: () => Promise<string>
   pickPdfDir: () => Promise<string | null>
   importToken: () => Promise<{ ok: boolean; error?: string } | null>
+  authorize: (
+    clientId: string,
+    clientSecret: string
+  ) => Promise<{ ok: boolean; error?: string }>
   saveText: (
     name: string,
     text: string,

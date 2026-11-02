@@ -1596,6 +1596,46 @@ button.danger:hover:not(:disabled) {
 .setup .steps b {
   font-weight: 600;
 }
+/* the redirect URI is the one thing that has to match character for character,
+   so it is offered as a copy rather than as something to retype */
+.setup code.copyable {
+  cursor: pointer;
+  border: 1px dashed var(--border);
+}
+.setup code.copyable:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.setup-auth {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+/* both are pasted from a web page and neither is a sentence, so neither wants
+   the proportional font or the spell checker's red squiggles */
+.setup-id {
+  flex: 1 1 15em;
+  min-width: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--fg);
+  font-family: ui-monospace, Consolas, 'Courier New', monospace;
+  font-size: 0.867rem;
+}
+.setup-id:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.setup-err {
+  margin: 0 0 14px;
+  color: var(--err);
+  font-size: 0.867rem;
+  line-height: 1.6;
+}
 .setup-actions {
   display: flex;
   align-items: center;
