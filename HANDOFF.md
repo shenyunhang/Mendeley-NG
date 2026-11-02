@@ -144,7 +144,22 @@ src/                        renderer
     useUndo.ts      撤销栈
   lib/panes.ts      三栏宽度与各栏的地板（拖拽与 useConfig 共用）
   lib/columns.ts    列的定义、迁移与排序取值
-  components/       视图组件，PdfViewer 是自成一体的阅读器
+  components/       视图组件
+    PdfViewer.tsx   阅读器：缩放、翻页、拖选，以及把下面这些拼起来的 JSX
+    …               其余视图
+  lib/pdfgeom.ts    三个坐标空间的换算：PDF 点 / 页面 0..1 盒 / CSS 像素
+  lib/pdfcache.ts   邻近页的位图：留哪几张、哪张在渲染中（LRU）
+  lib/pdftext.ts    文本层（让高亮跟着词走，而不是跟着手画的框）
+  lib/pdffind.ts    在一页里找一个词，返回 0..1 矩形
+  lib/pdfsel.ts     把浏览器的选区换算成页面矩形
+  lib/hooks/
+    useConfig.ts        落盘的那些值：列、排序、列宽、模板、引文样式、面板宽度、主题、字号
+    useLibrary.ts       云端库：缓存、同步、token 三态
+    useFullText.ts      全文检索：词、命中、索引进度、重建 / 取消 / 清空
+    useUndo.ts          撤销栈
+    useContinuousPages  连续滚动的账本：哪几页画过、画在什么缩放、哪几页在视野里
+    usePdfFind          在这一篇里找一个词
+    usePdfAnnotations   这篇的标注：本地、云端、选中的那条
 shared/types.ts             main / preload / renderer 三端共享类型
 scripts/                    start.mjs 启动器、demo.mjs 假库与截图、get-token.mjs、check-api.mjs、hooks/
 docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
@@ -159,6 +174,13 @@ docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
 **判断标准不是"这段长不长"，而是"这段回答的是哪个问题"**——列宽和排序都落盘，
 所以同在 `useConfig`；命中和索引进度都是"正文里有什么"，所以同在 `useFullText`；
 `useConfig` 必须在 `useLibrary` 之前调用，因为后者要用前者的 `syncOnStart` 决定开不开同步。
+
+`PdfViewer.tsx` 曾有两千零三十六行，同一套道理往下走了一层：一个组件的"状态"和
+"这块在算什么"是可以分开的。算的东西进了 `lib/pdf*.ts`——几何换算、位图缓存、文
+本层、查找、选区——它们都不认识 React；要跟着挂载与卸载走的账本进了 `lib/hooks/`。
+组件自己剩下缩放、翻页、拖选和 JSX，一千一百多行。**判断依据同样不是长度**：连续
+滚动那套"哪几页画过、画在什么缩放上"既不是缩放也不是查找，它是第三件事，所以它是
+第三个 hook。
 
 `--demo` 与 `--smoke` 同源但方向相反：自检要真实数据才测得准，**截图要假数据才敢公开**。
 `scripts/demo.mjs` 造 18 篇虚构文献（含它自己拼出来的 PDF）、写进 `.demo/`，
