@@ -409,6 +409,21 @@ textarea:focus {
   min-height: 0;
 }
 
+/* Reading one paper: the panes are gone and the paper has the whole window.
+   A column at the side of a table is the room a catalogue gives a paper;
+   reading is what the catalogue was for, so it gets its own view. */
+.body.reading {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-2);
+}
+.body.reading > .pdf-pane {
+  flex: 1;
+  min-height: 0;
+}
+
 .pane {
   display: flex;
   flex-direction: column;

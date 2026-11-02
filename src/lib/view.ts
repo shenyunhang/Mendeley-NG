@@ -26,6 +26,16 @@ import type { Entry } from './import'
 export type View =
   /** The table of papers: folders, filters, sorting, columns. */
   | { kind: 'library' }
+  /**
+   * Reading one paper, with the paper given the whole window.
+   *
+   * The reader used to be a tab in a pane beside the table, which is the
+   * arrangement a catalogue wants and not the one a reader does: the table
+   * kept the middle of the window while the paper being read had a column
+   * at the side.  Reading is why the library was gathered, so it gets its
+   * own view rather than a share of somebody else's.
+   */
+  | { kind: 'reader' }
   /** Searching the text of the PDFs rather than their metadata. */
   | { kind: 'fulltext' }
   /** A bibliography file, read and waiting to be confirmed. */

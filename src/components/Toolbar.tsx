@@ -56,6 +56,15 @@ interface Props {
   onExportRis: () => void
   onExportEndnote: () => void
 
+  /**
+   * Reading is one of the two things the program is for, so it has a button
+   * on the bar.  It did not used to: find, outline and annotations all lived
+   * inside the viewer, and the bar — which is how the program says what it
+   * thinks it is for — had none of them.
+   */
+  canRead: boolean
+  onRead: () => void
+
   // Getting things back out of the library.
   docs: Doc[]
   filtered: Doc[]
@@ -154,6 +163,11 @@ export default function Toolbar(p: Props) {
       }
     },
     {
+      label: '按标识符添加',
+      title: '按 DOI / arXiv id / 标题添加条目，不需要 PDF',
+      run: () => p.onView({ kind: 'add' })
+    },
+    {
       label: '查重',
       disabled: !p.docs.length,
       title: '按 DOI / arXiv id / 标题找重复条目',
@@ -179,7 +193,19 @@ export default function Toolbar(p: Props) {
 
   return (
     <div className="toolbar">
-      <button className="primary" onClick={() => p.onSync(false)} disabled={p.busy}>
+      {/* Reading comes first because it is what the library was gathered for.
+          Syncing used to own this spot and the highlight that went with it,
+          which put the only action in the program that needs the network at
+          the front of the bar. */}
+      <button
+        className={p.view.kind === 'reader' ? 'primary' : ''}
+        onClick={p.onRead}
+        disabled={!p.canRead}
+        title="把这篇 PDF 放到整个窗口里读（Esc 回到列表）"
+      >
+        阅读
+      </button>
+      <button onClick={() => p.onSync(false)} disabled={p.busy}>
         {p.busy ? '同步中…' : '同步云端'}
       </button>
       <button
@@ -235,18 +261,12 @@ export default function Toolbar(p: Props) {
       >
         导入文献
       </button>
-      <button
-        onClick={() => p.onView({ kind: 'add' })}
-        title="按 DOI / arXiv id / 标题添加条目，不需要 PDF"
-      >
-        按标识符添加
-      </button>
       <button onClick={() => p.onSettings()} title="主题、字号、PDF 目录、命名模板、全文索引">
         设置
       </button>
       <MenuButton
         label="更多"
-        title="不常用的命令：导入 token、检查更新、查重、全部标注、回收站、保存搜索"
+        title="不常用的命令：导入 token、检查更新、按标识符添加、查重、全部标注、回收站、保存搜索"
         items={more}
       />
       <button

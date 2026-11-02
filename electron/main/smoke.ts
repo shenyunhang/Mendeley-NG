@@ -1950,6 +1950,55 @@ export async function runSmoke() {
   }
   log('links in a paper', linkInfo)
 
+  // Reading is a view of its own: the paper gets the whole window instead of
+  // a column beside the table, and one key goes back.  Worth asserting
+  // because "the reader is a tab in a pane" is the arrangement a catalogue
+  // wants and the one this program grew into, and nothing else in the suite
+  // would notice if it went back to being that.
+  const readerInfo = await (async () => {
+    const pressed = Number(
+      await w.webContents.executeJavaScript(
+        '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+        + '.find(x=>x.textContent.trim()==="阅读");if(!b||b.disabled)return 0;'
+        + 'b.click();return 1})()'
+      )
+    )
+    await new Promise((r) => setTimeout(r, 2500))
+    const inReader = JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(()=>{const b=document.querySelector(".body.reading");'
+        + 'return JSON.stringify({reading:!!b,pdf:!!(b&&b.querySelector(".pdf-pane")),'
+        + 'table:!!document.querySelector(".pane-mid")})})()'
+      )
+    )
+    await w.webContents.executeJavaScript(
+      '(()=>{window.dispatchEvent(new KeyboardEvent("keydown",'
+      + '{key:"Escape",bubbles:true,cancelable:true}));return 1})()'
+    )
+    await new Promise((r) => setTimeout(r, 900))
+    const back = JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(()=>JSON.stringify({reading:!!document.querySelector(".body.reading"),'
+        + 'table:!!document.querySelector(".pane-mid")}))()'
+      )
+    )
+    return { pressed, inReader, back }
+  })()
+  log('reading view', readerInfo)
+  expect(
+    'reading gives the paper the whole window',
+    readerInfo.pressed === 1 &&
+      readerInfo.inReader.reading === true &&
+      readerInfo.inReader.pdf === true &&
+      readerInfo.inReader.table === false,
+    readerInfo
+  )
+  expect(
+    'Esc leaves the reader and brings the table back',
+    readerInfo.back.reading === false && readerInfo.back.table === true,
+    readerInfo.back
+  )
+
   // Reading position.  A library this size is never read in one sitting, so
   // reopening a paper has to land where it was left rather than on page one.
   // Checked by leaving a paper on page 3, opening another, and coming back.

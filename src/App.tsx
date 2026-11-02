@@ -300,6 +300,13 @@ export default function App() {
           setSettings(false)
           return
         }
+        // out of the reading view and back to the table, which is where the
+        // key is pressed from and the only place it can mean "leave"
+        if (view.kind === 'reader') {
+          e.preventDefault()
+          setView(LIBRARY)
+          return
+        }
         if (showCols) {
           e.preventDefault()
           setShowCols(false)
@@ -426,7 +433,11 @@ export default function App() {
     // when either moves: a closure captured at mount would still see them
     // as false and Esc would do nothing at all.  folderId is read by F2 for
     // the same reason.
-  }, [bumpFont, settings, showCols, showFilters, showSort, folderId])
+    // `view.kind` has to be in here, not merely read: the handler is built
+    // once per change, and a closure over the view from the render it was
+    // built in would go on answering for a view that has since been left —
+    // which is how Esc stopped leaving the reader.
+  }, [bumpFont, settings, showCols, showFilters, showSort, folderId, view.kind])
 
   const docs = lib?.docs ?? []
 
@@ -1604,6 +1615,33 @@ export default function App() {
     setTimeout(() => setImportMsg(null), 2500)
   }
 
+  /**
+   * The reader, whether it is being given the whole window or the pane beside
+   * the table.  One element because there is one thing to say about how a
+   * paper is opened, and the two places differ only in how much room they
+   * give it.
+   *
+   * It is not shared between them at once — the reading view replaces the
+   * panes rather than sitting next to them — so opening one does not leave
+   * two readers arguing over where the paper was left.
+   */
+  const reader = selected ? (
+    <PdfViewer
+      doc={selected}
+      jumpTo={jump}
+      // the word in the search box, whichever of the two modes typed
+      // it: a hit in the list is a claim about the paper, and the
+      // paper is where it has to be checkable
+      hitQuery={view.kind === 'fulltext' ? ftQuery : query}
+      confirm={askConfirm}
+      onLocalPdf={(id, p) =>
+        setLib((l) =>
+          l ? { ...l, docs: l.docs.map((x) => (x.id === id ? { ...x, localPdf: p } : x)) } : l
+        )
+      }
+    />
+  ) : null
+
   return (
     <div
       className={'app' + (dropping ? ' dropping' : '')}
@@ -1631,6 +1669,8 @@ export default function App() {
         status={status}
         upd={upd}
         onSettings={() => setSettings(true)}
+        canRead={!!selected?.localPdf}
+        onRead={() => setView({ kind: 'reader' })}
         onImportRefs={(entries) => setView({ kind: 'import', entries })}
         onExportBib={exportBib}
         onExportRis={exportRis}
@@ -1723,6 +1763,20 @@ export default function App() {
         />
       )}
 
+      {view.kind === 'reader' && selected ? (
+        <div className="body reading">
+          <div className="pane-head">
+            <button style={{ padding: '3px 10px' }} onClick={() => setView(LIBRARY)}>
+              ← 回到列表
+            </button>
+            <span className="grow" />
+            <span className="badge" title={selected.title ?? ''}>
+              {(selected.title ?? '无标题').slice(0, 60)}
+            </span>
+          </div>
+          {reader}
+        </div>
+      ) : (
       <div className="body" ref={bodyRef}>
         <div className="pane pane-left" style={{ flexBasis: leftW }}>
           <div className="pane-head">
@@ -2278,23 +2332,11 @@ export default function App() {
               }}
             />
           ) : (
-            <PdfViewer
-              doc={selected}
-              jumpTo={jump}
-              // the word in the search box, whichever of the two modes typed
-              // it: a hit in the list is a claim about the paper, and the
-              // paper is where it has to be checkable
-              hitQuery={view.kind === 'fulltext' ? ftQuery : query}
-              confirm={askConfirm}
-              onLocalPdf={(id, p) =>
-                setLib((l) =>
-                  l ? { ...l, docs: l.docs.map((x) => (x.id === id ? { ...x, localPdf: p } : x)) } : l
-                )
-              }
-            />
+            reader
           )}
         </div>
       </div>
+      )}
       {settings && (
         <Settings
           theme={theme}
