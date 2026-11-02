@@ -94,7 +94,16 @@ http://localhost:8080/
 
 注册完会拿到 `client_id` 和 `client_secret`。
 
-### 2. 换 token
+### 2. 接入
+
+把 `client_id` 和 `client_secret` 填进应用首屏那两个框，点**授权并接入**。
+会弹一个窗口让你登录并同意，同意完就好了——token 会自动写进应用自己找的那个
+位置，并开始同步。不用碰命令行，也不用去手抄任何东西。
+
+<details>
+<summary>不想把 client_secret 粘进输入框</summary>
+
+也可以走命令行：
 
 ```bash
 node scripts/get-token.mjs <client_id> <client_secret>
@@ -104,7 +113,10 @@ node scripts/get-token.mjs <client_id> <client_secret>
 打不开的 `localhost` 地址——**这是正常的**，那个地址根本不需要能访问。
 把地址栏里 `?code=` 后面那一段复制下来，粘回命令行。
 
-成功后会在项目根目录写出 `token.json`（已在 `.gitignore` 里，不会被提交）。
+成功后会在项目根目录写出 `token.json`（已在 `.gitignore` 里，不会被提交），
+用首屏**选择已有的 token.json** 选中它即可。
+
+</details>
 
 <details>
 <summary>想手动做的话</summary>
@@ -132,11 +144,9 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 
 </details>
 
-### 3. 导入
+### 3. token 放在哪
 
-启动应用，点工具栏**导入 token**，选中刚才那个 `token.json`，会自动开始同步。
-
-应用也会在下述位置自动找 token，找到了就不用导入：
+不用手动找：应用自己会在下述位置找 token，找到就直接用：
 
 - `<userData>/token.json`
 - `<userData>/mendeley-token.json`
