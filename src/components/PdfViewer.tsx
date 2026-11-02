@@ -22,9 +22,11 @@ import {
   type ZoomMode
 } from '../lib/pdfgeom'
 import { PrefetchCache } from '../lib/pdfcache'
+import { selectionRects } from '../lib/pdfsel'
 import { drawTextLayer } from '../lib/pdftext'
 import { useContinuousPages } from '../lib/hooks/useContinuousPages'
 import { usePdfFind } from '../lib/hooks/usePdfFind'
+import { usePdfAnnotations } from '../lib/hooks/usePdfAnnotations'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -69,21 +71,8 @@ export default function PdfViewer({
    * and one left switched on quietly undoes the default this restores.
    */
   const [marking, setMarking] = useState(false)
-  /**
-   * A highlight that was just made out of a text selection, so that it can be
-   * taken back in one click.
-   *
-   * Only that kind.  Dragging a box over the page is an unambiguous request to
-   * mark it, where picking words is exactly what somebody does to copy them —
-   * and the mode may have been left on from the last paper.  Without a way
-   * back, one forgotten switch fills a paper with marks that then have to be
-   * found and deleted one at a time.
-   */
-  const [justMade, setJustMade] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const [anns, setAnns] = useState<Annotation[]>([])
   const [drag, setDrag] = useState<Rect | null>(null)
-  const [sel, setSel] = useState<string | null>(null)
   const [sizes, setSizes] = useState<Record<number, Size>>({})
   const [note, setNote] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
@@ -164,13 +153,30 @@ export default function PdfViewer({
     sizeOf
   })
 
-  // load annotations for this document
-  useEffect(() => {
-    setSel(null)
-    window.api.loadAnnotations().then((all) => {
-      setAnns(all.filter((a) => a.docId === doc.id))
-    })
-  }, [doc.id])
+  const {
+    anns,
+    sel,
+    setSel,
+    justMade,
+    setJustMade,
+    rectsFor,
+    annsOn,
+    commitHighlight,
+    undoHighlight,
+    syncCloud,
+    remove,
+    recolor,
+    saveNote,
+    annsByPage
+  } = usePdfAnnotations({
+    docId: doc.id,
+    sizes,
+    sizeOf,
+    confirm,
+    busy,
+    onBusy: setBusy,
+    onMsg: setMsg
+  })
 
   useEffect(() => {
     setPage(1)
@@ -624,66 +630,15 @@ export default function PdfViewer({
     onJump: reveal
   })
 
-  /** The selection, resolved to the page it was made on and to rects in that
-   *  page's own 0..1 coordinates.  In continuous mode the column has one text
-   *  layer per page, so the layers on screen are tried in reading order. */
-  const selectionRects = (): { page: number; rects: Rect[] } => {
-    const layers: Array<[number, HTMLElement]> = continuous
+  /** Which layers the selection could have been made in.  In continuous mode
+   *  the column has one text layer per page, so they are tried in reading
+   *  order; the single page has only its own. */
+  const selLayers = (): Array<[number, HTMLElement | null | undefined]> =>
+    continuous
       ? [...visible.current]
           .sort((a, b) => a - b)
-          .map((n) => [n, contLayer.current.get(n)] as [number, HTMLElement])
-          .filter((x) => x[1])
-      : [[page, layerRef.current as HTMLElement]]
-    for (const [n, layer] of layers) {
-      const rects = rectsInLayer(layer)
-      if (rects.length) return { page: n, rects }
-    }
-    return { page, rects: [] }
-  }
-
-  /** Rects covering the current browser selection, in 0..1 page coordinates. */
-  const rectsInLayer = (layer: HTMLElement): Rect[] => {
-    const sel = window.getSelection()
-    if (!layer || !sel || sel.isCollapsed || !sel.rangeCount) return []
-    const box = layer.getBoundingClientRect()
-    const spans = Array.from(layer.querySelectorAll('span.tx'))
-    const raw: Rect[] = []
-    for (let r = 0; r < sel.rangeCount; r++) {
-      const range = sel.getRangeAt(r)
-      const rr = range.getBoundingClientRect()
-      for (const sp of spans) {
-        if (!range.intersectsNode(sp)) continue
-        const sr = (sp as HTMLElement).getBoundingClientRect()
-        const x0 = Math.max(sr.left, rr.left)
-        const x1 = Math.min(sr.right, rr.right)
-        const y0 = Math.max(sr.top, rr.top)
-        const y1 = Math.min(sr.bottom, rr.bottom)
-        if (x1 - x0 > 0.5 && y1 - y0 > 0.5) {
-          raw.push({ x: x0 - box.left, y: y0 - box.top, w: x1 - x0, h: y1 - y0 })
-        }
-      }
-    }
-    // a selection is one fragment per text run; stitch the ones on the same
-    // line back into a single rectangle per line
-    const lines: Rect[] = []
-    for (const r of raw.sort((a, b) => a.y - b.y || a.x - b.x)) {
-      const line = lines.find((l) => Math.abs(l.y - r.y) < 3)
-      if (line) {
-        const right = Math.max(line.x + line.w, r.x + r.w)
-        line.x = Math.min(line.x, r.x)
-        line.w = right - line.x
-        line.h = Math.max(line.h, r.h)
-      } else {
-        lines.push({ ...r })
-      }
-    }
-    return lines.map((l) => ({
-      x: l.x / box.width,
-      y: l.y / box.height,
-      w: l.w / box.width,
-      h: l.h / box.height
-    }))
-  }
+          .map((n) => [n, contLayer.current.get(n)])
+      : [[page, layerRef.current]]
 
   useEffect(() => {
     render().catch((e) => {
@@ -692,185 +647,6 @@ export default function PdfViewer({
       setErr(String(e))
     })
   }, [render])
-
-  /** Rects to draw for `a` on page `n`, in 0..1 with y from the top. */
-  const rectsFor = (a: Annotation, n: number): Rect[] => {
-    if (a.pos && a.pos.length) {
-      const out: Rect[] = []
-      for (const p of a.pos) {
-        if (p.page !== n) continue
-        const s = sizes[p.page]
-        if (!s) continue
-        out.push(posToRect(p, s))
-      }
-      return out
-    }
-    return a.page === n ? a.rects : []
-  }
-
-  /** Annotations that belong on page `n`. */
-  const annsOn = (n: number) =>
-    anns.filter((a) => (a.pos?.length ? a.pos.some((p) => p.page === n) : a.page === n))
-
-  /** Positions for `a` in PDF points, deriving them from rects if needed. */
-  const posFor = async (a: Annotation): Promise<PdfPos[]> => {
-    if (a.pos && a.pos.length) return a.pos
-    const out: PdfPos[] = []
-    for (const r of a.rects) {
-      const s = await sizeOf(a.page)
-      if (!s) continue
-      out.push(rectToPos(r, a.page, s))
-    }
-    return out
-  }
-
-  const persist = async (next: Annotation[]) => {
-    const all = await window.api.loadAnnotations()
-    const others = all.filter((a) => a.docId !== doc.id)
-    await window.api.saveAnnotations([...others, ...next])
-    setAnns(next)
-  }
-
-  /** Save a highlight on page `on`, in that page's own 0..1 rects. */
-  const commitHighlight = async (rects: Rect[], on: number): Promise<string | null> => {
-    if (!rects.length) return null
-    const s = await sizeOf(on)
-    const a: Annotation = {
-      id: `${doc.id}-${on}-${Date.now()}`,
-      docId: doc.id,
-      page: on,
-      type: 'highlight',
-      color: '#ffe066',
-      rects,
-      // keep the authoritative copy in PDF points so a cloud round trip does
-      // not drift when the page is later rendered at another zoom level
-      pos: s ? rects.map((r) => rectToPos(r, on, s)) : undefined,
-      created: new Date().toISOString()
-    }
-    const all = await window.api.loadAnnotations()
-    const next = [...all, a]
-    await window.api.saveAnnotations(next)
-    setAnns(next.filter((x) => x.docId === doc.id))
-    setSel(a.id)
-    return a.id
-  }
-
-  /** Take the last highlight back, locally first and then in the cloud. */
-  const undoHighlight = async (id: string) => {
-    const all = await window.api.loadAnnotations()
-    const gone = all.find((a) => a.id === id)
-    const next = all.filter((a) => a.id !== id)
-    await window.api.saveAnnotations(next)
-    setAnns(next.filter((x) => x.docId === doc.id))
-    setSel(null)
-    setJustMade(null)
-    // after the local copy is safely written, so a failure here leaves a stray
-    // cloud highlight rather than a lost local one
-    if (gone?.remoteId) {
-      await window.api.deleteRemoteAnnotation(gone.remoteId).catch(() => {})
-    }
-  }
-
-  useEffect(() => {
-    if (!justMade) return
-    const t = setTimeout(() => setJustMade(null), 8000)
-    return () => clearTimeout(t)
-  }, [justMade])
-
-  /** Pull cloud annotations, merge them in, then push anything local-only. */
-  const syncCloud = async () => {
-    if (busy) return
-    setBusy(true)
-    setMsg('正在与云端同步…')
-    try {
-      const cloud = await window.api.pullAnnotations(doc.id)
-      const mine = anns
-      const byRemote = new Map(mine.filter((a) => a.remoteId).map((a) => [a.remoteId!, a]))
-      const merged: Annotation[] = []
-      for (const c of cloud) {
-        const pos = fromCloudPositions(c)
-        if (!pos.length && c.type !== 'sticky_note') continue
-        const prev = byRemote.get(c.id)
-        byRemote.delete(c.id)
-        merged.push({
-          id: prev?.id ?? 'cloud-' + c.id,
-          docId: doc.id,
-          page: pos[0]?.page ?? prev?.page ?? 1,
-          type: c.type === 'sticky_note' ? 'note' : 'highlight',
-          color: prev?.color ?? '#ffe066',
-          rects: prev?.rects ?? [],
-          text: c.text,
-          note: prev?.note ?? c.text,
-          created: prev?.created ?? c.created ?? new Date().toISOString(),
-          remoteId: c.id,
-          pos
-        })
-      }
-      // local-only ones survive; anything we knew from the cloud but that the
-      // cloud no longer lists was deleted elsewhere, so it is dropped
-      const localOnly = mine.filter((a) => !a.remoteId)
-      let pushed = 0
-      const hash = await window.api.fileHash(doc.id)
-      for (const a of localOnly) {
-        if (!hash) break
-        const items = await posFor(a)
-        if (!items.length) continue
-        try {
-          const created = await window.api.pushAnnotations(doc.id, hash, items)
-          if (created[0]?.id) {
-            a.remoteId = created[0].id
-            a.pos = items
-            pushed++
-          }
-        } catch {
-          /* leave it local-only and try again next time */
-        }
-      }
-      const next = [...merged, ...localOnly]
-      await persist(next)
-      setMsg(
-        `云端 ${cloud.length} 条${hash ? ` · 新上传 ${pushed} 条` : ' · 云端无 filehash，本地高亮未上传'}`
-      )
-    } catch (e) {
-      setMsg('同步失败：' + String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const remove = async (id: string) => {
-    const target = anns.find((a) => a.id === id)
-    if (!target) return
-    // Asking here too, and not only in the annotation list, because this is
-    // the button next to the highlight itself — the one most easily hit by
-    // accident while reaching for the colour swatches beside it.  An
-    // annotation has no trash to come back from.
-    const go = await confirm({
-      title: target.type === 'note' ? '删除这条笔记？' : '删除这条标注？',
-      body: target.note
-        ? `「${target.note.slice(0, 60)}${target.note.length > 60 ? '…' : ''}」\n\n不可恢复，云端那条也会一并删掉。`
-        : '不可恢复，云端那条也会一并删掉。',
-      ok: '删除'
-    })
-    if (!go) return
-    if (target.remoteId) {
-      try {
-        await window.api.deleteRemoteAnnotation(target.remoteId)
-      } catch {
-        /* the cloud copy may already be gone; drop it locally regardless */
-      }
-    }
-    setSel(null)
-    await persist(anns.filter((a) => a.id !== id))
-  }
-
-  const recolor = async (id: string, color: string) => {
-    await persist(anns.map((a) => (a.id === id ? { ...a, color } : a)))
-  }
-
-  const saveNote = async (id: string, text: string) => {
-    await persist(anns.map((a) => (a.id === id ? { ...a, note: text } : a)))
-  }
 
   /** Which page a mouse event landed on, and the box to measure it against.
    *  In continuous mode the column has one such box per page, so the event
@@ -912,7 +688,7 @@ export default function PdfViewer({
     // picking words to copy must not also mark the page
     if (!marking) return
     // a real text selection wins: it follows the words rather than a box
-    const picked = selectionRects()
+    const picked = selectionRects(selLayers(), page)
     if (picked.rects.length) {
       setJustMade(await commitHighlight(picked.rects, picked.page))
       window.getSelection()?.removeAllRanges()
@@ -1010,22 +786,6 @@ export default function PdfViewer({
             />
           ))
     )
-
-  /** Everything on this document, in reading order, for the sidebar. */
-  const annsByPage = useMemo(
-    () =>
-      [...anns].sort((a, b) => {
-        const pa = a.pos?.[0]?.page ?? a.page
-        const pb = b.pos?.[0]?.page ?? b.page
-        if (pa !== pb) return pa - pb
-        // same page: top of the page first, remembering PDF y counts upwards
-        const ya = a.pos?.[0]?.y ?? 0
-        const yb = b.pos?.[0]?.y ?? 0
-        return yb - ya
-      }),
-    [anns]
-  )
-
   const download = async () => {
     if (busy) return
     setBusy(true)
