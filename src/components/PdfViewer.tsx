@@ -1,124 +1,28 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import type { Annotation, CloudAnnotation, Doc, PdfPos } from '../../shared/types'
+import type { Annotation, Doc, PdfPos } from '../../shared/types'
+import {
+  FIT_PAD,
+  PALETTE,
+  PGAP,
+  SCROLLBAR,
+  bitmapKey,
+  clampScale,
+  flattenOutline,
+  fromCloudPositions,
+  posToRect,
+  rectToPos,
+  type FindHit,
+  type OutlineNode,
+  type OutlineRow,
+  type Rect,
+  type Size,
+  type TextRun,
+  type ZoomMode
+} from '../lib/pdfgeom'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
-
-interface Rect {
-  x: number
-  y: number
-  w: number
-  h: number
-}
-
-interface Size {
-  w: number
-  h: number
-}
-
-/** The subset of a pdf.js text item the selection layer needs.  pdfjs-dist
- *  does not re-export `TextItem` from its entry point, so it is spelled out
- *  here rather than casting through `any`. */
-interface TextRun {
-  str: string
-  transform: number[]
-  width: number
-  height: number
-}
-
-/** One occurrence of the find query: the page it is on and the boxes that
- *  cover it, in that page's own 0..1 coordinates. */
-interface FindHit {
-  page: number
-  rects: Rect[]
-}
-
-/** Highlight colours, roughly the ones Mendeley Desktop offered. */
-const PALETTE = ['#ffe066', '#a9e34b', '#74c0fc', '#ffa8a8', '#d0bfff']
-
-/**
- * How the zoom is chosen.  `fit-width` and `fit-page` are recomputed from the
- * viewport, so they survive a window resize; any manual zoom step drops back
- * to `manual`, because silently snapping back on the next page turn would
- * fight the user.
- */
-type ZoomMode = 'manual' | 'fit-width' | 'fit-page'
-
-/** Past either end the page is either a few pixels or unusably large.  Named
- *  because there are four places that zoom and they must agree. */
-const MIN_SCALE = 0.2
-const MAX_SCALE = 6
-const clampScale = (s: number) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s))
-
-/** Depth-first walk of the outline tree into a flat, indented list. */
-function flattenOutline(items: OutlineNode[], depth = 0): OutlineRow[] {
-  const out: OutlineRow[] = []
-  for (const n of items ?? []) {
-    out.push({ node: n, depth })
-    if (n.items?.length) out.push(...flattenOutline(n.items, depth + 1))
-  }
-  return out
-}
-
-/** One node of the PDF outline, as pdf.js hands it back. */
-type OutlineNode = Awaited<ReturnType<pdfjs.PDFDocumentProxy['getOutline']>>[number]
-
-interface OutlineRow {
-  node: OutlineNode
-  depth: number
-}
-
-/** Room for the scroll container's own padding, plus a vertical scroll bar.
- *  Both are reserved unconditionally: measuring `clientWidth` instead would
- *  make the fitted scale depend on whether a scroll bar happens to be showing,
- *  which is exactly the feedback loop that makes a fitted reader jitter. */
-const FIT_PAD = 24
-const SCROLLBAR = 18
-
-/** Gap between pages in continuous mode, in CSS px. */
-const PGAP = 14
-
-/**
- * Mendeley stores annotation positions in raw PDF points, but with a trap:
- * the field called `top_left` holds the point with the *smaller* y, which is
- * the visually *lower* corner, because PDF user space has its origin at the
- * bottom left.  Verified against three existing cloud highlights by checking
- * which convention lands on real text:
- *
- *   page 1, y 671.3..685.7 on a 612x792 page -> the paper's title, i.e. near
- *   the top, which is only true if y is measured from the bottom.
- *
- * So the visual top of a rectangle is `pageHeight - max(y)`.
- */
-const fromCloudPositions = (
-  c: CloudAnnotation
-): PdfPos[] =>
-  (c.positions || []).map((p) => ({
-    page: p.page,
-    x: Math.min(p.top_left.x, p.bottom_right.x),
-    y: Math.min(p.top_left.y, p.bottom_right.y),
-    w: Math.abs(p.bottom_right.x - p.top_left.x),
-    h: Math.abs(p.bottom_right.y - p.top_left.y)
-  }))
-
-/** PDF points -> normalised rect with y measured from the top of the page. */
-const posToRect = (p: PdfPos, s: Size): Rect => ({
-  x: p.x / s.w,
-  y: (s.h - (p.y + p.h)) / s.h,
-  w: p.w / s.w,
-  h: p.h / s.h
-})
-
-/** The inverse of `posToRect`. */
-const rectToPos = (r: Rect, page: number, s: Size): PdfPos => ({
-  page,
-  x: r.x * s.w,
-  // y in PDF points is the *bottom* edge, hence the flip
-  y: s.h - (r.y + r.h) * s.h,
-  w: r.w * s.w,
-  h: r.h * s.h
-})
 
 export default function PdfViewer({
   doc,
@@ -550,9 +454,6 @@ export default function PdfViewer({
     d.pfWarm = [...warming.current.keys()].join(',')
   }
 
-  const prefetchKey = (n: number, s: number, d: number) =>
-    `${n}:${s.toFixed(3)}:${d}`
-
   const renderTo = useCallback(
     async (canvas: HTMLCanvasElement, n: number, s: number) => {
       const pg = await pdf!.getPage(n)
@@ -572,7 +473,7 @@ export default function PdfViewer({
   const warm = (n: number, s: number): Promise<void> => {
     if (n < 1 || n > numPages || !pdf) return Promise.resolve()
     const dpr = window.devicePixelRatio || 1
-    const k = prefetchKey(n, s, dpr)
+    const k = bitmapKey(n, s, dpr)
     const done = prefetch.current.get(k)
     if (done) return Promise.resolve()
     const flight = warming.current.get(k)
@@ -617,7 +518,7 @@ export default function PdfViewer({
     // in continuous mode the single-page canvas is not what is on screen
     if (!pdf || !canvas || continuous) return
     const dpr = window.devicePixelRatio || 1
-    const key = prefetchKey(page, scale, dpr)
+    const key = bitmapKey(page, scale, dpr)
     let cached = prefetch.current.get(key)
     const pg = await pdf.getPage(page)
     const viewport = pg.getViewport({ scale })
@@ -757,7 +658,7 @@ export default function PdfViewer({
       const canvas = contCanvas.current.get(n)
       if (!pdf || !canvas || contBusy.current.has(n)) return
       const dpr = window.devicePixelRatio || 1
-      const k = prefetchKey(n, s, dpr)
+      const k = bitmapKey(n, s, dpr)
       if (painted.current.get(n) === k) return
       const pg = await pdf.getPage(n)
       const viewport = pg.getViewport({ scale: s })
