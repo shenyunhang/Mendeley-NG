@@ -22,6 +22,8 @@ import {
   type ZoomMode
 } from '../lib/pdfgeom'
 import { PrefetchCache } from '../lib/pdfcache'
+import { drawTextLayer } from '../lib/pdftext'
+import { useContinuousPages } from '../lib/hooks/useContinuousPages'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -127,18 +129,41 @@ export default function PdfViewer({
     })
   }
 
-  /** Canvases and text layers of the continuous column, keyed by page. */
-  const contCanvas = useRef(new Map<number, HTMLCanvasElement>())
-  const contLayer = useRef(new Map<number, HTMLDivElement>())
-  /** What each page was last painted at, so a scroll does not repaint it. */
-  const painted = useRef(new Map<number, string>())
-  const contBusy = useRef(new Set<number>())
-  const contPending = useRef(
-    new Map<number, ReturnType<pdfjs.PDFPageProxy['render']>>()
+  /** Page size in PDF points, fetched on demand and cached. */
+  const sizeOf = useCallback(
+    async (n: number): Promise<Size | null> => {
+      const hit = sizesRef.current[n]
+      if (hit) return hit
+      if (!pdf) return null
+      const pg = await pdf.getPage(n)
+      const vp = pg.getViewport({ scale: 1 })
+      const s = { w: vp.width, h: vp.height }
+      setSizes((prev) => ({ ...prev, [n]: s }))
+      return s
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pdf]
   )
-  /** Pages currently inside the observer's margin. */
-  const visible = useRef(new Set<number>())
-  const contRef = useRef<HTMLDivElement>(null)
+
+  const {
+    contCanvas,
+    contLayer,
+    contRef,
+    visible,
+    scrollToPage,
+    onScroll: onContScroll
+  } = useContinuousPages({
+    pdf,
+    scale,
+    numPages,
+    continuous,
+    docKey: doc.localPdf,
+    sizes,
+    sizesRef,
+    pageRef,
+    onPage: setPage,
+    sizeOf
+  })
 
   // load annotations for this document
   useEffect(() => {
@@ -329,21 +354,6 @@ export default function PdfViewer({
     sc.scrollTop += r.top + a.fy * r.height - a.y
   }, [scale, continuous])
 
-  /** Page size in PDF points, fetched on demand and cached. */
-  const sizeOf = useCallback(
-    async (n: number): Promise<Size | null> => {
-      const hit = sizesRef.current[n]
-      if (hit) return hit
-      if (!pdf) return null
-      const pg = await pdf.getPage(n)
-      const vp = pg.getViewport({ scale: 1 })
-      const s = { w: vp.width, h: vp.height }
-      setSizes((prev) => ({ ...prev, [n]: s }))
-      return s
-    },
-    [pdf]
-  )
-
   // make sure every page that carries an annotation has its size known
   useEffect(() => {
     if (!pdf) return
@@ -407,24 +417,8 @@ export default function PdfViewer({
   // pushed out by the LRU.  Clearing on every scale change used to throw away
   // the neighbours a moment before the user turned to them.
   //
-  // The continuous column keeps the same kind of record, and needs the same
-  // treatment for a worse reason: its key is page, scale and pixel ratio, with
-  // nothing in it to say which document the paint was of.  Opening another
-  // paper at an unchanged zoom therefore found every page already recorded as
-  // painted, returned before touching a canvas, and left the whole column
-  // black — the scroll bar was there and the pages had their full height, so
-  // nothing looked broken except that there was no paper on any of them.
-  // Single-page mode never showed it, and only by luck: fitting a new paper
-  // moves the scale, which happens to change the key.
   useEffect(() => {
     prefetch.current.clear()
-    // a bitmap of the paper being left must not land on a canvas that now
-    // belongs to another one
-    contPending.current.forEach((t) => t.cancel())
-    contPending.current.clear()
-    contBusy.current.clear()
-    painted.current.clear()
-    visible.current.clear()
   }, [doc.localPdf])
 
   const renderTo = useCallback(
@@ -514,7 +508,7 @@ export default function PdfViewer({
       ctx.drawImage(bmp, 0, 0)
       // re-insert so the LRU knows this one was just used
       prefetch.current.touch(key)
-      await drawTextLayer(pg, viewport)
+      await drawTextLayer(pg, viewport, layerRef.current)
       document.documentElement.dataset.renderSrc = 'cache'
       prefetch.current.stamp()
       // the turn came from the cache, so the neighbours of the new page are
@@ -554,181 +548,13 @@ export default function PdfViewer({
     }
     if (id !== renderId.current) return
     document.documentElement.dataset.renderSrc = 'pdf'
-    await drawTextLayer(pg, viewport)
+    await drawTextLayer(pg, viewport, layerRef.current)
 
     // Warm the neighbours now that the page the user asked for is on screen.
     warmAround(page, scale)
   }, [pdf, page, scale, numPages, renderTo, continuous])
 
   /**
-   * An invisible layer of one span per text run, laid out to match the glyphs.
-   * Its only job is to make the page selectable, so that a highlight follows
-   * the words instead of a hand-drawn box.  The text is transparent and the
-   * browser's own selection colour is what the user sees.
-   */
-  const drawTextLayer = async (
-    pg: pdfjs.PDFPageProxy,
-    viewport: pdfjs.PageViewport,
-    into?: HTMLElement | null
-  ) => {
-    const layer = into ?? layerRef.current
-    if (!layer) return
-    layer.innerHTML = ''
-    const tc = await pg.getTextContent()
-    const spans: HTMLElement[] = []
-    const wanted: number[] = []
-    for (const item of tc.items as unknown as TextRun[]) {
-      if (!item.str) continue
-      const tx = pdfjs.Util.transform(viewport.transform, item.transform)
-      const fontHeight = Math.hypot(tx[2], tx[3])
-      if (!fontHeight) continue
-      const span = document.createElement('span')
-      span.className = 'tx'
-      span.textContent = item.str
-      span.style.fontSize = `${fontHeight}px`
-      // pdf.js positions the baseline at tx[5]; the box top is one ascent up
-      span.style.left = `${tx[4]}px`
-      span.style.top = `${tx[5] - fontHeight}px`
-      layer.appendChild(span)
-      spans.push(span)
-      wanted.push(item.width * viewport.scale)
-    }
-    // measure every span before writing any scaleX, otherwise each read
-    // forces a layout and a dense page becomes noticeably sluggish
-    const widths = spans.map((s) => s.getBoundingClientRect().width)
-    spans.forEach((s, i) => {
-      if (widths[i] > 0.5 && wanted[i] > 0.5) {
-        s.style.transform = `scaleX(${wanted[i] / widths[i]})`
-      }
-    })
-  }
-
-  /**
-   * Paint one page of the continuous column.  Idempotent: a page already
-   * painted at the current scale and pixel ratio is left alone, which is what
-   * keeps a scroll from re-rendering everything it passes.
-   */
-  const paintPage = useCallback(
-    async (n: number, s: number) => {
-      const canvas = contCanvas.current.get(n)
-      if (!pdf || !canvas || contBusy.current.has(n)) return
-      const dpr = window.devicePixelRatio || 1
-      const k = bitmapKey(n, s, dpr)
-      if (painted.current.get(n) === k) return
-      const pg = await pdf.getPage(n)
-      const viewport = pg.getViewport({ scale: s })
-      canvas.width = Math.floor(viewport.width * dpr)
-      canvas.height = Math.floor(viewport.height * dpr)
-      canvas.style.width = `${viewport.width}px`
-      canvas.style.height = `${viewport.height}px`
-      const ctx = canvas.getContext('2d')!
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx.clearRect(0, 0, viewport.width, viewport.height)
-      contBusy.current.add(n)
-      // one canvas, one render at a time: pdf.js refuses to touch a canvas
-      // that already has a render in flight
-      const task = pg.render({ canvasContext: ctx, viewport })
-      contPending.current.set(n, task)
-      try {
-        await task.promise
-      } catch (e) {
-        if ((e as { name?: string })?.name === 'RenderingCancelledException') return
-        throw e
-      } finally {
-        contBusy.current.delete(n)
-        contPending.current.delete(n)
-      }
-      painted.current.set(n, k)
-      await drawTextLayer(pg, viewport, contLayer.current.get(n))
-    },
-    [pdf]
-  )
-
-  /** Repaint whatever is on screen, e.g. after the scale moved. */
-  const repaintVisible = useCallback(
-    (s: number) => {
-      for (const n of [...visible.current].sort((a, b) => a - b)) {
-        paintPage(n, s).catch(() => {
-          /* a page that fails to paint stays blank until it is scrolled to */
-        })
-      }
-    },
-    [paintPage]
-  )
-
-  // every page has to have a known size before the column can be laid out,
-  // because the scroll height is the sum of them
-  useEffect(() => {
-    if (!pdf || !continuous) return
-    let dead = false
-    ;(async () => {
-      for (let n = 1; n <= numPages; n++) {
-        if (dead) return
-        await sizeOf(n)
-      }
-    })()
-    return () => {
-      dead = true
-    }
-  }, [pdf, continuous, numPages, sizeOf])
-
-  // paint pages as they come into view, with a margin so a flick of the wheel
-  // lands on something already drawn
-  useEffect(() => {
-    const root = contRef.current
-    if (!continuous || !root || typeof IntersectionObserver === 'undefined') return
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          const n = Number((e.target as HTMLElement).dataset.page)
-          if (!Number.isFinite(n)) continue
-          if (e.isIntersecting) visible.current.add(n)
-          else visible.current.delete(n)
-        }
-        repaintVisible(scale)
-      },
-      { root, rootMargin: '700px 0px' }
-    )
-    for (const el of root.querySelectorAll('[data-page]')) io.observe(el)
-    return () => io.disconnect()
-  }, [continuous, numPages, sizes, scale, repaintVisible])
-
-  // a new scale invalidates every bitmap, and the observer will not fire again
-  // for pages that are already on screen, so they are repainted by hand
-  useEffect(() => {
-    if (!continuous) return
-    contPending.current.forEach((t) => t.cancel())
-    contPending.current.clear()
-    contBusy.current.clear()
-    painted.current.clear()
-    visible.current.clear()
-    const root = contRef.current
-    if (!root) return
-    // the column is about to be relaid out at the new size, so ask again on
-    // the next frame rather than measuring heights that are still old
-    requestAnimationFrame(() => {
-      for (const el of root.querySelectorAll('[data-page]')) {
-        const n = Number((el as HTMLElement).dataset.page)
-        if (Number.isFinite(n)) visible.current.add(n)
-      }
-      repaintVisible(scale)
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scale, continuous])
-
-  /** Scroll the column so that page `n` is at the top. */
-  const scrollToPage = (n: number) => {
-    const el = contRef.current
-    if (!el) return
-    let top = 0
-    for (let i = 1; i < n; i++) {
-      const s = sizesRef.current[i]
-      if (!s) return
-      top += s.h * scale + PGAP
-    }
-    el.scrollTo({ top })
-  }
-
   /**
    * Turn to a page, in either mode.  In continuous mode the column has to be
    * scrolled as well, or the page box and the view disagree about where the
@@ -766,26 +592,6 @@ export default function PdfViewer({
     e.preventDefault()
     e.stopPropagation()
     goPage(want)
-  }
-
-  /** Keep the page box in step with whatever the user has scrolled to. */
-  const onContScroll = () => {
-    const el = contRef.current
-    if (!el) return
-    // a line below the very top edge, so a page is "current" once it occupies
-    // most of the view rather than the instant it peeks in
-    const y = el.scrollTop + 24
-    let top = 0
-    for (let n = 1; n <= numPages; n++) {
-      const s = sizesRef.current[n]
-      if (!s) return
-      const h = s.h * scale + PGAP
-      if (y < top + h) {
-        if (n !== pageRef.current) setPage(n)
-        return
-      }
-      top += h
-    }
   }
 
   /* ------------------------------------------------------------------ *
