@@ -1106,17 +1106,63 @@ export async function runSmoke() {
         + '.map(d=>d.dataset.col))'
       )
     )
+  /**
+   * Ask until the page agrees, rather than sleeping for a fixed time.
+   *
+   * A reload puts a whole new page in, and that page mounts on its own
+   * schedule.  Under load a fixed 2500 ms has been watched losing that race,
+   * and the run then read the layout off a page that was being thrown away —
+   * which is not a small mistake here: one wrong column layout takes the pdf
+   * dot off every row, and a dozen checks afterwards then fail for a reason
+   * that has nothing to do with any of them.
+   */
+  const until = async (js: string, ok: (v: unknown) => boolean, ms = 8000) => {
+    const t0 = Date.now()
+    let last: unknown
+    for (;;) {
+      last = await w.webContents.executeJavaScript(js).catch(() => undefined)
+      if (ok(last) || Date.now() - t0 > ms) return last
+      await new Promise((r) => setTimeout(r, 200))
+    }
+  }
+
   const OLD_DEFAULT = ['star', 'pdf', 'authors', 'title', 'year', 'source', 'citation_key']
-  const atStart = await headKeys()
+  const atStart: string[] = await headKeys()
+  const HEAD_KEYS =
+    'JSON.stringify([...document.querySelectorAll(".col-head > div")]'
+    + '.map(d=>d.dataset.col))'
+  const keysOf = (v: unknown): string[] => {
+    try {
+      const k = JSON.parse(String(v ?? '[]'))
+      return Array.isArray(k) ? k : []
+    } catch {
+      return []
+    }
+  }
   const setColsAndReload = async (cols: string[] | null) => {
     // written straight to the config rather than through setConfig, which can
     // only merge: a layout the user never had would come back as a null
-    const cfg = loadConfig()
-    if (cols) cfg.cols = cols
-    else delete cfg.cols
-    saveConfig(cfg)
-    await w.loadFile(path.join(__dirname, '../renderer/index.html'))
-    await new Promise((r) => setTimeout(r, 2500))
+    //
+    // The migration may add a column, so what is waited for is that every
+    // column asked for is on screen, not that the list is exactly it.
+    const want = cols ?? atStart
+    const has = (v: unknown) => {
+      const k = keysOf(v)
+      return k.length > 0 && want.every((x) => k.includes(x))
+    }
+    for (let i = 0; i < 3; i++) {
+      const cfg = loadConfig()
+      if (cols) cfg.cols = cols
+      else delete cfg.cols
+      saveConfig(cfg)
+      await w.loadFile(path.join(__dirname, '../renderer/index.html'))
+      if (has(await until(HEAD_KEYS, has))) {
+        await new Promise((r) => setTimeout(r, 400))
+        return
+      }
+      log('reload did not take the layout, again', i + 1)
+    }
+    await new Promise((r) => setTimeout(r, 400))
   }
   await setColsAndReload(OLD_DEFAULT)
   const migrated = await headKeys()
