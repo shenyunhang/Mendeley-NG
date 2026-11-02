@@ -1,5 +1,12 @@
 import { useRef, type RefObject } from 'react'
-import type { Doc, FtStatus, SavedView, SyncStatus, UpdateState } from '../../shared/types'
+import {
+  PROJECT_URL,
+  type Doc,
+  type FtStatus,
+  type SavedView,
+  type SyncStatus,
+  type UpdateState
+} from '../../shared/types'
 import ColumnPicker from './ColumnPicker'
 import FilterMenu from './FilterMenu'
 import MenuButton, { type MenuItem } from './MenuButton'
@@ -197,6 +204,14 @@ export default function Toolbar(p: Props) {
       disabled: !p.canSaveSearch,
       title: '把当前的文件夹 + 搜索词 + 筛选存成一个虚拟文件夹',
       run: p.onSaveSearch
+    },
+    {
+      // the ↗ is the whole warning: this one leaves the app, which none of
+      // the others do, and a menu item that opens a browser without saying so
+      // is a surprise rather than a convenience
+      label: '项目主页 ↗',
+      title: '在默认浏览器里打开 GitHub 仓库：说明、源码、更新日志',
+      run: () => void window.api.openExternal(PROJECT_URL)
     }
   ]
 
@@ -275,7 +290,7 @@ export default function Toolbar(p: Props) {
       </button>
       <MenuButton
         label="更多"
-        title="不常用的命令：导入 token、检查更新、按标识符添加、查重、全部标注、回收站、保存搜索"
+        title="不常用的命令：导入 token、检查更新、按标识符添加、查重、全部标注、回收站、保存搜索、项目主页"
         items={more}
       />
       <button

@@ -210,6 +210,11 @@ export const DEFAULT_FT_PAGES = 3
  */
 export const OAUTH_REDIRECT = 'http://localhost:8080/'
 
+/** Where the project lives.  The menu, the settings panel and the smoke run
+ *  all name it, and three copies of an address is three chances for one of
+ *  them to be the old one. */
+export const PROJECT_URL = 'https://github.com/shenyunhang/Mendeley-NG'
+
 /** How local PDFs are named unless the user says otherwise.  Shared so the
  *  dialog can offer it as the starting point and main can fall back to it. */
 export const DEFAULT_PDF_TEMPLATE = '{authors} - {year} - {title}'

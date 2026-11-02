@@ -12,7 +12,7 @@ import {
   saveAnnotations,
   saveConfig
 } from './store'
-import type { Doc } from '../../shared/types'
+import { PROJECT_URL, type Doc } from '../../shared/types'
 import { sync } from './library'
 import {
   ftAdd,
@@ -314,6 +314,46 @@ export async function runSmoke() {
     ),
     moreItems
   )
+
+  // The one item in that menu that leaves the app.  A smoke run that really
+  // opened a browser on the reader's desktop would be a worse bug than the one
+  // being looked for, so the channel is taken over for the press and what is
+  // checked is that the address arrives whole and only once.
+  const homeOpened: string[] = []
+  ipcMain.removeHandler('shell:openExternal')
+  ipcMain.handle('shell:openExternal', (_e, url: string) => {
+    homeOpened.push(url)
+    return { ok: true }
+  })
+  try {
+    // the menu is still open from the check above; asking again would press
+    // the toggle and close it
+    await w.webContents.executeJavaScript(
+      '(()=>{if(!document.querySelector(".menu-pop")){'
+      + 'const b=[...document.querySelectorAll(".toolbar button")]'
+      + '.find(x=>x.textContent.trim().startsWith("更多"));if(b)b.click()}return 1})()'
+    )
+    await new Promise((r) => setTimeout(r, 300))
+    const homePressed = Number(
+      await w.webContents.executeJavaScript(
+        '(()=>{const b=[...document.querySelectorAll(".menu-pop .menu-item")]'
+        + '.find(x=>x.textContent.includes("项目主页"));if(!b)return 0;b.click();return 1})()'
+      )
+    )
+    await new Promise((r) => setTimeout(r, 400))
+    log('project home', { homePressed, homeOpened })
+    expect(
+      'the menu sends the reader to the project page and nothing else',
+      homePressed === 1 && homeOpened.length === 1 && homeOpened[0] === PROJECT_URL,
+      { homePressed, homeOpened }
+    )
+  } finally {
+    ipcMain.removeHandler('shell:openExternal')
+    ipcMain.handle('shell:openExternal', (_e, url: string) => {
+      shell.openExternal(url)
+      return { ok: true }
+    })
+  }
 
   // The filters answer the four questions the table can already show but
   // could not isolate: what have I not read, what have I no file for, what is
