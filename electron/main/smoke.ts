@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { findToken } from './mendeley'
 import {
   dataDir,
@@ -1769,6 +1770,185 @@ export async function runSmoke() {
     + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));if(r.length)r[0].click();return 1})()'
   )
   await new Promise((r) => setTimeout(r, 1500))
+
+  // Links inside a paper.  A reference list is only worth having if a
+  // citation can be followed and a DOI in the margin only if it can be
+  // opened, so the run presses one of each kind and checks where it ended
+  // up.  The two end in different places and that is the whole point: a
+  // destination inside the paper turns the page, an address outside it is
+  // handed to the shell and nothing else in the app moves.
+  //
+  // Which paper carries links is a property of the library, not of the run,
+  // so it is asked for rather than written down: a title hard-coded here
+  // would only be true on the machine it was taken from.  pdf.js is already
+  // loaded in this process for the full-text index, so the papers can be
+  // asked without putting them on screen.
+  let linkInfo: {
+    ok?: boolean
+    skip?: string
+    title?: string
+    anchors?: number
+    pageFrom?: number
+    pageTo?: number
+    extPage?: number | null
+    opened?: string[]
+  } = {}
+  const wantLinks = await (async () => {
+    const cands = (loadLibrary()?.docs ?? []).filter(
+      (d) => d.localPdf && fs.existsSync(d.localPdf as string)
+    )
+    for (const d of cands.slice(0, 60)) {
+      try {
+        const data = new Uint8Array(fs.readFileSync(d.localPdf as string))
+        const pdf = await pdfjs.getDocument({ data, useSystemFonts: false }).promise
+        const last = Math.min(pdf.numPages, 12)
+        let inner = 0
+        let extPage: number | null = null
+        for (let i = 1; i <= last; i++) {
+          const p = await pdf.getPage(i)
+          const anns = (await p.getAnnotations({ intent: 'display' })) as unknown as {
+            subtype?: string
+            url?: string
+            unsafeUrl?: string
+            dest?: unknown
+          }[]
+          for (const a of anns) {
+            if (a.subtype !== 'Link') continue
+            if (i === 1 && a.dest != null && !(a.url ?? a.unsafeUrl)) inner++
+            if (extPage === null && (a.url ?? a.unsafeUrl)) extPage = i
+          }
+          if (extPage !== null && inner) break
+        }
+        await pdf.destroy()
+        // page one is what the reader lands on, so a link there is what can be
+        // pressed without hunting for it
+        if (inner >= 1) return { doc: d, extPage }
+      } catch {
+        /* a paper that will not parse simply has no links to offer */
+      }
+    }
+    return undefined
+  })()
+
+  if (!wantLinks) {
+    linkInfo = { skip: 'no paper in this library carries a link on its first page' }
+  } else {
+    const title = String(wantLinks.doc.title ?? '').slice(0, 40)
+    // The table only draws the rows it can see, so a paper that is not on
+    // screen cannot be clicked; narrowing the list to it is the way in.
+    await w.webContents.executeJavaScript(
+      `(()=>{const i=document.querySelector(".toolbar input[placeholder^='搜索']");if(!i)return 0;`
+      + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+      + `set.call(i,${JSON.stringify(title)});`
+      + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+    )
+    await new Promise((r) => setTimeout(r, 1500))
+    await w.webContents.executeJavaScript(
+      '(()=>{const r=[...document.querySelectorAll("div.row")]'
+      + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+      + 'if(!r.length)return 0;r[0].click();return 1})()'
+    )
+    await new Promise((r) => setTimeout(r, 5000))
+    // reopening a paper opens where it was left, and the links are read for
+    // the page being read
+    await paneKey('Home')
+    await new Promise((r) => setTimeout(r, 1200))
+    const seen = JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(()=>{const a=[...document.querySelectorAll("a.pdf-link")];'
+        + 'return JSON.stringify({n:a.length,'
+        + 'ext:a.filter(x=>x.classList.contains("ext")).length,'
+        + 'href:(a.find(x=>x.classList.contains("ext"))||{}).href||null,'
+        + 'marked:a.length?getComputedStyle(a[0]).pointerEvents:null})})()'
+      )
+    )
+    log('links on the page', seen)
+    expect(
+      'a paper that carries links gets a link to press',
+      seen.n >= 1 && seen.marked === 'auto',
+      seen
+    )
+    // an internal link is pressed only if it points somewhere else: a link to
+    // the page it is on turning the page to the page it is on proves nothing
+    const pageFrom = await pageNow()
+    const pressed = Number(
+      await w.webContents.executeJavaScript(
+        '(()=>{const cur=Number((document.querySelector(".pdf-bar input")||{}).value||0);'
+        + 'const a=[...document.querySelectorAll("a.pdf-link")]'
+        + '.filter(x=>!x.classList.contains("ext"))'
+        + '.find(x=>{const m=(x.getAttribute("href")||"").match(/^#page-(\\d+)$/);'
+        + 'return m&&Number(m[1])!==cur});'
+        + 'if(!a)return 0;a.click();return 1})()'
+      )
+    )
+    await new Promise((r) => setTimeout(r, 1200))
+    const pageTo = await pageNow()
+    log('internal link', { pressed, pageFrom, pageTo })
+    expect(
+      'pressing a link inside the paper turns to the page it points at',
+      pressed === 1 && pageTo !== pageFrom,
+      { pressed, pageFrom, pageTo }
+    )
+    // An external link has to reach the shell and nowhere else.  The channel
+    // is taken over for the press, because a smoke run that really opened the
+    // browser on the user's desktop would be a worse bug than the one being
+    // looked for; what is checked is that the address arrives intact.
+    const opened: string[] = []
+    ipcMain.removeHandler('shell:openExternal')
+    ipcMain.handle('shell:openExternal', (_e, url: string) => {
+      opened.push(url)
+      return { ok: true }
+    })
+    try {
+      if (wantLinks.extPage !== null) {
+        await w.webContents.executeJavaScript(
+          `(()=>{const i=document.querySelector(".pdf-bar input");if(!i)return 0;`
+          + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+          + `set.call(i,${JSON.stringify(String(wantLinks.extPage))});`
+          + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+        )
+        await new Promise((r) => setTimeout(r, 2500))
+      }
+      const extPressed = Number(
+        await w.webContents.executeJavaScript(
+          '(()=>{const a=document.querySelector("a.pdf-link.ext");if(!a)return 0;'
+          + 'a.click();return 1})()'
+        )
+      )
+      await new Promise((r) => setTimeout(r, 800))
+      log('external link', { extPage: wantLinks.extPage, extPressed, opened })
+      if (wantLinks.extPage === null) {
+        log('no external link in this paper, press not checked')
+      } else {
+        expect(
+          'a link out of the paper reaches the shell and nothing else',
+          extPressed === 1 && opened.length === 1 && /^https?:\/\//.test(opened[0] ?? ''),
+          { extPage: wantLinks.extPage, extPressed, opened }
+        )
+      }
+    } finally {
+      ipcMain.removeHandler('shell:openExternal')
+      ipcMain.handle('shell:openExternal', (_e, url: string) => {
+        shell.openExternal(url)
+        return { ok: true }
+      })
+    }
+    linkInfo = { ok: true, title, anchors: seen.n, pageFrom, pageTo, opened }
+    // back to the whole library: what follows looks at the rows near the top
+    await w.webContents.executeJavaScript(
+      `(()=>{const i=document.querySelector(".toolbar input[placeholder^='搜索']");if(!i)return 0;`
+      + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+      + `set.call(i,"");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+    )
+    await new Promise((r) => setTimeout(r, 1000))
+    await w.webContents.executeJavaScript(
+      '(()=>{const s=document.querySelector(".table-wrap");if(s)s.scrollTop=0;'
+      + 'const r=[...document.querySelectorAll("div.row")]'
+      + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));if(r.length)r[0].click();return 1})()'
+    )
+    await new Promise((r) => setTimeout(r, 1500))
+  }
+  log('links in a paper', linkInfo)
 
   // Reading position.  A library this size is never read in one sitting, so
   // reopening a paper has to land where it was left rather than on page one.

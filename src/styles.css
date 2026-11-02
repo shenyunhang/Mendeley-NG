@@ -1485,6 +1485,31 @@ button.danger:hover:not(:disabled) {
 .marking canvas {
   cursor: crosshair;
 }
+
+/* Links in the paper.  Nothing is drawn until the pointer is on one: a paper
+   carries dozens of them, and a page of blue boxes makes every sentence look
+   like it goes somewhere.  The ring on hover is the whole answer to "is this
+   one a link", which is why it has to be a ring and not a tint — a tint over
+   text you are trying to read is the same damage as the boxes. */
+.pdf-link {
+  cursor: pointer;
+  text-decoration: none;
+}
+.pdf-link:hover,
+.pdf-link:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  background: rgba(90, 170, 255, 0.14);
+}
+.pdf-link.ext:hover::after {
+  content: '↗';
+  position: absolute;
+  top: -0.55em;
+  left: 0;
+  font-size: 0.75em;
+  line-height: 1;
+  color: var(--accent);
+}
 .dupe-group {
   border-bottom: 1px solid var(--sep);
 }

@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode
+} from 'react'
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { Annotation, Doc, PdfPos } from '../../shared/types'
@@ -26,6 +34,7 @@ import { selectionRects } from '../lib/pdfsel'
 import { drawTextLayer } from '../lib/pdftext'
 import { useContinuousPages } from '../lib/hooks/useContinuousPages'
 import { usePdfFind } from '../lib/hooks/usePdfFind'
+import { usePdfLinks } from '../lib/hooks/usePdfLinks'
 import { usePdfAnnotations } from '../lib/hooks/usePdfAnnotations'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
@@ -630,6 +639,14 @@ export default function PdfViewer({
     onJump: reveal
   })
 
+  const { links } = usePdfLinks({
+    pdf,
+    numPages,
+    continuous,
+    page,
+    docKey: doc.localPdf
+  })
+
   /** Which layers the selection could have been made in.  In continuous mode
    *  the column has one text layer per page, so they are tried in reading
    *  order; the single page has only its own. */
@@ -786,6 +803,62 @@ export default function PdfViewer({
             />
           ))
     )
+
+  /**
+   * The links of one page, as a transparent layer over the paper.
+   *
+   * Nothing is drawn for them until the pointer is over one: a paper carries
+   * dozens of links and a page full of blue boxes is worse than a page without
+   * links, because it makes every sentence look like it goes somewhere.  A
+   * hover ring and a pointing hand are enough to say "this one does".
+   *
+   * The whole layer stands down while highlighting is on.  Marking is a drag
+   * across the page, and a link in the way would turn every one of those drags
+   * into a jump to somewhere the reader was not going.
+   */
+  // Held in a ref so the layers below can be memoised.  A paper carries
+  // dozens of links a page and the whole column is mounted at once, so that
+  // is the better part of a thousand anchors; rebuilt on every render of the
+  // window they cost more than a keystroke is allowed to, and rebuilding them
+  // is pointless because nothing about them changes.  Memoising hands React
+  // the very same element next time and it walks past the whole subtree.
+  const revealRef = useRef(reveal)
+  revealRef.current = reveal
+
+  const linkLayers = useMemo(() => {
+    const out: Record<number, ReactNode> = {}
+    for (const k of Object.keys(links)) {
+      const n = Number(k)
+      if (!links[n].length) continue
+      out[n] = links[n].map((l, i) => (
+        <a
+          key={`l-${i}`}
+          className={l.url ? 'pdf-link ext' : 'pdf-link'}
+          href={l.url ?? `#page-${l.page}`}
+          title={l.url ? l.url : `跳到第 ${l.page} 页`}
+          style={{
+            position: 'absolute',
+            left: `${l.x * 100}%`,
+            top: `${l.y * 100}%`,
+            width: `${l.w * 100}%`,
+            height: `${l.h * 100}%`,
+            // the layer only claims the pointer when it is allowed to answer it
+            pointerEvents: marking ? 'none' : 'auto'
+          }}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (l.page) revealRef.current(l.page)
+            else if (l.url) void window.api.openExternal(l.url)
+          }}
+        />
+      ))
+    }
+    return out
+  }, [links, marking])
+
+  const linkMarks = (n: number) => linkLayers[n] ?? null
+
   const download = async () => {
     if (busy) return
     setBusy(true)
@@ -1077,6 +1150,7 @@ export default function PdfViewer({
               {drag && rubberBand(drag)}
               {/* invisible, selectable, the reason highlights follow words */}
               <div className="tx-layer" ref={layerRef} />
+              {linkMarks(page)}
             </div>
           </div>
         ) : (
@@ -1124,6 +1198,7 @@ export default function PdfViewer({
                         else contLayer.current.delete(n)
                       }}
                     />
+                    {linkMarks(n)}
                   </div>
                 </div>
               )
