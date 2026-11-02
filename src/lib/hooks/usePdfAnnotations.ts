@@ -96,8 +96,20 @@ export function usePdfAnnotations(o: {
     setAnns(next)
   }
 
-  /** Save a highlight on page `on`, in that page's own 0..1 rects. */
-  const commitHighlight = async (rects: Rect[], on: number): Promise<string | null> => {
+  /**
+   * Save a highlight on page `on`, in that page's own 0..1 rects.
+   *
+   * `words` are the sentence the mark covers.  They are kept because a
+   * highlight that only remembers where it is cannot be read anywhere but on
+   * that one page: the sidebar has nothing to name it by, an export has
+   * nothing to quote, and if the PDF is ever lost the rectangle points at
+   * nothing.
+   */
+  const commitHighlight = async (
+    rects: Rect[],
+    on: number,
+    words?: string
+  ): Promise<string | null> => {
     if (!rects.length) return null
     const s = await o.sizeOf(on)
     const a: Annotation = {
@@ -107,6 +119,7 @@ export function usePdfAnnotations(o: {
       type: 'highlight',
       color: '#ffe066',
       rects,
+      ...(words ? { text: words } : {}),
       // keep the authoritative copy in PDF points so a cloud round trip does
       // not drift when the page is later rendered at another zoom level
       pos: s ? rects.map((r) => rectToPos(r, on, s)) : undefined,
@@ -155,11 +168,14 @@ export function usePdfAnnotations(o: {
           id: prev?.id ?? 'cloud-' + c.id,
           docId: o.docId,
           page: pos[0]?.page ?? prev?.page ?? 1,
-          type: c.type === 'sticky_note' ? 'note' : 'highlight',
-          color: prev?.color ?? '#ffe066',
-          rects: prev?.rects ?? [],
-          text: c.text,
-          note: prev?.note ?? c.text,
+        type: c.type === 'sticky_note' ? 'note' : 'highlight',
+        color: prev?.color ?? '#ffe066',
+        rects: prev?.rects ?? [],
+        // Mendeley keeps the rectangles and not the words, so its copy of a
+        // highlight made here has no text; taking it would throw away the
+        // only record of what was marked
+        text: prev?.text ?? c.text,
+        note: prev?.note ?? c.text,
           created: prev?.created ?? c.created ?? new Date().toISOString(),
           remoteId: c.id,
           pos

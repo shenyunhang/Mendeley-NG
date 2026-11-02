@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  Annotation,
   Doc,
   SavedSearch,
   SavedView,
@@ -54,7 +55,13 @@ import SetupGuide from './components/SetupGuide'
 import Splitter from './components/Splitter'
 import Toolbar from './components/Toolbar'
 import { extractIds } from './lib/pdfmeta'
-import { toBibtex, toEndnoteXml, toNotesMarkdown, toRis } from './lib/export'
+import {
+  toAnnotationsMarkdown,
+  toBibtex,
+  toEndnoteXml,
+  toNotesMarkdown,
+  toRis
+} from './lib/export'
 import { buildTree, byName } from './lib/tree'
 import { useConfig } from './lib/hooks/useConfig'
 import { useFullText } from './lib/hooks/useFullText'
@@ -226,6 +233,10 @@ export default function App() {
   /** Local notes, kept here only so the search box can look inside them.
    *  They are written by the details panel, which reports back after saving. */
   const [noteMap, setNoteMap] = useState<Record<string, string>>({})
+  /** Highlights and their notes, held only so the export menu can tell
+   *  whether there is anything to carry.  The reader writes them on its own,
+   *  so the export itself reads the store again instead of trusting this. */
+  const [anns, setAnns] = useState<Annotation[]>([])
   const searchRef = useRef<HTMLInputElement>(null)
   // The two cards that hang off the bar are placed against these, not against
   // their own parents: the bar may scroll sideways, and a box that scrolls on
@@ -243,6 +254,7 @@ export default function App() {
 
   useEffect(() => {
     window.api.loadNotes().then((n) => setNoteMap(n ?? {})).catch(() => {})
+    window.api.loadAnnotations().then((a) => setAnns(a ?? [])).catch(() => {})
     const offUpd = window.api.onUpdateState(setUpd)
     return () => {
       offUpd()
@@ -1362,8 +1374,11 @@ export default function App() {
    * is opened rather than tracking it: the reader writes annotations on its
    * own, and a cached copy would quietly hide anything marked since.
    */
-  const openNotes = async () =>
-    setView({ kind: 'annotations', anns: await window.api.loadAnnotations() })
+  const openNotes = async () => {
+    const all = await window.api.loadAnnotations()
+    setAnns(all)
+    setView({ kind: 'annotations', anns: all })
+  }
 
   const deleteAnnotation = async (id: string) => {
     const all = await window.api.loadAnnotations()
@@ -1381,6 +1396,7 @@ export default function App() {
     if (!go) return
     const next = all.filter((a) => a.id !== id)
     await window.api.saveAnnotations(next)
+    setAnns(next)
     setView((v) => (v.kind === 'annotations' ? { ...v, anns: next } : v))
     // the cloud copy is deleted after the local one is safely written, and a
     // failure there leaves a stray cloud highlight rather than a lost local one
@@ -1621,6 +1637,45 @@ export default function App() {
   }, [target, noteMap])
 
   /**
+   * The highlights, separately from the bibliography and from the notes.
+   *
+   * Mendeley keeps the rectangles of a highlight but not the words under
+   * them, and the words are the part that cannot be fetched again: the shape
+   * of a mark on page seven is worthless on its own.  So this reads the store
+   * again at the moment of exporting rather than trusting the copy held for
+   * the menu — the reader writes annotations without passing them back.
+   *
+   * Annotations whose paper has since gone from the library come along:
+   * nothing else can reach them, and they are the most exposed thing here.
+   */
+  const exportAnnotations = async () => {
+    const all = await window.api.loadAnnotations()
+    const pickedIds = new Set(target.map((d) => d.id))
+    const allIds = new Set(docs.map((d) => d.id))
+    const picked = all.filter((a) => pickedIds.has(a.docId) || !allIds.has(a.docId))
+    if (!picked.length) return
+    const r = await window.api.saveText(
+      'annotations.md',
+      toAnnotationsMarkdown(target, picked, docs),
+      '标注（Markdown）',
+      'md'
+    )
+    if (r.error) setErr(`导出失败：${r.error}`)
+    else if (r.path) {
+      setBatchMsg(`已导出 ${picked.length} 条标注到 ${r.path}`)
+      setTimeout(() => setBatchMsg(null), 6000)
+    }
+  }
+  /** Whether there is anything to export.  Same shape as the notes: this is
+   *  recomputed on every keystroke, so the empty case — most libraries —
+   *  answers without walking the list. */
+  const canExportAnnotations = useMemo(() => {
+    if (!anns.length) return false
+    const have = new Set(anns.map((a) => a.docId))
+    return target.some((d) => have.has(d.id))
+  }, [target, anns])
+
+  /**
    * Put a formatted citation on the clipboard.  This is the single most
    * frequent thing a reference manager is for — pick a paper, paste it into
    * the manuscript — and it used to need a whole-file export and a search.
@@ -1735,6 +1790,8 @@ export default function App() {
         onExportEndnote={exportEndnote}
         onExportNotes={() => void exportNotes()}
         canExportNotes={canExportNotes}
+        onExportAnnotations={() => void exportAnnotations()}
+        canExportAnnotations={canExportAnnotations}
         docs={docs}
         filtered={filtered}
         target={target}

@@ -1,4 +1,4 @@
-import type { Doc } from '../../shared/types'
+import type { Annotation, Doc } from '../../shared/types'
 
 /** EndNote ref-type name and its numeric code, which the desktop importer
  *  still relies on.  The names are the ones import.ts maps back from, so a
@@ -109,6 +109,97 @@ export function toNotesMarkdown(docs: Doc[], notes: Record<string, string>): str
     return lines.join('\n')
   })
   return head.join('\n') + '\n\n' + body.join('\n\n---\n\n')
+}
+
+/**
+ * The annotations, as Markdown.
+ *
+ * A highlight is the second kind of data here with no other copy.  Mendeley
+ * keeps the rectangles, so the marks themselves survive a resync, but it does
+ * not keep the words underneath them — and the words are what the reader
+ * marked them for.  The three bibliography exporters take `Doc[]` and never
+ * see an annotation, so until now they could not leave the app either.
+ *
+ * Markdown, for the same reason as the notes: nobody imports highlights.  They
+ * get read, pasted into a manuscript, or grepped.  Page order rather than the
+ * order they were made in, because this file gets read rather than audited.
+ *
+ * `library`, when given, is the whole library rather than the selection.  It
+ * is what tells "a paper outside the current filter" — which is simply not
+ * exported — from "a paper that is no longer in the library at all", whose
+ * annotations have no other way out and which therefore come last, together.
+ */
+export function toAnnotationsMarkdown(
+  docs: Doc[],
+  anns: Annotation[],
+  library?: Doc[]
+): string {
+  const known = new Set((library ?? docs).map((d) => d.id))
+  const byDoc = new Map<string, Annotation[]>()
+  const lost: Annotation[] = []
+  for (const a of anns) {
+    if (!known.has(a.docId)) {
+      lost.push(a)
+      continue
+    }
+    const g = byDoc.get(a.docId)
+    if (g) g.push(a)
+    else byDoc.set(a.docId, [a])
+  }
+
+  /** Reading order: page, then down the page, remembering PDF y counts up. */
+  const inOrder = (list: Annotation[]) =>
+    [...list].sort((x, y) => {
+      const px = x.pos?.[0]?.page ?? x.page ?? 0
+      const py = y.pos?.[0]?.page ?? y.page ?? 0
+      if (px !== py) return px - py
+      const yx = x.pos?.[0]?.y ?? 0
+      const yy = y.pos?.[0]?.y ?? 0
+      if (yx !== yy) return yy - yx
+      return String(x.created ?? '').localeCompare(String(y.created ?? ''))
+    })
+
+  const section = (title: string, d: Doc | undefined, list: Annotation[]): string => {
+    const lines = [`## ${title}`, '']
+    if (d) {
+      const meta: [string, string | undefined | null][] = [
+        ['作者', authorsLine(d)],
+        ['年份', d.year != null ? String(d.year) : ''],
+        ['发表处', d.source],
+        ['citation key', d.citation_key],
+        ['DOI', d.identifiers?.doi ?? d.doi]
+      ]
+      for (const [k, v] of meta) if (v) lines.push(`- ${k}：${v}`)
+      lines.push('')
+    }
+    for (const a of inOrder(list)) {
+      const on = a.pos?.[0]?.page ?? a.page ?? 0
+      const said = (a.text ?? '').replace(/\s+/g, ' ').trim()
+      // Mendeley sends a note back as the only text it has, so for anything
+      // that came from the cloud the two are the same sentence; printing it
+      // twice would make every cloud highlight read twice
+      const mine = (a.note ?? '').trim()
+      const own = mine && mine !== said ? mine : ''
+      const tags = [a.type === 'note' ? '笔记' : '', own].filter(Boolean)
+      lines.push('> ' + (said || own || '（没有记录到文字）'))
+      lines.push('>')
+      lines.push(`> — p${on}${tags.length ? ' · ' + tags.join(' · ') : ''}`)
+      lines.push('')
+    }
+    return lines.join('\n')
+  }
+
+  const parts = docs
+    .filter((d) => byDoc.has(d.id))
+    .map((d) => section(d.title ?? '(无标题)', d, byDoc.get(d.id) ?? []))
+  if (lost.length) parts.push(section('（已不在库中）', undefined, lost))
+
+  const head = [
+    '# 标注导出',
+    '',
+    `${anns.length} 条 · ${parts.length} 篇 · ${new Date().toISOString().slice(0, 10)}`
+  ]
+  return head.join('\n') + '\n\n' + parts.join('\n---\n\n')
 }
 
 export function toRis(docs: Doc[]): string {

@@ -30,7 +30,7 @@ import {
   type ZoomMode
 } from '../lib/pdfgeom'
 import { PrefetchCache } from '../lib/pdfcache'
-import { selectionRects } from '../lib/pdfsel'
+import { selectionRects, textInRect } from '../lib/pdfsel'
 import { drawTextLayer } from '../lib/pdftext'
 import type { LinkBox } from '../lib/pdflinks'
 import { useContinuousPages } from '../lib/hooks/useContinuousPages'
@@ -658,6 +658,10 @@ export default function PdfViewer({
           .map((n) => [n, contLayer.current.get(n)])
       : [[page, layerRef.current]]
 
+  /** The text layer of one page, which is where a mark's words are read from. */
+  const layerOf = (n: number): HTMLElement | null =>
+    continuous ? (contLayer.current.get(n) ?? null) : n === page ? layerRef.current : null
+
   useEffect(() => {
     render().catch((e) => {
       // cancelling is a normal part of switching zoom, not a failure
@@ -668,12 +672,17 @@ export default function PdfViewer({
 
   /** Which page a mouse event landed on, and the box to measure it against.
    *  In continuous mode the column has one such box per page, so the event
-   *  itself is the only reliable way to tell them apart. */
+   *  itself is the only reliable way to tell them apart.  The box is the page
+   *  itself, not the slot it sits in: the slot is a page height plus the gap
+   *  between pages, and the text layer a drag is read against is the page. */
   const pageBox = (e: React.MouseEvent): { page: number; box: DOMRect } => {
     const host = (e.currentTarget as HTMLElement).closest('[data-page]')
     if (host) {
       const n = Number((host as HTMLElement).dataset.page)
-      if (Number.isFinite(n)) return { page: n, box: host.getBoundingClientRect() }
+      const inner = host.querySelector('.pg-box')
+      if (Number.isFinite(n) && inner) {
+        return { page: n, box: inner.getBoundingClientRect() }
+      }
     }
     return { page, box: wrapRef.current!.getBoundingClientRect() }
   }
@@ -708,10 +717,14 @@ export default function PdfViewer({
     // a real text selection wins: it follows the words rather than a box
     const picked = selectionRects(selLayers(), page)
     if (picked.rects.length) {
-      setJustMade(await commitHighlight(picked.rects, picked.page))
+      setJustMade(await commitHighlight(picked.rects, picked.page, picked.text))
       window.getSelection()?.removeAllRanges()
     } else if (drag && drag.w > 0.01 && drag.h > 0.005) {
-      await commitHighlight([drag], dragPage.current ?? page)
+      // a band drawn over the page: no selection to read, so the words are
+      // taken from the text layer underneath it
+      const on = dragPage.current ?? page
+      const layer = layerOf(on)
+      await commitHighlight([drag], on, layer ? textInRect(layer, drag) : '')
     } else {
       setSel(null)
     }

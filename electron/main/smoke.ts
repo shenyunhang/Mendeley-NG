@@ -12,12 +12,12 @@ import {
   saveAnnotations,
   saveConfig
 } from './store'
-import { PROJECT_URL, type Doc } from '../../shared/types'
+import { PROJECT_URL, type Annotation, type Doc } from '../../shared/types'
 // This one lives with the renderer, but it is a pure function with no DOM in
 // it, and the note it carries is the only data in the app that exists nowhere
 // else — a claim about being able to take your library with you is worth one
 // import across the boundary to have checked on every run.
-import { toNotesMarkdown } from '../../src/lib/export'
+import { toAnnotationsMarkdown, toNotesMarkdown } from '../../src/lib/export'
 import { sync } from './library'
 import {
   ftAdd,
@@ -1841,6 +1841,118 @@ export async function runSmoke() {
     notesMd.slice(0, 140)
   )
 
+  // The other half of the same hole.  Mendeley keeps a highlight's rectangles
+  // but not the words underneath them, and the words are the part worth
+  // keeping; the three bibliography exporters take `Doc[]` and never see an
+  // annotation at all.  Again the function is handed data of its own rather
+  // than writing into the reader's library.
+  const annsMd = toAnnotationsMarkdown(
+    [
+      { id: 'a1', title: 'A Paper With Marks', year: 2024, citation_key: 'marks2024' },
+      { id: 'a2', title: 'A Paper Without Marks', year: 2023 }
+    ] as Doc[],
+    [
+      {
+        id: 'x1',
+        docId: 'a1',
+        page: 7,
+        type: 'highlight',
+        color: '#ffe066',
+        rects: [],
+        text: 'the sentence that mattered',
+        pos: [{ page: 7, x: 1, y: 2, w: 3, h: 4 }],
+        created: '2026-01-02T00:00:00.000Z'
+      },
+      {
+        id: 'x2',
+        docId: 'a1',
+        page: 3,
+        type: 'highlight',
+        color: '#ffe066',
+        rects: [],
+        text: 'an earlier one',
+        note: 'my comment',
+        created: '2026-01-01T00:00:00.000Z'
+      },
+      {
+        // the cloud knows one text field, so a note it sends back arrives as
+        // the quoted words under a second name
+        id: 'x3',
+        docId: 'a1',
+        page: 4,
+        type: 'note',
+        color: '#ffe066',
+        rects: [],
+        text: 'sticky words',
+        note: 'sticky words',
+        created: '2026-01-03T00:00:00.000Z'
+      },
+      {
+        id: 'x4',
+        docId: 'gone',
+        page: 2,
+        type: 'highlight',
+        color: '#ffe066',
+        rects: [],
+        text: 'orphan words',
+        created: '2026-01-04T00:00:00.000Z'
+      }
+    ] as Annotation[]
+  )
+  log('annotations export', annsMd)
+  expect(
+    'a highlight leaves with the words it covers',
+    /the sentence that mattered/.test(annsMd) && /p7/.test(annsMd),
+    annsMd.slice(0, 160)
+  )
+  expect(
+    'and they come out in reading order, not in the order they were made',
+    annsMd.indexOf('an earlier one') < annsMd.indexOf('the sentence that mattered') &&
+      annsMd.indexOf('an earlier one') < annsMd.indexOf('sticky words'),
+    annsMd.slice(0, 400)
+  )
+  expect(
+    'a note the cloud sent back as the text is not printed twice',
+    annsMd.split('sticky words').length - 1 === 1,
+    annsMd.slice(0, 400)
+  )
+  expect(
+    'a paper with nothing marked on it is left out',
+    !/A Paper Without Marks/.test(annsMd),
+    annsMd.slice(0, 160)
+  )
+  expect(
+    'and a mark whose paper has gone from the library still gets out',
+    /orphan words/.test(annsMd) && /已不在库中/.test(annsMd),
+    annsMd.slice(0, 400)
+  )
+
+  // Both ways out have to be *offered*, not merely to exist as functions.  A
+  // menu item that appears only once there is already something to carry is
+  // no comfort to somebody deciding whether to write in here at all — and a
+  // greyed-out one that does not say why looks like a broken button.
+  log('open 导出', await openMenu('导出'))
+  await new Promise((r) => setTimeout(r, 300))
+  const exportItems = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify([...document.querySelectorAll(".menu-pop .menu-item")]'
+        + '.map(x=>({t:x.textContent.trim(),off:x.disabled,why:x.title})))'
+    )
+  ) as { t: string; off: boolean; why: string }[]
+  log('export menu', exportItems)
+  expect(
+    'both kinds of local reading are offered a way out',
+    exportItems.some((i) => /笔记/.test(i.t)) && exportItems.some((i) => /标注/.test(i.t)),
+    exportItems
+  )
+  expect(
+    'and whichever is greyed out says why',
+    exportItems.filter((i) => i.off).every((i) => (i.why ?? '').length > 0),
+    exportItems
+  )
+  log('close 导出', await openMenu('导出'))
+  await new Promise((r) => setTimeout(r, 200))
+
   const shot = async (name: string) => {
     const p = path.join(app.getPath('temp'), 'mendeley-ng-' + name + '.png')
     const img = await w.webContents.capturePage()
@@ -2770,7 +2882,7 @@ export async function runSmoke() {
       '(async()=>{const a=await window.api.loadAnnotations();const before=window.__before;'
       + 'const added=a.filter(x=>!before.some(y=>y.id===x.id));'
       + 'return JSON.stringify({added:added.length,rects:added[0]?added[0].rects:null,'
-      + 'pos:added[0]?added[0].pos:null})})()'
+      + 'pos:added[0]?added[0].pos:null,text:added[0]?added[0].text:null})})()'
     )
   const mouseUpOnPage = () =>
     w.webContents.executeJavaScript(
@@ -2805,6 +2917,18 @@ export async function runSmoke() {
   await new Promise((r) => setTimeout(r, 1500))
   const made = JSON.parse(await addSinceBefore())
   log('selection highlight', 'before', beforeCount, made)
+  // A highlight that only remembers where it is cannot be read anywhere but
+  // on that one page: the sidebar has nothing to name it by, an export has
+  // nothing to quote, and if the PDF is ever lost the rectangle points at
+  // nothing.  Only asked when a mark was really made — this is a real paper,
+  // and a page with no text layer has no words to remember.
+  if (made.added > 0) {
+    expect(
+      'a highlight remembers the words it covers',
+      String(made.text ?? '').trim().length > 0,
+      made
+    )
+  }
 
   // A highlight made while the mode was on still needs a way back: the mode
   // can have been left on, and picking words is what somebody does to copy

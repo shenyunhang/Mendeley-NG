@@ -66,6 +66,10 @@ interface Props {
    *  format carries them, and Mendeley has nowhere to keep a copy. */
   onExportNotes: () => void
   canExportNotes: boolean
+  /** The same for highlights and their notes, which live in their own store
+   *  and are the other half of what cannot be fetched again. */
+  onExportAnnotations: () => void
+  canExportAnnotations: boolean
 
   /**
    * Reading is one of the two things the program is for, so it has a button
@@ -245,7 +249,7 @@ export default function Toolbar(p: Props) {
       </button>
       <MenuButton
         label="导出"
-        title="把当前筛选结果写成 BibTeX / RIS / EndNote XML，或把写在上面的笔记导出成 Markdown"
+        title="把当前筛选结果写成 BibTeX / RIS / EndNote XML，或把写在这里的笔记与标注导出成 Markdown"
         disabled={!p.filtered.length}
         items={[
           { label: 'BibTeX', run: p.onExportBib },
@@ -262,6 +266,14 @@ export default function Toolbar(p: Props) {
               ? '笔记只存在本机（Mendeley 没有 /notes 接口），这是把它们带走的方式'
               : '当前这些文献没有写笔记',
             run: p.onExportNotes
+          },
+          {
+            label: '标注（Markdown）',
+            disabled: !p.canExportAnnotations,
+            title: p.canExportAnnotations
+              ? '高亮与批注按篇分组导出，带页码和被划的那句话'
+              : '当前这些文献没有任何标注',
+            run: p.onExportAnnotations
           }
         ]}
       />
