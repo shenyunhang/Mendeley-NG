@@ -169,7 +169,8 @@ export const COLUMNS: ColumnDef[] = [
     label: '',
     track: '26px',
     min: 26,
-    text: (d) => (d.localPdf ? '本地 PDF' : d.file_attached ? '云端有文件' : '无 PDF'),
+    text: (d) =>
+      d.localPdf ? '本地 PDF' : d.file_attached ? '云端有 PDF，本地还没有' : '无 PDF',
     kind: 'pdf'
   },
   {

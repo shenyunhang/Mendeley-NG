@@ -925,6 +925,63 @@ export async function runSmoke() {
     authGuard
   )
 
+  // Whether a row has a PDF used to be a mark that was never drawn.  The only
+  // rule that gave it a size was `td .pdf-dot`, written when a row was a table
+  // cell; rows have been a CSS grid of divs for several releases, so the
+  // selector stopped matching and left the span with no width and no height.
+  // The column was in the layout and the mark was not on screen.  So the first
+  // question is not what colour it is but whether it has a size at all.
+  const pdfMarks = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{'
+      + 'const p=document.createElement("span");document.body.appendChild(p);'
+      + 'const of=(c)=>{p.className=c;const s=getComputedStyle(p);'
+      + 'return [s.width,s.height,s.backgroundColor,s.borderTopWidth,s.opacity].join("|")};'
+      + 'const three={local:of("pdf-dot"),cloud:of("pdf-dot cloud"),'
+      + 'none:of("pdf-dot no-pdf")};'
+      + 'p.remove();'
+      + 'const rows=[...document.querySelectorAll("div.row")].map(r=>{'
+      + 'const m=r.querySelector(".pdf-dot");'
+      + 'return {id:r.dataset.id,w:m?Math.round(m.getBoundingClientRect().width):0,'
+      + 'cls:!m?null:m.classList.contains("no-pdf")?"no-pdf":m.classList.contains("cloud")'
+      + '?"cloud":"local"}});'
+      + 'return JSON.stringify({three,rows})})()'
+    )
+  )
+  log('pdf marks', { three: pdfMarks.three, rows: pdfMarks.rows.length })
+  expect(
+    'every row carries a mark, and the mark has a size',
+    pdfMarks.rows.length > 0 && pdfMarks.rows.every((r: { w: number }) => r.w >= 6),
+    pdfMarks.rows.slice(0, 4)
+  )
+
+  const threeLooks = new Set(Object.values(pdfMarks.three) as string[])
+  expect(
+    'local, cloud-only and none are three different marks',
+    threeLooks.size === 3 &&
+      !(Object.values(pdfMarks.three) as string[]).some((s) => s.startsWith('0px')),
+    pdfMarks.three
+  )
+
+  // Which mark each row gets is the document's to decide, so it is checked
+  // against the library rather than asserted in the abstract: a mark that is
+  // drawn but always says "here" would pass the two above.
+  const docById = new Map((loadLibrary()?.docs ?? []).map((d) => [d.id, d]))
+  const mismatched = pdfMarks.rows.filter((r: { id?: string; cls?: string | null }) => {
+    const d = r.id ? docById.get(r.id) : undefined
+    if (!d) return false
+    const want = d.localPdf ? 'local' : d.file_attached ? 'cloud' : 'no-pdf'
+    return r.cls !== want
+  })
+  const markChecked = pdfMarks.rows.filter(
+    (r: { id?: string }) => r.id && docById.has(r.id)
+  ).length
+  expect(
+    'the mark on each row is the one its document asks for',
+    markChecked >= 5 && mismatched.length === 0,
+    { checked: markChecked, wrong: mismatched.slice(0, 3) }
+  )
+
   // An empty table has to say why.  The usual case is a term that is in the
   // paper but not in its title or abstract, and the answer is in the same
   // toolbar — which is exactly the thing nobody was told.

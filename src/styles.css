@@ -598,51 +598,42 @@ body.resizing {
   border-collapse: collapse;
   table-layout: fixed;
 }
-.tbl th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--bg-2);
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--fg-dim);
-  padding: 6px 8px;
-  cursor: pointer;
-  user-select: none;
-}
-.tbl th.sorted {
-  color: var(--accent);
-}
-.tbl td {
-  padding: 0 8px;
-  height: var(--row-h);
-  font-size: 0.867rem;
-  border-bottom: 1px solid var(--row-line);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-tr.row {
-  cursor: pointer;
-}
-tr.row:hover td {
-  background: var(--hover);
-}
-tr.row.sel td {
-  background: var(--accent-dim);
-}
-td .pdf-dot {
+/* Whether a row carries a PDF, and where that PDF is.
+ *
+ * Three answers, not two.  "There is one on this machine" and "there is one
+ * in the cloud" are the same thing to a reader only until they try to open
+ * one, and the old mark painted both green.
+ *
+ * These were written as `td .pdf-dot`, back when a row was a table cell.  Rows
+ * became a CSS grid of divs several releases ago and the selectors quietly
+ * stopped matching, which left the mark with neither width nor height: the
+ * column was in the layout and the dot was not on screen at all. */
+.pdf-dot {
   display: inline-block;
+  border-radius: 50%;
+  vertical-align: middle;
+  /* the unmarked case: a full dot means the PDF is on this machine and opens
+     when the row does */
+  width: 9px;
+  height: 9px;
+  background: var(--ok);
+}
+/* in the cloud only: the same dot, hollow — it exists, it is not here yet.
+   `no-pdf` below is left as the name for the third case rather than renamed
+   along with it, because that name is what the smoke run asks for by. */
+.pdf-dot.cloud {
+  box-sizing: border-box;
+  background: transparent;
+  border: 1.5px solid var(--ok);
+  opacity: 0.8;
+}
+/* nothing at all: smaller and barely there, so the eye skips the column
+   instead of stopping on a mark whose whole meaning is "no" */
+.pdf-dot.no-pdf {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
-  background: var(--ok);
-  margin-right: 6px;
-}
-td .no-pdf {
   background: var(--muted);
+  opacity: 0.45;
 }
 
 /* ---------- details ---------- */

@@ -305,6 +305,12 @@ export default function DocTable({
                   className={
                     'row' + (selectedId === d.id ? ' sel' : '') + (picked ? ' multi' : '')
                   }
+                  // which document this row is.  The row is only ever reachable
+                  // by index in the DOM, and a virtualised list means the index
+                  // means nothing: what is on screen is a window over five
+                  // thousand rows, so anything that wants to check a row
+                  // against the document it came from has to be told which one.
+                  data-id={d.id}
                   draggable
                   onDragStart={(e) => {
                     // What travels is the selection, not this row: dragging one
@@ -366,11 +372,16 @@ export default function DocTable({
                       )
                     }
                     if (c.kind === 'pdf') {
+                      // Three answers, not two.  "There is a PDF somewhere"
+                      // and "there is a PDF on this machine" are different
+                      // things to somebody about to read one, and the old dot
+                      // painted both the same green — the reader had to open
+                      // the row to find out which it was.
                       return (
                         <div key={c.key} style={{ paddingLeft: 8 }}>
                           <span
                             className={
-                              'pdf-dot' + (d.localPdf || d.file_attached ? '' : ' no-pdf')
+                              'pdf-dot' + (d.localPdf ? '' : d.file_attached ? ' cloud' : ' no-pdf')
                             }
                             title={c.text(d)}
                           />
