@@ -27,29 +27,32 @@ import SortMenu from './components/SortMenu'
 import MenuButton from './components/MenuButton'
 import FullTextView from './components/FullTextView'
 import {
-  DEFAULT_SORT,
   SORT_DEFAULT_DIR,
   TITLE_ORDER,
-  migrateCols,
   normaliseCols,
-  normaliseSort,
   sortValue,
   type ColKey,
   type SortKey
 } from './lib/columns'
+import {
+  DEFAULT_LEFT_W,
+  DEFAULT_RIGHT_PCT,
+  LEFT_MAX,
+  LEFT_MIN,
+  MID_MIN,
+  RIGHT_MAX,
+  RIGHT_MIN,
+  clampLeft,
+  clampNum,
+  clampRight
+} from './lib/panes'
 import {
   FILTER_LABEL,
   FILTER_TEST,
   LIST_FILTERS,
   type ListFilter
 } from './lib/filters'
-import {
-  CITE_STYLES,
-  DEFAULT_CITE_STYLE,
-  formatCitation,
-  isCiteStyle,
-  type CiteStyle
-} from './lib/cite'
+import { CITE_STYLES, formatCitation, isCiteStyle, type CiteStyle } from './lib/cite'
 import DetailsPanel from './components/DetailsPanel'
 import PdfViewer from './components/PdfViewer'
 import RowMenu, { type RowMenuItem } from './components/RowMenu'
@@ -61,42 +64,13 @@ import Splitter from './components/Splitter'
 import { extractIds } from './lib/pdfmeta'
 import { toBibtex, toEndnoteXml, toRis } from './lib/export'
 import { buildTree, byName } from './lib/tree'
+import { useConfig } from './lib/hooks/useConfig'
+import { useFullText } from './lib/hooks/useFullText'
+import { useUndo } from './lib/hooks/useUndo'
+import { useLibrary } from './lib/hooks/useLibrary'
 import { findDuplicates, type DupeGroup } from './lib/dupes'
 import { parseAny, type Entry } from './lib/import'
 
-
-/**
- * One step of undo.  `run` is a closure rather than a description of the
- * change, because the operations being undone are all cloud calls whose
- * inverse is another cloud call; there is no shared state to diff against.
- */
-interface UndoEntry {
-  id: string
-  label: string
-  run: () => Promise<void>
-}
-
-/**
- * Pane widths, and the room every pane is guaranteed.
- *
- * The list keeps at least `MID_MIN`: a table squeezed to a couple of columns
- * is worse than a reader that is a little narrower, and without a floor a
- * drag to the far right would leave the middle pane with nothing.
- */
-const DEFAULT_LEFT_W = 240
-const DEFAULT_RIGHT_PCT = 46
-const LEFT_MIN = 140
-const LEFT_MAX = 520
-const RIGHT_MIN = 22
-const RIGHT_MAX = 70
-const MID_MIN = 260
-
-const clampNum = (v: number, lo: number, hi: number) =>
-  Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : lo
-
-const clampLeft = (v: number) => Math.round(clampNum(v, LEFT_MIN, LEFT_MAX))
-const clampRight = (v: number) =>
-  Math.round(clampNum(v, RIGHT_MIN, RIGHT_MAX) * 10) / 10
 
 /**
  * Toolbar wording for each updater phase; null means "say nothing".
@@ -156,8 +130,6 @@ function hay(d: Doc, note?: string): string {
 }
 
 export default function App() {
-  const [lib, setLib] = useState<Library | null>(null)
-  const [folders, setFolders] = useState<Folder[]>([])
   const [folderId, setFolderId] = useState<string | null>(null)
   /**
    * F2 asks for the rename box on the selected folder.  The counter is what
@@ -168,16 +140,58 @@ export default function App() {
   const [renameReq, setRenameReq] = useState<{ id: string; n: number } | null>(null)
   const [query, setQuery] = useState('')
   const [selId, setSelId] = useState<string | null>(null)
-  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(DEFAULT_SORT)
-  const [status, setStatus] = useState<SyncStatus | null>(null)
-  const [busy, setBusy] = useState(false)
   const [rightTab, setRightTab] = useState<'pdf' | 'details'>('details')
   const [err, setErr] = useState<string | null>(null)
   const [upd, setUpd] = useState<UpdateState | null>(null)
   const [trash, setTrash] = useState<Doc[] | null>(null)
   const [dupes, setDupes] = useState<DupeGroup[] | null>(null)
-  const [dupeIgnores, setDupeIgnores] = useState<string[][]>([])
-  const [syncOnStart, setSyncOnStart] = useState(true)
+  // first, because the library decides whether to start a sync on from
+  // `syncOnStart` and cannot be asked twice
+  const {
+    pdfDir,
+    setPdfDir,
+    saved,
+    setSaved,
+    views,
+    setViews,
+    cols,
+    setCols,
+    sort,
+    setSort,
+    colWidths,
+    setColWidths,
+    nameTemplate,
+    setNameTemplate,
+    citeStyle,
+    setCiteStyle,
+    dupeIgnores,
+    setDupeIgnores,
+    syncOnStart,
+    setSyncOnStart,
+    ftPages,
+    setFtPages,
+    leftW,
+    setLeftW,
+    rightPct,
+    setRightPct,
+    theme,
+    setTheme,
+    fontSize,
+    setFontSize,
+    bumpFont
+  } = useConfig()
+  const {
+    lib,
+    setLib,
+    folders,
+    setFolders,
+    status,
+    busy,
+    hasToken,
+    version,
+    sync: doSync,
+    markToken
+  } = useLibrary(syncOnStart, setErr)
   const [importing, setImporting] = useState<Entry[] | null>(null)
   const [adding, setAdding] = useState(false)
   const [filters, setFilters] = useState<ListFilter[]>([])
@@ -186,7 +200,6 @@ export default function App() {
     setFilters((f) => (f.includes(k) ? f.filter((x) => x !== k) : [...f, k]))
   const [multi, setMulti] = useState<string[]>([])
   const lastIdx = useRef<number | null>(null)
-  const [saved, setSaved] = useState<SavedSearch[]>([])
   const [activeSearch, setActiveSearch] = useState<string | null>(null)
   const [ask, setAsk] = useState<{
     title: string
@@ -214,41 +227,28 @@ export default function App() {
       new Promise<boolean>((resolve) => setConfirm({ ...req, resolve })),
     []
   )
-  const [pdfDir, setPdfDir] = useState('')
   /**
    * Whether a token has been found yet, or `null` while that is still being
    * asked.  Null is not the same as false: answering "no token" before the
    * question has come back would flash the guide at everyone on startup.
    */
-  const [hasToken, setHasToken] = useState<boolean | null>(null)
   const [setupDone, setSetupDone] = useState(false)
-  const [fontSize, setFontSize] = useState(15)
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
-  const [cols, setCols] = useState<ColKey[]>(() => migrateCols(undefined))
-  // widths the reader has dragged to; empty until something is dragged, so a
-  // column that was never touched keeps the track its definition gives it
-  const [colWidths, setColWidths] = useState<Record<string, number>>({})
-  const [views, setViews] = useState<SavedView[]>([])
   const [showCols, setShowCols] = useState(false)
   const [showSort, setShowSort] = useState(false)
-  const [nameTemplate, setNameTemplate] = useState(DEFAULT_PDF_TEMPLATE)
-  const [citeStyle, setCiteStyle] = useState<CiteStyle>(DEFAULT_CITE_STYLE)
-  const [ftMode, setFtMode] = useState(false)
-  const [ftQuery, setFtQuery] = useState('')
-  const [ftHits, setFtHits] = useState<FtHit[]>([])
-  const [ftStat, setFtStat] = useState<FtStatus | null>(null)
-  /**
-   * Bumped whenever the corpus finishes changing, so that a search which came
-   * back empty gets asked again.
-   *
-   * A search is only run when the words change, so building the index after
-   * searching leaves the old answer on the screen: "正文里没找到" stays there
-   * over a library that has since been read in full, and the reader is left
-   * to conclude that the word is not in their papers.  The words did not
-   * change, so only the index finishing can be what prompts the second look.
-   */
-  const [ftEpoch, setFtEpoch] = useState(0)
-  const ftWasBuilding = useRef(false)
+  const {
+    ftMode,
+    setFtMode,
+    ftQuery,
+    setFtQuery,
+    ftHits,
+    setFtHits,
+    ftStat,
+    setFtStat,
+    ftEpoch,
+    build: buildIndex,
+    cancel: cancelIndex,
+    clear: clearIndex
+  } = useFullText()
   /** Page to open the reader at.  The nonce re-triggers a jump to the same
    *  page on the same document, which a bare number could not. */
   const [jump, setJump] = useState<{ page: number; nonce: number } | null>(null)
@@ -260,17 +260,7 @@ export default function App() {
   const [allAnns, setAllAnns] = useState<Annotation[] | null>(null)
   const [batchEdit, setBatchEdit] = useState(false)
   const [settings, setSettings] = useState(false)
-  const [version, setVersion] = useState('')
-  const [ftPages, setFtPages] = useState(DEFAULT_FT_PAGES)
-  /**
-   * Pane widths.  The folder tree is a fixed width, because a tree does not
-   * get wider when the window does; the reader is a share of the window,
-   * because that is exactly what it should follow.  Both are remembered.
-   */
-  const [leftW, setLeftW] = useState(DEFAULT_LEFT_W)
-  const [rightPct, setRightPct] = useState(DEFAULT_RIGHT_PCT)
   const bodyRef = useRef<HTMLDivElement>(null)
-  const [undo, setUndo] = useState<UndoEntry[]>([])
   /** Local notes, kept here only so the search box can look inside them.
    *  They are written by the details panel, which reports back after saving. */
   const [noteMap, setNoteMap] = useState<Record<string, string>>({})
@@ -283,7 +273,6 @@ export default function App() {
   const sortBtn = useRef<HTMLButtonElement>(null)
   // the keydown listener is installed once, so it has to reach the undo stack
   // through a ref rather than closing over a stale one
-  const undoRef = useRef<() => void>(() => {})
   /** Same reason, for the table navigation: the listener outlives every
    *  change to the filtered list it has to walk. */
   const navRef = useRef<{
@@ -294,73 +283,12 @@ export default function App() {
   }>({ step: () => {}, edge: () => {}, open: () => {}, del: () => {} })
 
   useEffect(() => {
-    window.api.loadLibrary().then((r) => {
-      if (r && !('error' in r) && r.docs) {
-        setLib(r)
-        setFolders(r.folders ?? [])
-      }
-    })
-    window.api.appVersion().then(setVersion).catch(() => {})
-    window.api.hasToken().then(setHasToken).catch(() => setHasToken(false))
-    window.api.getConfig().then((c) => {
-      setPdfDir(c.pdfDir)
-      setSaved(c.savedSearches ?? [])
-      setViews(c.views ?? [])
-      setCols(migrateCols(c.cols))
-      // how the reader left the list is part of how they read it; going back
-      // to newest-first on every start undid the one press that matters most
-      // right after opening the app
-      setSort(normaliseSort(c.sort))
-      if (c.colWidths) setColWidths(c.colWidths)
-      if (c.pdfNameTemplate) setNameTemplate(c.pdfNameTemplate)
-      if (isCiteStyle(c.citeStyle)) setCiteStyle(c.citeStyle)
-      // entries with fewer than two papers are not a group and cannot have
-      // been one: the filter also throws away anything a hand edited into the
-      // file, which is better than carrying it into a comparison that would
-      // then never match
-      setDupeIgnores((c.dupeIgnores ?? []).filter((e) => Array.isArray(e) && e.length > 1))
-      // on unless it was switched off: a library that is only refreshed when
-      // somebody remembers to press the button is a library that is stale by
-      // whatever was done on the other machine
-      setSyncOnStart(c.syncOnStart !== false)
-      if (typeof c.ftPages === 'number' && c.ftPages > 0) setFtPages(c.ftPages)
-      if (typeof c.paneLeft === 'number') setLeftW(clampLeft(c.paneLeft))
-      if (typeof c.paneRight === 'number') setRightPct(clampRight(c.paneRight))
-      setTheme(c.theme === 'light' ? 'light' : 'dark')
-      if (c.fontSize) {
-        fontRef.current = c.fontSize
-        setFontSize(c.fontSize)
-      }
-    })
     window.api.loadNotes().then((n) => setNoteMap(n ?? {})).catch(() => {})
-    const off = window.api.onSyncStatus(setStatus)
     const offUpd = window.api.onUpdateState(setUpd)
-    // Progress arriving with `building` turned off is the run having ended;
-    // the edge, rather than every update, because a build reports progress
-    // once per paper and a search is not wanted a thousand times over.
-    const offFt = window.api.onFtProgress((s) => {
-      setFtStat(s)
-      if (ftWasBuilding.current && !s.building) setFtEpoch((e) => e + 1)
-      ftWasBuilding.current = !!s.building
-    })
     return () => {
-      off()
       offUpd()
-      offFt()
     }
   }, [])
-
-  // one knob scales the whole UI, because every size in styles.css is in rem
-  useEffect(() => {
-    document.documentElement.style.setProperty('--ui-fs', fontSize + 'px')
-  }, [fontSize])
-
-  // the palette is picked entirely by this attribute, including native
-  // scrollbars and form controls through color-scheme
-  useEffect(() => {
-    if (theme === 'light') document.documentElement.dataset.theme = 'light'
-    else delete document.documentElement.dataset.theme
-  }, [theme])
 
   // the point of the feature: no second click. once the installer is on disk we
   // quit and let it run, and it relaunches the app when it finishes
@@ -387,14 +315,6 @@ export default function App() {
         .catch(() => setUpd(null))
     }, 4000)
     return () => clearTimeout(t)
-  }, [])
-
-  const fontRef = useRef(15)
-  const bumpFont = useCallback((d: number) => {
-    const next = Math.min(24, Math.max(11, fontRef.current + d))
-    fontRef.current = next
-    setFontSize(next)
-    window.api.setConfig({ fontSize: next })
   }, [])
 
   useEffect(() => {
@@ -538,59 +458,6 @@ export default function App() {
     // the same reason.
   }, [bumpFont, settings, showCols, showFilters, showSort, folderId])
 
-  /** `full` re-pulls the whole library.  Incremental is the default because a
-   *  5.6k-document pull takes long enough to be annoying, but deletions are
-   *  only visible to a full one, which is why that stays one click away. */
-  const doSync = useCallback(async (full = false) => {
-    setBusy(true)
-    setErr(null)
-    const r = await window.api.sync(full)
-    if (r && 'error' in r) {
-      // the banner no longer says "sync failed" on every message, so the one
-      // that is about syncing has to say so itself
-      setErr('同步失败：' + r.error + '　（可能需要导入 token.json）')
-    } else if (r) {
-      setLib({ docs: r.docs, folders: r.folders, syncedAt: new Date().toISOString() })
-      setFolders(r.folders)
-    }
-    setBusy(false)
-  }, [])
-
-  /**
-   * One quiet pull at start-up.
-   *
-   * The library on disk is a cache of the cloud, and a cache refreshed only
-   * when somebody remembers to press 同步 is stale by exactly the work done
-   * on the other machine.  Incremental, because a full pull of five thousand
-   * papers is long enough to be noticed and nothing here needs it.
-   *
-   * Silent, and that is the whole design: a red banner on every launch that
-   * happened to be offline is worse than a list that is a few hours behind,
-   * and the reader never asked to be told.  Whoever wants to know can press
-   * the button, which is loud on purpose.
-   *
-   * It waits for the token question to be answered rather than assuming it —
-   * `sync` throws `NO_TOKEN` otherwise, and an error at start-up is the one
-   * kind of error that gets read.
-   */
-  const startedSync = useRef(false)
-  useEffect(() => {
-    if (!syncOnStart || hasToken !== true || startedSync.current) return
-    startedSync.current = true
-    window.api
-      .sync(false)
-      .then((r) => {
-        if (r && !('error' in r)) {
-          setLib({ docs: r.docs, folders: r.folders, syncedAt: new Date().toISOString() })
-          setFolders(r.folders)
-        }
-      })
-      .catch(() => {
-        /* a start-up pull that failed is not news: the cached library is
-           still on screen, and the button says when it last worked */
-      })
-  }, [syncOnStart, hasToken])
-
   const docs = lib?.docs ?? []
 
   /**
@@ -713,21 +580,6 @@ export default function App() {
   filteredRef.current = filtered
   const multiRef = useRef<string[]>([])
   multiRef.current = multi
-
-  // Full-text search runs in the main process against the whole corpus, so it
-  // is debounced: typing a word should not start one scan per keystroke.
-  useEffect(() => {
-    if (!ftMode) return
-    const q = ftQuery.trim()
-    if (q.length < 2) {
-      setFtHits([])
-      return
-    }
-    const t = setTimeout(() => {
-      window.api.ftSearch(q).then(setFtHits).catch(() => setFtHits([]))
-    }, 250)
-    return () => clearTimeout(t)
-  }, [ftMode, ftQuery, ftEpoch])
 
   /**
    * The row the right-hand pane is showing, which is not always a row the
@@ -1114,29 +966,7 @@ export default function App() {
 
   const [batchMsg, setBatchMsg] = useState<string | null>(null)
 
-  /** Most recent last, capped: an undo stack that grows without bound is a
-   *  memory leak dressed up as a feature. */
-  const pushUndo = (label: string, run: () => Promise<void>) => {
-    setUndo((s) =>
-      [...s, { id: 'u' + Date.now().toString(36), label, run }].slice(-20)
-    )
-  }
-
-  const doUndo = async () => {
-    const top = undo[undo.length - 1]
-    if (!top) return
-    // pop first, so a failure cannot leave the same step to be retried
-    // forever against a cloud that has already moved on
-    setUndo((s) => s.slice(0, -1))
-    try {
-      await top.run()
-    } catch (e) {
-      setErr('撤销失败：' + String(e))
-    }
-  }
-  undoRef.current = () => {
-    void doUndo()
-  }
+  const { undo, pushUndo, doUndo, undoRef } = useUndo(setErr)
   navRef.current = {
     step: stepSel,
     edge: (end) => selectOnly(end ? filtered.length - 1 : 0),
@@ -2247,14 +2077,7 @@ export default function App() {
                 })
                 if (!go) return
               }
-              // The answer to `ftBuild` is the status the run starts with, not
-              // the one it ends with, so the "was building" flag is set from
-              // here as well as from the progress below: a run short enough
-              // never to report progress still has to end the search's wait.
-              window.api.ftBuild(rebuild).then((s) => {
-                setFtStat(s)
-                ftWasBuilding.current = !!s.building
-              })
+              buildIndex(rebuild)
             }}
             onClear={async () => {
               const go = await askConfirm({
@@ -2263,14 +2086,9 @@ export default function App() {
                 ok: '删除索引'
               })
               if (!go) return
-              // the results go too: they are hits into text that is no longer
-              // there, and leaving them up reads as a search that worked
-              window.api.ftClear().then((s) => {
-                setFtStat(s)
-                setFtHits([])
-              })
+              clearIndex()
             }}
-            onCancel={() => window.api.ftCancel().then(setFtStat)}
+            onCancel={cancelIndex}
             onOpen={(d, p) => {
               setSelId(d.id)
               // A hit is a hit into a file that was read, but the file can
@@ -2400,7 +2218,7 @@ export default function App() {
             onImportToken={async () => {
               const r = await window.api.importToken()
               if (r?.ok) {
-                setHasToken(true)
+                markToken()
                 await doSync()
               } else if (r) setErr('导入 token 失败：' + (r.error ?? '未选择文件'))
             }}

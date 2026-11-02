@@ -136,6 +136,15 @@ electron/main/
   demo.ts         --demo 截图
 electron/preload/index.ts   contextBridge，只暴露白名单方法
 src/                        renderer
+  App.tsx            组装层：把 hooks 解构出来、排进 JSX，自己不再持有大块状态
+  lib/hooks/
+    useConfig.ts    落盘的那些值：列、排序、列宽、模板、引文样式、面板宽度、主题、字号
+    useLibrary.ts   云端库：缓存、同步、token 三态
+    useFullText.ts  全文检索：词、命中、索引进度、重建 / 取消 / 清空
+    useUndo.ts      撤销栈
+  lib/panes.ts      三栏宽度与各栏的地板（拖拽与 useConfig 共用）
+  lib/columns.ts    列的定义、迁移与排序取值
+  components/       视图组件，PdfViewer 是自成一体的阅读器
 shared/types.ts             main / preload / renderer 三端共享类型
 scripts/                    start.mjs 启动器、demo.mjs 假库与截图、get-token.mjs、check-api.mjs、hooks/
 docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
@@ -144,6 +153,12 @@ docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
 `index.ts` 曾经过五千六百行：入口、窗口、同步、四十多个 IPC 通道，外加四千三百行的自检脚本。
 现在它只有八十几行，做的事情是"决定这次是哪一种启动"。**改主进程时先想清楚该落在哪个文件**——
 新加一个 IPC 通道是"它属于哪个域"的问题，不是"插到列表哪里"的问题。
+
+渲染器这一侧是同样的思路，只是粒度更细：`App.tsx` 曾是近两千八百行的状态堆，
+现在它把状态按"谁跟谁一起变"交给 `lib/hooks/` 下的几个 hook，自己只剩组装与 JSX。
+**判断标准不是"这段长不长"，而是"这段回答的是哪个问题"**——列宽和排序都落盘，
+所以同在 `useConfig`；命中和索引进度都是"正文里有什么"，所以同在 `useFullText`；
+`useConfig` 必须在 `useLibrary` 之前调用，因为后者要用前者的 `syncOnStart` 决定开不开同步。
 
 `--demo` 与 `--smoke` 同源但方向相反：自检要真实数据才测得准，**截图要假数据才敢公开**。
 `scripts/demo.mjs` 造 18 篇虚构文献（含它自己拼出来的 PDF）、写进 `.demo/`，
@@ -1013,6 +1028,12 @@ SetupGuide、批量进度、拖列宽、拖列换顺序、添加时间默认列�
   `citeStyle` / `pdfNameTemplate` / `pdfContinuous` / `ftPages` / `paneLeft` / `paneRight`
   一次写回 `cfg0`。真踩到过：一次偶发的"列顺序没复原"让下一轮连"没有带 PDF 的行"
   一起红。
+
+- **"写在最后"不够，崩溃是最会跳过的那条路径**：`Script failed to execute` 之类从
+  `runSmoke` 里抛出来时，写在它最后几行的复原一行也跑不到——配置就停在半改过的状态，
+  下一轮一开局就红一大片，而且每一条都像是新病。现在快照在**读到那一刻**就存进模块级
+  的 `cfgSnapshot`，复原做成 `restoreSmokeConfig()`，由 `index.ts` 的 `.catch` 也调一次。
+  正常跑完的那一轮自己已经复原过，再调一次什么都不改（幂等）。
 
 - **"点一个键 / 点一个列头会给什么方向"这类断言，不能去猜当前排的是什么**：取决于
   当前是否已按该键排着——是则翻向，否则选向。而"当前排着什么"会被前面的检查改掉，
