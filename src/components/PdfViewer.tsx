@@ -21,6 +21,7 @@ import {
   type TextRun,
   type ZoomMode
 } from '../lib/pdfgeom'
+import { PrefetchCache } from '../lib/pdfcache'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -396,24 +397,15 @@ export default function PdfViewer({
     setScale(clampScale(next))
   }, [zoomMode, page, sizes, tick, continuous])
 
-  /**
-   * Neighbouring pages, rendered ahead of time into offscreen canvases so a
-   * page turn paints immediately instead of waiting for pdf.js.  Keyed by
-   * page and scale, so a zoom change simply misses and re-renders.  Capped,
-   * because a full-page bitmap at devicePixelRatio is not small.
-   */
-  const prefetch = useRef(new Map<string, HTMLCanvasElement>())
-  /** In-flight warms, kept as promises so a page turn can join one instead of
-   *  starting a second render of the same page.  A warm is queued behind the
-   *  visible page in the pdf.js worker, so it routinely outlives the click
-   *  that will ask for it; without this the turn just renders it again. */
-  const warming = useRef(new Map<string, Promise<HTMLCanvasElement>>())
-  const PREFETCH_MAX = 6
+  /** Bitmaps of the pages next to this one.  The cache itself — what to keep,
+   *  what to drop, what is already in flight — is none of this component's
+   *  business; see `PrefetchCache`. */
+  const prefetch = useRef(new PrefetchCache())
 
   // A different document makes every cached bitmap wrong.  A different scale
   // does not: the key carries the scale, so stale entries simply miss and get
-  // pushed out by the LRU below.  Clearing on every scale change used to throw
-  // away the neighbours a moment before the user turned to them.
+  // pushed out by the LRU.  Clearing on every scale change used to throw away
+  // the neighbours a moment before the user turned to them.
   //
   // The continuous column keeps the same kind of record, and needs the same
   // treatment for a worse reason: its key is page, scale and pixel ratio, with
@@ -426,7 +418,6 @@ export default function PdfViewer({
   // moves the scale, which happens to change the key.
   useEffect(() => {
     prefetch.current.clear()
-    warming.current.clear()
     // a bitmap of the paper being left must not land on a canvas that now
     // belongs to another one
     contPending.current.forEach((t) => t.cancel())
@@ -435,24 +426,6 @@ export default function PdfViewer({
     painted.current.clear()
     visible.current.clear()
   }, [doc.localPdf])
-
-  /** Drop the least recently used entries until the cache fits again. */
-  const evict = () => {
-    const m = prefetch.current
-    while (m.size > PREFETCH_MAX) {
-      const oldest = m.keys().next().value
-      if (oldest === undefined) return
-      m.delete(oldest)
-    }
-  }
-
-  /** Exposed on <html> so the smoke run can tell a hit from a miss. */
-  const stampCache = () => {
-    const d = document.documentElement.dataset
-    d.pfSize = String(prefetch.current.size)
-    d.pfKeys = [...prefetch.current.keys()].join(',')
-    d.pfWarm = [...warming.current.keys()].join(',')
-  }
 
   const renderTo = useCallback(
     async (canvas: HTMLCanvasElement, n: number, s: number) => {
@@ -473,29 +446,12 @@ export default function PdfViewer({
   const warm = (n: number, s: number): Promise<void> => {
     if (n < 1 || n > numPages || !pdf) return Promise.resolve()
     const dpr = window.devicePixelRatio || 1
-    const k = bitmapKey(n, s, dpr)
-    const done = prefetch.current.get(k)
-    if (done) return Promise.resolve()
-    const flight = warming.current.get(k)
-    if (flight) return flight.then(() => undefined).catch(() => undefined)
-    const off = document.createElement('canvas')
-    const p = renderTo(off, n, s).then(() => {
-      warming.current.delete(k)
-      prefetch.current.set(k, off)
-      evict()
-      stampCache()
-      return off
+    return prefetch.current.warm(bitmapKey(n, s, dpr), () => {
+      // created inside, so a warm that finds the page already cached costs
+      // nothing at all
+      const off = document.createElement('canvas')
+      return renderTo(off, n, s).then(() => off)
     })
-    warming.current.set(k, p)
-    stampCache()
-    // the rejection is deliberately left on the promise: whoever awaits it
-    // decides whether a failed warm matters, and an unhandled one would be
-    // indistinguishable from a real bug
-    p.catch(() => {
-      warming.current.delete(k)
-      stampCache()
-    })
-    return p.then(() => undefined)
   }
 
   /**
@@ -519,7 +475,7 @@ export default function PdfViewer({
     if (!pdf || !canvas || continuous) return
     const dpr = window.devicePixelRatio || 1
     const key = bitmapKey(page, scale, dpr)
-    let cached = prefetch.current.get(key)
+    let cached = prefetch.current.peek(key)
     const pg = await pdf.getPage(page)
     const viewport = pg.getViewport({ scale })
     // a bitmap only helps if it is already the right size; anything else
@@ -530,7 +486,7 @@ export default function PdfViewer({
       c.height === Math.floor(viewport.height * dpr)
 
     if (!cached) {
-      const flight = warming.current.get(key)
+      const flight = prefetch.current.flight(key)
       if (flight) {
         // the neighbour render is already under way; waiting for it is the
         // whole point of having started it, and re-rendering would double the
@@ -557,21 +513,20 @@ export default function PdfViewer({
       ctx.clearRect(0, 0, bmp.width, bmp.height)
       ctx.drawImage(bmp, 0, 0)
       // re-insert so the LRU knows this one was just used
-      prefetch.current.delete(key)
-      prefetch.current.set(key, bmp)
+      prefetch.current.touch(key)
       await drawTextLayer(pg, viewport)
       document.documentElement.dataset.renderSrc = 'cache'
-      stampCache()
+      prefetch.current.stamp()
       // the turn came from the cache, so the neighbours of the new page are
       // the ones worth warming now
       warmAround(page, scale)
       return
     }
     if (cached) {
-      prefetch.current.delete(key)
+      prefetch.current.drop(key)
       document.documentElement.dataset.pfLast = 'size-mismatch'
     }
-    stampCache()
+    prefetch.current.stamp()
 
     // devicePixelRatio is what makes this crisp on a 4K panel; Mendeley
     // Desktop rendered at 1x and looked correspondingly soft
