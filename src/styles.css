@@ -1603,6 +1603,20 @@ button.danger:hover:not(:disabled) {
   line-height: 1.7;
   font-size: 0.933rem;
 }
+/* the one thing on this page that is not an instruction: what it costs.  It
+   is set apart because it is the answer to a question the reader has already
+   asked themselves, and an answer buried at the end of a paragraph of setup
+   steps is not an answer they will find */
+.setup-once {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-2);
+  border-radius: 0 4px 4px 0;
+  color: var(--fg);
+  line-height: 1.7;
+  font-size: 0.933rem;
+}
 .setup .steps {
   margin: 0 0 22px;
   padding-left: 1.4em;

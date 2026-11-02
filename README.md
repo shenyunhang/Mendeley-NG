@@ -84,9 +84,22 @@ electron.exe 会退化成纯 Node，`require('electron')` 返回的是二进制�
 
 ## 获取 token（首次使用必读）
 
+**这一步只做一次，大约两分钟。** 做完 token 会自己续期，你不用再来第二次，
+也不用再碰 dev.mendeley.com。
+
 Mendeley 的 API 用 OAuth 2.0，而这个项目没有内置 client credential——
-**每个人都要注册自己的应用**，所以没有现成的 token 可下载。走一遍就好，之后
-refresh token 会自动续期，不用再来第二次。
+**每个人都要注册自己的应用**，所以没有现成的 token 可下载。
+**这不是注册开发者账号，也不用写任何代码**：页面上只有两个框要填，
+填完它给你两串字符，粘进应用就行。
+
+<details>
+<summary>为什么非要这一步（技术上绕不开）</summary>
+
+Mendeley 的 OAuth **没有 PKCE**，code flow 因此必须带 `client_secret`；
+implicit flow 官方写明不返回 refresh token、也不给过期时间，而 access token
+约一小时就失效——用它等于每小时重新授权一次，比这一步更糟。
+
+</details>
 
 ### 1. 注册应用
 

@@ -68,10 +68,23 @@ export default function SetupGuide({
         {step === 'token' ? (
           <>
             <h2>先接入你的 Mendeley 账号</h2>
+            {/**
+             * Answered before it is asked.  Somebody told to go and register
+             * an application at a developer portal reads "am I about to become
+             * a developer", and while that question is open every step below
+             * looks like one more unreasonable demand.  So the first thing on
+             * the page is what this costs — once, two minutes, never again —
+             * and the second is that it is form-filling, not programming.
+             */}
+            <p className="setup-once">
+              <b>这一步只做一次，大约两分钟。</b>做完 token 会自己续期，
+              你不会再回到这个页面，也不用再碰 dev.mendeley.com。
+            </p>
             <p className="lede">
-              这里读的是你 Mendeley 云端那一份库，所以要一个 token。Mendeley 的 API
-              不提供通用的凭据——每个人得注册自己的应用，因此没有现成的 token 可以
-              下载。走一遍就好，之后 refresh token 会自动续期，不用再来第二次。
+              这个程序要一把能读你库的钥匙，而 Mendeley 没有「给某个应用授权」这种按钮：
+              它的做法是让你在 <b>dev.mendeley.com</b> 上登记一个名字。
+              <b>这不是注册开发者账号，也不用写任何代码</b>——页面上只有两个框要填，
+              填完它给你两串字符，粘到下面就行。
             </p>
             <ol className="steps">
               <li>
@@ -129,6 +142,10 @@ export default function SetupGuide({
               <button onClick={onDismiss}>已经有库了，先看看本地</button>
             </div>
             <p className="foot">
+              为什么非要这一步：Mendeley 的 OAuth 没有 PKCE，implicit 流程又不给
+              refresh token（access token 约一小时就过期），所以只有这条路能拿到一把
+              不会一小时就失效的钥匙。
+              <br />
               不想把 client_secret 粘进输入框，也可以在项目目录里跑
               <code>node scripts/get-token.mjs &lt;client_id&gt; &lt;client_secret&gt;</code>
               ——那条路会写出一个 token.json，用上面的按钮选中它就行。
