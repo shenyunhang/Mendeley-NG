@@ -121,6 +121,16 @@ export interface SyncStatus {
   message?: string
 }
 
+/** Progress of the one export that takes the whole library somewhere else.
+ *  Copying several thousand PDFs takes long enough that a bar with nothing
+ *  behind it looks like a hang, so the count is reported as it goes. */
+export interface LeaveProgress {
+  phase: 'files' | 'pdf' | 'done'
+  done: number
+  total: number
+  bytes: number
+}
+
 /** A named filter, Zotero's "saved search".  Mendeley has no equivalent on
  *  the server, so these live in the local config. */
 export interface SavedSearch {

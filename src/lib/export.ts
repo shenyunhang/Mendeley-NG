@@ -202,6 +202,66 @@ export function toAnnotationsMarkdown(
   return head.join('\n') + '\n\n' + parts.join('\n---\n\n')
 }
 
+/**
+ * The note left on the doorstep of a folder holding the whole library.
+ *
+ * "Export" in most programs means "here is a file, good luck".  A reader who
+ * is leaving wants the opposite: to be told what they are holding, what it
+ * opens in, and what of it cannot be imported anywhere.  Saying the last part
+ * out loud is the point — notes and highlights have no import format, and a
+ * folder that pretends otherwise would have the reader discovering it after
+ * the old library was gone.
+ */
+export function toExitReadme(c: {
+  docs: number
+  notes: number
+  anns: number
+  pdfs: number
+}): string {
+  const when = new Date().toISOString().slice(0, 10)
+  const held = [
+    `${c.docs} 篇文献`,
+    c.notes ? `${c.notes} 条笔记` : '',
+    c.anns ? `${c.anns} 条标注` : '',
+    c.pdfs ? `${c.pdfs} 份 PDF` : ''
+  ].filter(Boolean)
+  const lines = [
+    `Mendeley NG 导出 · ${when}`,
+    '',
+    `这个文件夹里是：${held.join('、')}。`,
+    '',
+    '  library.bib           BibTeX，Zotero / JabRef / LaTeX 都能读',
+    '  library.ris           RIS，EndNote / Papers 一类',
+    '  library.endnote.xml   EndNote XML',
+    c.notes ? '  notes.md              写在每一篇上的笔记' : '',
+    c.anns ? '  annotations.md        高亮与批注，按篇分组，带页码和被划的那句话' : '',
+    c.pdfs ? '  pdf/                  PDF 原件，文件名是它在本地原来的名字' : '',
+    '',
+    '怎么拿回去：在要去的地方 import library.bib（或 .ris / .xml），书目就回来了。',
+    c.pdfs
+      ? '  PDF 是原文件本身，不需要导入；要重新挂回条目，按文件名在 pdf/ 里找。'
+      : '  这次没有复制 PDF——它们是你在设置里选的那个目录里的原文件，本来就在你手上。'
+  ]
+  if (c.notes || c.anns) {
+    lines.push(
+      '',
+      '两件没有导入格式的事，先说清楚：',
+      '  笔记和标注没有通用格式，哪个工具都不 import 它们。它们是给你读、粘进稿子、',
+      '  或者 grep 的——按篇写好了，翻到哪篇都能对上。'
+    )
+  }
+  lines.push('', '这次导出没有改动库里的任何东西，也没有联网。')
+  return lines.filter((l) => l !== '').join('\n') + '\n'
+}
+
+/** A number of bytes as a reader would say it.  Shared with the confirm box,
+ *  which has to state what copying the PDFs will cost before doing it. */
+export function humanBytes(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`
+  if (n >= 1e6) return `${Math.round(n / 1e6)} MB`
+  return `${Math.max(1, Math.round(n / 1e3))} KB`
+}
+
 export function toRis(docs: Doc[]): string {
   const ty = (d: Doc): string => {
     const t = (d.type ?? '').toLowerCase()

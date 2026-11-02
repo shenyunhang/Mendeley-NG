@@ -56,9 +56,11 @@ import Splitter from './components/Splitter'
 import Toolbar from './components/Toolbar'
 import { extractIds } from './lib/pdfmeta'
 import {
+  humanBytes,
   toAnnotationsMarkdown,
   toBibtex,
   toEndnoteXml,
+  toExitReadme,
   toNotesMarkdown,
   toRis
 } from './lib/export'
@@ -195,10 +197,11 @@ export default function App() {
     title: string
     body?: string
     ok?: string
+    cancel?: string
     resolve: (v: boolean) => void
   } | null>(null)
   const askConfirm = useCallback(
-    (req: { title: string; body?: string; ok?: string }) =>
+    (req: { title: string; body?: string; ok?: string; cancel?: string }) =>
       new Promise<boolean>((resolve) => setConfirm({ ...req, resolve })),
     []
   )
@@ -1666,6 +1669,81 @@ export default function App() {
       setTimeout(() => setBatchMsg(null), 6000)
     }
   }
+  /**
+   * The way out, as one action.
+   *
+   * A program that lets you export four things one at a time has not really
+   * answered "can I leave" — the reader has to know that those four things
+   * exist, and that together they are everything.  So this writes all of them
+   * into one folder with a note on top saying what is in it, including the two
+   * parts no other program will import.
+   *
+   * The PDFs are the only part with a cost, so they are the only part asked
+   * about, and the question carries the number: several thousand files can be
+   * thirty gigabytes, and "do you want the PDFs too" without that figure is
+   * not a question anybody can answer.
+   */
+  const leaveLibrary = async () => {
+    if (!target.length) return
+    const dir = await window.api.pickDir('把这一库放到哪个文件夹')
+    // choosing nothing is the reader changing their mind, not a failure
+    if (!dir) return
+    const withPdf = target.filter((d) => d.localPdf).map((d) => d.localPdf!)
+    const plan = withPdf.length ? await window.api.pdfPlan(withPdf) : { copies: [], bytes: 0 }
+    let copies: { from: string; to: string }[] = []
+    if (plan.copies.length) {
+      const go = await askConfirm({
+        title: 'PDF 也复制一份？',
+        body:
+          `${plan.copies.length} 个文件，${humanBytes(plan.bytes)}。\n\n` +
+          '复制的是原件，库里那些不受影响。不复制也能走：PDF 本来就在你自己选的目录里，' +
+          '而书目、笔记和标注是只有这里有的东西。',
+        ok: '复制',
+        cancel: '只导出数据'
+      })
+      if (go) copies = plan.copies
+    }
+    const fresh = await window.api.loadAnnotations()
+    const freshNotes = await window.api.loadNotes()
+    const allIds = new Set(docs.map((d) => d.id))
+    const pickedIds = new Set(target.map((d) => d.id))
+    const annsOut = fresh.filter((a) => pickedIds.has(a.docId) || !allIds.has(a.docId))
+    const notesOut = target.filter((d) => (freshNotes[d.id] ?? '').trim())
+    const files = [
+      { name: 'library.bib', text: toBibtex(target) },
+      { name: 'library.ris', text: toRis(target) },
+      { name: 'library.endnote.xml', text: toEndnoteXml(target) },
+      { name: 'README.txt', text: toExitReadme({
+        docs: target.length,
+        notes: notesOut.length,
+        anns: annsOut.length,
+        pdfs: copies.length
+      }) }
+    ]
+    if (notesOut.length) {
+      files.push({ name: 'notes.md', text: toNotesMarkdown(notesOut, freshNotes) })
+    }
+    if (annsOut.length) {
+      files.push({ name: 'annotations.md', text: toAnnotationsMarkdown(target, annsOut, docs) })
+    }
+    const off = window.api.onLeaveProgress((p) => {
+      if (p.phase === 'pdf') setBatchMsg(`复制 PDF ${p.done}/${p.total}…`)
+    })
+    try {
+      const r = await window.api.leaveLibrary(dir, files, copies)
+      if (r.error) setErr(`导出失败：${r.error}`)
+      else {
+        const bits = [`${target.length} 篇`, `${files.length} 个文件`]
+        if (copies.length) bits.push(`${r.copied ?? 0} 份 PDF`)
+        if (r.failed?.length) bits.push(`${r.failed.length} 份失败`)
+        setBatchMsg(`已放到 ${dir}：${bits.join(' · ')}`)
+        setTimeout(() => setBatchMsg(null), 12000)
+      }
+    } finally {
+      off()
+    }
+  }
+
   /** Whether there is anything to export.  Same shape as the notes: this is
    *  recomputed on every keystroke, so the empty case — most libraries —
    *  answers without walking the list. */
@@ -1792,6 +1870,7 @@ export default function App() {
         canExportNotes={canExportNotes}
         onExportAnnotations={() => void exportAnnotations()}
         canExportAnnotations={canExportAnnotations}
+        onLeave={() => void leaveLibrary()}
         docs={docs}
         filtered={filtered}
         target={target}
@@ -1870,6 +1949,7 @@ export default function App() {
           title={confirm.title}
           body={confirm.body}
           ok={confirm.ok}
+          cancel={confirm.cancel}
           onOk={() => {
             confirm.resolve(true)
             setConfirm(null)

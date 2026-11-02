@@ -2,11 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { usePopSpot } from '../lib/popspot'
 
 export interface MenuItem {
-  label: string
+  /** Absent for a separator, which has no label because it is not a choice. */
+  label?: string
   title?: string
   disabled?: boolean
   danger?: boolean
-  run: () => void
+  /** A rule rather than an action, for the item that is a different kind of
+   *  thing from the ones above it. */
+  sep?: boolean
+  run?: () => void
 }
 
 interface Props {
@@ -65,20 +69,24 @@ export default function MenuButton({ label, title, disabled, primary, items }: P
       </button>
       {open && (
         <div className="menu-pop" ref={pop} style={spot ?? undefined}>
-          {items.map((it) => (
-            <button
-              key={it.label}
-              className={'menu-item' + (it.danger ? ' danger' : '')}
-              disabled={it.disabled}
-              title={it.title}
-              onClick={() => {
-                setOpen(false)
-                it.run()
-              }}
-            >
-              {it.label}
-            </button>
-          ))}
+          {items.map((it, i) =>
+            it.sep ? (
+              <div key={'s' + i} className="menu-sep" />
+            ) : (
+              <button
+                key={it.label}
+                className={'menu-item' + (it.danger ? ' danger' : '')}
+                disabled={it.disabled}
+                title={it.title}
+                onClick={() => {
+                  setOpen(false)
+                  it.run?.()
+                }}
+              >
+                {it.label}
+              </button>
+            )
+          )}
         </div>
       )}
     </div>

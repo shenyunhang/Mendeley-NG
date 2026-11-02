@@ -7,6 +7,7 @@ import type {
   Folder,
   FtHit,
   FtStatus,
+  LeaveProgress,
   Library,
   MetaCandidate,
   SyncStatus,
@@ -49,6 +50,32 @@ const api = {
       canceled?: boolean
       error?: string
     }>,
+  pickDir: (title: string) => ipcRenderer.invoke('dialog:pickDir', title) as Promise<string | null>,
+  /** What copying these PDFs would cost, and where each one would land. */
+  pdfPlan: (files: string[]) =>
+    ipcRenderer.invoke('export:pdfPlan', files) as Promise<{
+      copies: { from: string; to: string }[]
+      bytes: number
+    }>,
+  /** The whole library, in one folder.  Returns what landed and what did not. */
+  leaveLibrary: (
+    dir: string,
+    files: { name: string; text: string }[],
+    copies: { from: string; to: string }[]
+  ) =>
+    ipcRenderer.invoke('export:leave', dir, files, copies) as Promise<{
+      dir?: string
+      files?: string[]
+      copied?: number
+      failed?: { from: string; error: string }[]
+      bytes?: number
+      error?: string
+    }>,
+  onLeaveProgress: (cb: (s: LeaveProgress) => void) => {
+    const h = (_e: unknown, s: LeaveProgress) => cb(s)
+    ipcRenderer.on('leave:progress', h)
+    return () => ipcRenderer.removeListener('leave:progress', h)
+  },
 
   patchDoc: (id: string, body: Record<string, unknown>) =>
     ipcRenderer.invoke('doc:patch', id, body) as Promise<Doc>,

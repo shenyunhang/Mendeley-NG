@@ -11,6 +11,9 @@ interface Props {
   body?: string
   /** Label for the button that does it.  Defaults to 删除. */
   ok?: string
+  /** Label for the other one, when 取消 does not say what it is choosing —
+   *  "只导出数据" and "什么都不做" are different answers. */
+  cancel?: string
   onOk: () => void
   onCancel: () => void
 }
@@ -28,7 +31,14 @@ interface Props {
  * puts the cursor on 确定 turns a stray Enter into a deletion, and the whole
  * point of asking is that it should take a deliberate press.
  */
-export default function ConfirmDialog({ title, body, ok = '删除', onOk, onCancel }: Props) {
+export default function ConfirmDialog({
+  title,
+  body,
+  ok = '删除',
+  cancel = '取消',
+  onOk,
+  onCancel
+}: Props) {
   const cancelRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -53,7 +63,7 @@ export default function ConfirmDialog({ title, body, ok = '删除', onOk, onCanc
             {ok}
           </button>
           <button ref={cancelRef} onClick={onCancel}>
-            取消
+            {cancel}
           </button>
         </div>
       </div>

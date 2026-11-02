@@ -70,6 +70,8 @@ interface Props {
    *  and are the other half of what cannot be fetched again. */
   onExportAnnotations: () => void
   canExportAnnotations: boolean
+  /** All of it at once, into one folder: the way out, as one action. */
+  onLeave: () => void
 
   /**
    * Reading is one of the two things the program is for, so it has a button
@@ -274,6 +276,22 @@ export default function Toolbar(p: Props) {
               ? '高亮与批注按篇分组导出，带页码和被划的那句话'
               : '当前这些文献没有任何标注',
             run: p.onExportAnnotations
+          },
+          { sep: true },
+          {
+            // named by what the reader is really asking: not "导出" but "can I
+            // take all of this somewhere else".  The count is in the label
+            // because "整个库" would be a lie when a folder is selected, and a
+            // menu item that silently exports something else than it says is
+            // worse than one that never offers it
+            label:
+              p.target.length === p.docs.length
+                ? '带走整个库…'
+                : `带走这 ${p.target.length} 篇…`,
+            title:
+              '书目（BibTeX + RIS + EndNote XML）、笔记、标注、PDF，一次写进一个文件夹，' +
+              '附一份说明哪个文件是什么、哪两样别处 import 不了',
+            run: p.onLeave
           }
         ]}
       />

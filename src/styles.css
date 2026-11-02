@@ -265,6 +265,11 @@ textarea:focus {
 .menu-item.danger {
   color: var(--danger-fg);
 }
+.menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
 .toolbar .grow {
   flex: 1;
 }

@@ -17,7 +17,12 @@ import { PROJECT_URL, type Annotation, type Doc } from '../../shared/types'
 // it, and the note it carries is the only data in the app that exists nowhere
 // else — a claim about being able to take your library with you is worth one
 // import across the boundary to have checked on every run.
-import { toAnnotationsMarkdown, toNotesMarkdown } from '../../src/lib/export'
+import {
+  humanBytes,
+  toAnnotationsMarkdown,
+  toExitReadme,
+  toNotesMarkdown
+} from '../../src/lib/export'
 import { sync } from './library'
 import {
   ftAdd,
@@ -1927,6 +1932,92 @@ export async function runSmoke() {
     annsMd.slice(0, 400)
   )
 
+  // The way out as one action.  Four exports the reader has to know about and
+  // run one after another is not an answer to "can I leave", so the folder
+  // gets a note on top naming what is in it — including the two kinds nothing
+  // else will import, which a folder that pretended otherwise would have the
+  // reader discover after the old library was gone.
+  const exitReadme = toExitReadme({ docs: 12, notes: 3, anns: 5, pdfs: 7 })
+  log('exit readme', exitReadme)
+  expect(
+    'a folder holding everything says what is in it',
+    /BibTeX/.test(exitReadme) &&
+      /RIS/.test(exitReadme) &&
+      /notes\.md/.test(exitReadme) &&
+      /annotations\.md/.test(exitReadme) &&
+      /pdf\//.test(exitReadme),
+    exitReadme.slice(0, 220)
+  )
+  expect(
+    'and it says out loud which two things nothing else will import',
+    /没有导入格式/.test(exitReadme),
+    exitReadme.slice(0, 400)
+  )
+  const thinReadme = toExitReadme({ docs: 12, notes: 0, anns: 0, pdfs: 0 })
+  expect(
+    'what was not taken is not listed as if it had been',
+    !/pdf\//.test(thinReadme) && !/notes\.md/.test(thinReadme),
+    thinReadme.slice(0, 300)
+  )
+  expect(
+    'and the size is said the way a reader says it',
+    humanBytes(29_400_000_000) === '29.4 GB' && humanBytes(4_200_000) === '4 MB',
+    [humanBytes(29_400_000_000), humanBytes(4_200_000)]
+  )
+
+  // The same, driven through the real IPC into a scratch folder with a file of
+  // its own.  The reader's own PDFs are tens of gigabytes; a smoke run that
+  // copied those would not be a smoke run.
+  const stamp = Date.now()
+  const leaveDir = path.join(app.getPath('temp'), `mendeley-ng-leave-${stamp}`)
+  const fakePdf = path.join(app.getPath('temp'), `mendeley-ng-leave-${stamp}.pdf`)
+  fs.writeFileSync(fakePdf, Buffer.alloc(2048, 0x20))
+  const leavePlan = JSON.parse(
+    await w.webContents.executeJavaScript(
+      `(async()=>{const p=await window.api.pdfPlan(${JSON.stringify([
+        fakePdf,
+        fakePdf,
+        fakePdf + '.nope'
+      ])});return JSON.stringify(p)})()`
+    )
+  ) as { copies: { from: string; to: string }[]; bytes: number }
+  log('pdf plan', leavePlan)
+  // the third path does not exist, so it must not be promised or counted
+  expect(
+    'what copying the PDFs would cost is known before anything is copied',
+    leavePlan.copies.length === 2 && leavePlan.bytes === 4096,
+    leavePlan
+  )
+  expect(
+    'two papers that own the same filename do not overwrite each other',
+    leavePlan.copies[0].to !== leavePlan.copies[1].to,
+    leavePlan.copies
+  )
+  const leaveRes = JSON.parse(
+    await w.webContents.executeJavaScript(
+      `(async()=>{const r=await window.api.leaveLibrary(${JSON.stringify(leaveDir)},`
+        + `[{name:"README.txt",text:"hello"}],${JSON.stringify(leavePlan.copies)});`
+        + `return JSON.stringify(r)})()`
+    )
+  ) as { dir?: string; files?: string[]; copied?: number; failed?: unknown[]; bytes?: number }
+  log('leave', leaveRes)
+  const leftFile = fs.existsSync(path.join(leaveDir, 'README.txt'))
+    ? fs.readFileSync(path.join(leaveDir, 'README.txt'), 'utf8')
+    : ''
+  expect(
+    'the whole library lands in the folder the reader chose',
+    leftFile === 'hello' && leaveRes.files?.length === 1,
+    { leaveRes, landed: leftFile }
+  )
+  expect(
+    'and the PDFs come with it',
+    leavePlan.copies.every((c) => fs.existsSync(path.join(leaveDir, c.to))),
+    leaveRes
+  )
+  expect('nothing was lost on the way', (leaveRes.failed ?? []).length === 0, leaveRes)
+  fs.rmSync(leaveDir, { recursive: true, force: true })
+  fs.rmSync(fakePdf, { force: true })
+
   // Both ways out have to be *offered*, not merely to exist as functions.  A
   // menu item that appears only once there is already something to carry is
   // no comfort to somebody deciding whether to write in here at all — and a
@@ -1943,6 +2034,11 @@ export async function runSmoke() {
   expect(
     'both kinds of local reading are offered a way out',
     exportItems.some((i) => /笔记/.test(i.t)) && exportItems.some((i) => /标注/.test(i.t)),
+    exportItems
+  )
+  expect(
+    'and so is the whole library in one go',
+    exportItems.some((i) => /带走/.test(i.t)),
     exportItems
   )
   expect(

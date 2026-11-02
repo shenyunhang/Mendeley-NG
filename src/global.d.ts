@@ -6,6 +6,7 @@ import type {
   Folder,
   FtHit,
   FtStatus,
+  LeaveProgress,
   Library,
   MetaCandidate,
   SyncStatus,
@@ -34,6 +35,24 @@ export interface Api {
     kind: string,
     ext: string
   ) => Promise<{ path?: string; canceled?: boolean; error?: string }>
+  pickDir: (title: string) => Promise<string | null>
+  pdfPlan: (files: string[]) => Promise<{
+    copies: { from: string; to: string }[]
+    bytes: number
+  }>
+  leaveLibrary: (
+    dir: string,
+    files: { name: string; text: string }[],
+    copies: { from: string; to: string }[]
+  ) => Promise<{
+    dir?: string
+    files?: string[]
+    copied?: number
+    failed?: { from: string; error: string }[]
+    bytes?: number
+    error?: string
+  }>
+  onLeaveProgress: (cb: (s: LeaveProgress) => void) => () => void
   patchDoc: (id: string, body: Record<string, unknown>) => Promise<Doc>
   trashDoc: (id: string) => Promise<{ ok: boolean }>
   listTrash: () => Promise<Doc[]>

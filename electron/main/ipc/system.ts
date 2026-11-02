@@ -6,6 +6,7 @@ import { authorize } from '../auth'
 import { resetClient } from '../library'
 import { DEFAULT_PDF_DIR, loadConfig, saveConfig } from '../store'
 import { getWin } from '../window'
+import type { LeaveProgress } from '../../../shared/types'
 
 export function registerSystemIpc() {
   // The renderer is a file:// page, where navigator.clipboard is a permission
@@ -29,6 +30,120 @@ export function registerSystemIpc() {
     saveConfig({ ...loadConfig(), pdfDir })
     return pdfDir
   })
+
+  /**
+   * A folder rather than a file, for the one export that writes several of
+   * them.  Remembered in the same `exportDir` the single-file exports use, so
+   * the next time — of either kind — starts where the last one ended.
+   */
+  ipcMain.handle('dialog:pickDir', async (_e, title: string) => {
+    if (!getWin()) return null
+    const cfg = loadConfig()
+    const r = await dialog.showOpenDialog(getWin()!, {
+      title: title || '选择文件夹',
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: cfg.exportDir || app.getPath('downloads')
+    })
+    if (r.canceled || !r.filePaths[0]) return null
+    const dir = r.filePaths[0]
+    saveConfig({ ...cfg, exportDir: dir })
+    return dir
+  })
+
+  /**
+   * What copying the PDFs would actually cost, before anything is copied.
+   *
+   * Asking "also copy the PDFs?" without a number is asking the reader to
+   * guess whether it is forty megabytes or thirty gigabytes, and the wrong
+   * guess either fills a disk or leaves them without the files.  Statting a
+   * few thousand files is a second or two; being surprised by the size lasts
+   * longer.  Files that are no longer where the library thinks they are drop
+   * out here, so the number is what will really be written.
+   *
+   * The target names are made here too, because two papers can easily own the
+   * same filename and the second one must not overwrite the first.
+   */
+  ipcMain.handle('export:pdfPlan', async (_e, files: string[]) => {
+    const taken = new Map<string, number>()
+    const copies: { from: string; to: string }[] = []
+    let bytes = 0
+    for (const f of files) {
+      let size = 0
+      try {
+        size = fs.statSync(f).size
+      } catch {
+        continue
+      }
+      const base = path.basename(f)
+      const dot = base.lastIndexOf('.')
+      const stem = dot > 0 ? base.slice(0, dot) : base
+      const ext = dot > 0 ? base.slice(dot) : ''
+      const n = taken.get(base) ?? 0
+      taken.set(base, n + 1)
+      copies.push({ from: f, to: `pdf/${n ? `${stem}-${n + 1}${ext}` : base}` })
+      bytes += size
+    }
+    return { copies, bytes }
+  })
+
+  /**
+   * The way out: every kind of data in the library, written in one go.
+   *
+   * It lives in the main process because it is thousands of files, and a
+   * renderer that dies halfway through leaves a half-copied folder behind
+   * with no record of how far it got.  Each PDF is copied on its own: one
+   * unreadable file is a line in the summary, not the end of the run — the
+   * reader is leaving, and "three of your five thousand papers failed" is
+   * something they can act on where "nothing was exported" is not.
+   */
+  ipcMain.handle(
+    'export:leave',
+    async (
+      _e,
+      dir: string,
+      files: { name: string; text: string }[],
+      copies: { from: string; to: string }[]
+    ) => {
+      const say = (p: LeaveProgress) => getWin()?.webContents.send('leave:progress', p)
+      try {
+        fs.mkdirSync(dir, { recursive: true })
+        say({ phase: 'files', done: 0, total: files.length, bytes: 0 })
+        for (const f of files) {
+          fs.writeFileSync(path.join(dir, f.name), f.text, 'utf8')
+        }
+        say({ phase: 'files', done: files.length, total: files.length, bytes: 0 })
+
+        const failed: { from: string; error: string }[] = []
+        let bytes = 0
+        let done = 0
+        if (copies.length) {
+          fs.mkdirSync(path.join(dir, 'pdf'), { recursive: true })
+          for (const c of copies) {
+            try {
+              fs.copyFileSync(c.from, path.join(dir, c.to))
+              try {
+                bytes += fs.statSync(path.join(dir, c.to)).size
+              } catch {
+                /* the size is only for the progress line */
+              }
+            } catch (e) {
+              failed.push({ from: c.from, error: String(e) })
+            }
+            done++
+            // every fiftieth, plus the last: five thousand sends would cost
+            // more than the copying, and nothing in between is worth seeing
+            if (done % 50 === 0 || done === copies.length) {
+              say({ phase: 'pdf', done, total: copies.length, bytes })
+            }
+          }
+        }
+        say({ phase: 'done', done, total: copies.length, bytes })
+        return { dir, files: files.map((f) => f.name), copied: done - failed.length, failed, bytes }
+      } catch (e) {
+        return { error: String(e) }
+      }
+    }
+  )
 
   ipcMain.handle('dialog:importToken', async () => {
     if (!getWin()) return null
