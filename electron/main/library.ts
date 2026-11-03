@@ -93,7 +93,12 @@ export async function sync(full: boolean) {
   }
 
   saveLibrary(docs, folders)
-  saveConfig({ ...cfg, lastSync: new Date().toISOString() })
+  // Read again rather than carrying the `cfg` from the top of the function:
+  // a sync runs for seconds, and everything the reader changed while it ran —
+  // a column pressed, a pane dragged, a sort chosen — would be written back
+  // to the value it had when the sync started.  The watermark is the only
+  // thing this function has to add.
+  saveConfig({ ...loadConfig(), lastSync: new Date().toISOString() })
   status({
     phase: 'done',
     done: docs.length,

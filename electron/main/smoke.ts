@@ -1656,6 +1656,38 @@ export async function runSmoke() {
     saveConfig(cfg)
     await w.loadFile(path.join(__dirname, '../renderer/index.html'))
     await new Promise((r) => setTimeout(r, 2500))
+    /**
+     * A loaded page is not a started page.
+     *
+     * The sort the table shows is read over IPC, on the same channel the
+     * renderer is asking for five thousand papers at that very moment, and a
+     * header read before that answer lands is a header showing the default —
+     * which is a year arrow where a title one was meant, and which then reads
+     * exactly like a sort that did not survive the restart.  So the page is
+     * asked what it has, and waited for.  Both sides of the wait are logged,
+     * because they fail in different places: a value that never reaches the
+     * page is the channel, a value that is not on disk any more is a write
+     * that was overwritten, and only the second is a thing the app does.
+     */
+    const SORT_IN_PAGE =
+      '(async()=>{const c=await window.api.getConfig();'
+      + 'return JSON.stringify(c.sort||null)})()'
+    const seen: unknown[] = []
+    const inPage = await until(
+      SORT_IN_PAGE,
+      (v) => {
+        seen.push(v)
+        try {
+          const g = JSON.parse(String(v ?? 'null')) as { key?: string; dir?: number } | null
+          if (!s) return g === null
+          return g?.key === s.key && g?.dir === s.dir
+        } catch {
+          return false
+        }
+      },
+      10000
+    )
+    log('sort on the new page', { want: s, onDisk: loadConfig().sort ?? null, inPage, seen })
   }
   const pressHead = (col: string) =>
     w.webContents.executeJavaScript(
@@ -1663,18 +1695,44 @@ export async function runSmoke() {
       + `.find(d=>d.dataset.col===${JSON.stringify(col)});if(!c)return 0;`
       + `c.dispatchEvent(new MouseEvent("click",{bubbles:true}));return 1})()`
     )
+  /**
+   * The sort a press wrote, waited for rather than timed.
+   *
+   * The press writes from the renderer and the invoke is not awaited, so it
+   * queues behind whatever the renderer is doing — re-laying out five
+   * thousand rows is enough to put it a second out, which is why the column
+   * order above needs the same wait and why a fixed pause here read a press
+   * that had been written as one that had been lost.  Every value seen is
+   * logged, so a red says whether the write never arrived or arrived late.
+   */
+  const seenSorts: unknown[] = []
+  const sortUntil = async (want: { key: string; dir: number }) =>
+    JSON.parse(
+      String(
+        (await until(
+          '(async()=>{const c=await window.api.getConfig();'
+            + 'return JSON.stringify(c.sort||null)})()',
+          (v) => {
+            seenSorts.push(v)
+            try {
+              const s = JSON.parse(String(v ?? 'null')) as { key?: string; dir?: number }
+              return !!s && s.key === want.key && s.dir === want.dir
+            } catch {
+              return false
+            }
+          },
+          10000
+        )) ?? 'null'
+      )
+    ) as { key: string; dir: 1 | -1 } | null
   // what the reader had before the run started touching things: the press
   // further down writes, and the run has to put it back
-  const sortState = async () =>
-    JSON.parse(
-      await w.webContents.executeJavaScript(
-        '(()=>{const cs=[...document.querySelectorAll(".col-head > div")]'
-        + '.filter(d=>d.dataset.col);'
-        + 'const a=cs.find(d=>/[▲▼]/.test(d.textContent||""));'
-        + 'return JSON.stringify(a?{col:a.dataset.col,'
-        + 'dir:/▲/.test(a.textContent||"")?1:-1}:null)})()'
-      )
-    )
+  const ARROW_JS =
+    '(()=>{const cs=[...document.querySelectorAll(".col-head > div")]'
+    + '.filter(d=>d.dataset.col);'
+    + 'const a=cs.find(d=>/[▲▼]/.test(d.textContent||""));'
+    + 'return JSON.stringify(a?{col:a.dataset.col,'
+    + 'dir:/▲/.test(a.textContent||"")?1:-1}:null)})()'
   const sort0: { key: string; dir: 1 | -1 } | null = cfg0.sort ?? null
   // What a press on a header means depends on what is already sorted: on the
   // key it is already sorted by it turns the direction, on any other key it
@@ -1686,17 +1744,15 @@ export async function runSmoke() {
   await setSortAndReload({ key: 'year', dir: -1 })
   const want1 = 1
   expect('title is a column that can sort', (await pressHead('title')) === 1, 'title')
-  await new Promise((r) => setTimeout(r, 400))
-  const sort1 = await sortCfg()
-  log('sort after one press', { had: sort0, want1, sort1 })
+  const sort1 = await sortUntil({ key: 'title', dir: want1 })
+  log('sort after one press', { had: sort0, want1, sort1, seen: seenSorts })
   expect(
     'a press on a header is remembered',
     sort1?.key === 'title' && sort1?.dir === want1,
     { sort1, want1 }
   )
   await pressHead('title')
-  await new Promise((r) => setTimeout(r, 400))
-  const sort2 = await sortCfg()
+  const sort2 = await sortUntil({ key: 'title', dir: -want1 })
   log('sort after a second press', sort2)
   expect('pressing the same header again flips it', sort2?.dir === -want1, { sort2, want1 })
   await setSortAndReload(sort2)
@@ -1710,12 +1766,40 @@ export async function runSmoke() {
   await setSortAndReload(sort0)
   const wantArrow = sort0 ? sort0.key : 'year'
   const wantDir = sort0 ? sort0.dir : -1
-  const backState = await sortState()
-  log('sort restored', { wanted: { wantArrow, wantDir }, got: backState })
+  // The arrow is read off a page that has only just been reloaded, and a
+  // reload does not mean the page it replaced is finished talking: a write
+  // that page had queued can land after the new one has read the file, and
+  // the arrow then says what the last writer said rather than what was put
+  // there.  So it is waited for rather than read once, and every value seen
+  // is kept — a red then says whether the sort never came back or came back
+  // and was written over, which are two different faults and only one of
+  // them is in the thing being checked.
+  const seenArrows: unknown[] = []
+  const backState = await (async () => {
+    const got = await until(
+      ARROW_JS,
+      (v) => {
+        seenArrows.push(v)
+        try {
+          const s = JSON.parse(String(v ?? 'null')) as { col?: string; dir?: number }
+          return !!s && s.col === wantArrow && s.dir === wantDir
+        } catch {
+          return false
+        }
+      },
+      8000
+    )
+    try {
+      return JSON.parse(String(got ?? 'null')) as { col: string; dir: number } | null
+    } catch {
+      return null
+    }
+  })()
+  log('sort restored', { wanted: { wantArrow, wantDir }, got: backState, seen: seenArrows })
   expect(
     'the run leaves the sort as it found it',
     backState?.col === wantArrow && backState?.dir === wantDir,
-    { wantArrow, wantDir, backState }
+    { wantArrow, wantDir, backState, seen: seenArrows }
   )
 
   // Sorting is a question about the list, not about one column, so it has to
