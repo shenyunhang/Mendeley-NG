@@ -4280,6 +4280,14 @@ export async function runSmoke() {
     ftStat0.legacy === true,
     ftStat0
   )
+  // and it is that cause and not the other one: a reader who changed the page
+  // budget must not be told an update did it, which needs the two of them to
+  // be told apart at this end as well
+  expect(
+    'an index an older app wrote is not called a budget change',
+    ftStat0.voided === 'format',
+    ftStat0
+  )
   const ftLegacy = JSON.parse(
     await w.webContents.executeJavaScript(
       'JSON.stringify({text:(document.querySelector(".pane-mid .empty")||{}).textContent||null})'
@@ -5556,6 +5564,32 @@ export async function runSmoke() {
   )
   log('config after changing the page budget', cfgAfter)
   expect('the page budget reaches the config', /"ftPages":5/.test(cfgAfter), cfgAfter)
+  // Raising the budget throws away the index that was read for the old one,
+  // and for a long time the panel said an update had changed how the index is
+  // stored.  Those are not the same event and only one of them is something
+  // the reader did: told an update ate their six-minute build they go looking
+  // for a version to roll back, when what is wanted is a number put back.
+  // Both numbers are asked for, because "the range changed" is a claim and
+  // "3 → 5" is something to look at.
+  const voidedStat = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>JSON.stringify(await window.api.ftStatus()))()'
+    )
+  )
+  log('index after the budget changed', {
+    legacy: voidedStat.legacy,
+    voided: voidedStat.voided,
+    voidedPages: voidedStat.voidedPages,
+    pages: voidedStat.pages
+  })
+  expect(
+    'a budget the reader changed is not blamed on an update',
+    voidedStat.legacy === true &&
+      voidedStat.voided === 'budget' &&
+      voidedStat.voidedPages > 0 &&
+      voidedStat.voidedPages !== voidedStat.pages,
+    voidedStat
+  )
   // put it back the way it was, so the next run starts from the same place
   await w.webContents.executeJavaScript(
     `window.api.setConfig({ftPages:${JSON.parse(cfgBefore).ftPages ?? 3}})`

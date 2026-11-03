@@ -223,10 +223,24 @@ const dataFile = () => path.join(dir, 'fulltext.dat')
  * never having done it.
  */
 let legacy = false
+/**
+ * Which of them it was.
+ *
+ * Both leave an unreadable index on disk, and for a long time they were the
+ * same boolean — so a reader who had just changed the page budget was told
+ * an update had changed how the index is stored.  That is the wrong culprit
+ * in the one case where the reader could have done something about it, and
+ * the right culprit in the one where they could not.
+ */
+let voided: 'format' | 'budget' | null = null
+/** What the unreadable index was built with, when the budget is the reason. */
+let voidedPages = 0
 
 function loadMeta(): Meta {
   if (meta) return meta
   legacy = false
+  voided = null
+  voidedPages = 0
   try {
     const m = JSON.parse(fs.readFileSync(metaFile(), 'utf8')) as Meta
     // an index built with a different page budget does not describe the same
@@ -237,10 +251,14 @@ function loadMeta(): Meta {
       meta = m
       return meta
     }
-    // A page budget that changed is the reader's own doing and the panel
-    // already says why; an index written by an older version is not, and is
-    // the one that needs explaining.
-    if (m?.version) legacy = true
+    if (m?.version) {
+      legacy = true
+      // Same storage, different budget: the reader did this, and the sentence
+      // has to be about a number they can put back.  Anything else is an
+      // older app having written it, which is not theirs to answer for.
+      voided = m.version === 2 && m.pages !== pages ? 'budget' : 'format'
+      voidedPages = m.version === 2 ? (m.pages ?? 0) : 0
+    }
   } catch {
     /* no index yet */
   }
@@ -306,7 +324,9 @@ export function ftStatus(docs: Doc[]): FtStatus {
     current: progress.current,
     skipped: skipped.slice(),
     reader,
-    legacy
+    legacy,
+    voided: legacy ? voided : null,
+    voidedPages: legacy ? voidedPages : 0
   }
 }
 
@@ -486,6 +506,8 @@ export async function ftBuild(
   // whatever was on disk is being replaced from here on, so the note about
   // it being out of date has served its turn
   legacy = false
+  voided = null
+  voidedPages = 0
   const m = loadMeta()
   if (rebuild) {
     meta = { version: 2, pages: pages, bytes: 0, entries: {} }
@@ -769,6 +791,8 @@ export function ftClear() {
   skipped = []
   reader = null
   legacy = false
+  voided = null
+  voidedPages = 0
   blob = null
   try {
     fs.writeFileSync(dataFile(), '')

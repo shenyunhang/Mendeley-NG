@@ -212,17 +212,24 @@ export default function FullTextView({
         </div>
       ) : !status?.indexed && !building ? (
         <div className="empty">
-          {/* An update that changes how the index is stored loses the old one,
-              and "还没有索引" is not what happened.  Saying so is the
-              difference between a reader who rebuilds and one who thinks the
-              six minutes they spent were thrown away. */}
+          {/* Two different things leave an index that cannot be read, and only
+              one of them is something the reader did.  Both used to come out
+              as "this update changed how the index is stored", which is a
+              lie in the one case they could have undone and a puzzle in the
+              one they could not: told an update ate their build, a reader
+              goes looking for a version to roll back instead of a number to
+              put back. */}
           <p>{status?.legacy ? '索引要重建一次。' : '还没有索引。'}</p>
           <p className="sub">
-            {status?.legacy
-              ? '这次更新换了索引的存法：偏移量现在带一个字节锚点，建索引中途退出后下次才能接着建，'
-                + '而不用从头再来。旧索引读不了，重建一遍就好。'
-              : '建索引会读一遍本地 PDF 的正文，大约每篇 90 毫秒，几千篇要几分钟——中途'
-                + '可以停，下次会接着读。'}
+            {status?.voided === 'budget'
+              ? `「每篇索引页数」从 ${status.voidedPages} 改成了 ${status.pages}：`
+                + `按 ${status.voidedPages} 页读出来的索引对不上新的范围，所以作废了。`
+                + '不是更新弄丢的，是你刚改的——把数字改回去，或者重建一遍。'
+              : status?.legacy
+                ? '这次更新换了索引的存法：偏移量现在带一个字节锚点，建索引中途退出后下次才能接着建，'
+                  + '而不用从头再来。旧索引读不了，重建一遍就好。'
+                : '建索引会读一遍本地 PDF 的正文，大约每篇 90 毫秒，几千篇要几分钟——中途'
+                  + '可以停，下次会接着读。'}
             {' '}只取每篇的前 {status?.pages ?? 3} 页：标题、作者、摘要和引言开头，
             也就是要找的词通常在的地方。
           </p>

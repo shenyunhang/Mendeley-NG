@@ -270,6 +270,21 @@ export interface FtStatus {
    * away a build the reader already paid for.
    */
   legacy?: boolean
+  /**
+   * Which of the two things that void an index actually voided it.
+   *
+   * One boolean used to cover both, and the panel told a reader who had just
+   * changed the page budget that "this update changed how the index is
+   * stored" — blaming an upgrade that never happened for their own action,
+   * which is worse than saying nothing: it sends them looking for a version
+   * to roll back instead of a number to set back.  Only one of the two is
+   * something they did, and only that one is something they can undo.
+   */
+  voided?: 'format' | 'budget' | null
+  /** The budget the unreadable index was built with, when the budget is what
+   *  changed.  The sentence is only checkable with both numbers in it: "the
+   *  range changed" is an assertion, "3 → 5" is something to look at. */
+  voidedPages?: number
 }
 
 /** One place where the query appears in one document. */
