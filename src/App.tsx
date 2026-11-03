@@ -65,7 +65,7 @@ import {
   toRis
 } from './lib/export'
 import { buildTree, byName } from './lib/tree'
-import { docForRef } from './lib/refly'
+import { docForRef, docForUrl, idIndex } from './lib/refly'
 import { useConfig } from './lib/hooks/useConfig'
 import { useFullText } from './lib/hooks/useFullText'
 import { useUndo } from './lib/hooks/useUndo'
@@ -1818,13 +1818,17 @@ export default function App() {
    * two readers arguing over where the paper was left.
    */
   /**
-   * Which paper in the library a reference in a PDF is.
+   * Which paper in the library a reference in a PDF is, and which paper a
+   * link out of one points at.
    *
-   * Asked for one entry at a time, on hover, which is why it can afford to
-   * look down the whole list: the alternative is a paper that cites something
-   * already on the shelf and offers no way to get to it.
+   * Both are answered from the library's own identifiers, indexed once: they
+   * are asked for one at a time — on hover, and per link on a page that is
+   * being read — and a column of thirty links is thirty questions, which is
+   * not something to answer by walking five thousand papers each time.
    */
-  const refDocFor = useCallback((entry: string) => docForRef(docs, entry), [docs])
+  const refIx = useMemo(() => idIndex(docs), [docs])
+  const refDocFor = useCallback((entry: string) => docForRef(refIx, entry), [refIx])
+  const linkDocFor = useCallback((url: string) => docForUrl(refIx, url), [refIx])
 
   const reader = selected ? (
     <PdfViewer
@@ -1843,6 +1847,9 @@ export default function App() {
       // asked for when a citation is hovered, so a reference that is already
       // on the shelf can be opened from the paper that cites it
       refDoc={refDocFor}
+      // and for every link out of the paper, so one that points at a paper
+      // already on the shelf opens here instead of in a browser
+      linkDoc={linkDocFor}
       onOpenDoc={(id) => {
         setSelId(id)
         setRightTab('pdf')

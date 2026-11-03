@@ -1556,13 +1556,26 @@ button.danger:hover:not(:disabled) {
   outline-offset: -1px;
   background: rgba(90, 170, 255, 0.14);
 }
-.pdf-link.ext:hover::after {
+/* A link that leaves the paper and lands on a paper already on the shelf is
+   not a link out: it says so instead of showing the arrow, so the reader
+   knows before pressing that they are going to stay here. */
+.pdf-link.ext:not(.own):hover::after {
   content: '↗';
   position: absolute;
   top: -0.55em;
   left: 0;
   font-size: 0.75em;
   line-height: 1;
+  color: var(--accent);
+}
+.pdf-link.own:hover::after {
+  content: '库内';
+  position: absolute;
+  top: -0.55em;
+  left: 0;
+  font-size: 0.75em;
+  line-height: 1;
+  white-space: nowrap;
   color: var(--accent);
 }
 .dupe-group {

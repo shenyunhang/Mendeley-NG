@@ -283,6 +283,50 @@ const flatDoi = (s?: string | null) => (s ?? '').trim().toLowerCase().replace(/^
 const flatAx = (s?: string | null) => (s ?? '').match(/(\d{4}\.\d{4,5})/)?.[1] ?? ''
 
 /**
+ * The library's own identifiers, indexed once.
+ *
+ * A reference is matched when the pointer meets it and a link is matched
+ * when its page is read, and neither can afford to walk five thousand papers
+ * each time it is asked — a column of thirty links on a reference list is
+ * thirty walks, and that is the difference between a page that is ready and
+ * a page that is not.  Built from the list whenever the list changes, which
+ * is rare, and read in constant time after that.
+ *
+ * The first paper carrying an identifier wins.  Two copies of the same paper
+ * are a duplicate the reader has not resolved yet, and either of them is the
+ * right thing to open.
+ */
+export interface IdIndex {
+  doi: Map<string, Doc>
+  arxiv: Map<string, Doc>
+}
+
+export function idIndex(docs: Doc[]): IdIndex {
+  const doi = new Map<string, Doc>()
+  const arxiv = new Map<string, Doc>()
+  for (const d of docs) {
+    const a = flatDoi(d.doi ?? d.identifiers?.doi)
+    if (a && !doi.has(a)) doi.set(a, d)
+    const b = flatAx(d.arxiv ?? d.identifiers?.arxiv)
+    if (b && !arxiv.has(b)) arxiv.set(b, d)
+  }
+  return { doi, arxiv }
+}
+
+/** The paper carrying these identifiers, or null. */
+export function docByIds(ix: IdIndex, ids: { doi?: string; arxiv?: string }): Doc | null {
+  if (ids.doi) {
+    const d = ix.doi.get(ids.doi.toLowerCase())
+    if (d) return d
+  }
+  if (ids.arxiv) {
+    const d = ix.arxiv.get(ids.arxiv)
+    if (d) return d
+  }
+  return null
+}
+
+/**
  * The library's own copy of a reference, or null.
  *
  * Matched on the DOI and the arXiv id and on nothing else.  A title is not
@@ -291,12 +335,23 @@ const flatAx = (s?: string | null) => (s ?? '').match(/(\d{4}\.\d{4,5})/)?.[1] ?
  * a wrong match would need.  An entry that carries no identifier simply gets
  * no button, which costs a little convenience and no trust.
  */
-export function docForRef(docs: Doc[], entry: string): Doc | null {
-  const ids = refIds(entry)
-  if (!ids.doi && !ids.arxiv) return null
-  for (const d of docs) {
-    if (ids.doi && flatDoi(d.doi ?? d.identifiers?.doi) === ids.doi.toLowerCase()) return d
-    if (ids.arxiv && flatAx(d.arxiv ?? d.identifiers?.arxiv) === ids.arxiv) return d
-  }
-  return null
+export function docForRef(ix: IdIndex, entry: string): Doc | null {
+  return docByIds(ix, refIds(entry))
+}
+
+/**
+ * The library's own copy of whatever a link points at, or null.
+ *
+ * Asked with a link rather than with an entry, which is a different object
+ * with a different shape: a link carries its identifier in its path, and the
+ * path can end in a slash and can be followed by a query.  `…/10.1000/x?ref=1`
+ * is still that DOI and the `?ref=1` is not part of it, so everything from
+ * the first `?` or `#` on is cut away before the identifier is read.  A link
+ * that carries no identifier is answered with null, which is the answer the
+ * reader wants: it means the browser, as before.
+ */
+export function docForUrl(ix: IdIndex, url: string): Doc | null {
+  const ids = refIds(url.split(/[?#]/)[0])
+  if (ids.doi) ids.doi = ids.doi.replace(/\/+$/, '')
+  return docByIds(ix, ids)
 }

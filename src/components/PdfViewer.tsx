@@ -49,6 +49,7 @@ export default function PdfViewer({
   jumpTo,
   hitQuery,
   refDoc,
+  linkDoc,
   onOpenDoc,
   confirm
 }: {
@@ -64,6 +65,11 @@ export default function PdfViewer({
    *  citation is hovered and not before, so a library of several thousand
    *  papers is not walked on every page. */
   refDoc?: (entry: string) => Doc | null
+  /** The library's own copy of whatever a link points at, or null.  Asked for
+   *  once per link, when the page carrying it is read: a link that points at
+   *  a paper already on the shelf is a paper to open here, and not a reason
+   *  to leave for a landing page in a browser. */
+  linkDoc?: (url: string) => Doc | null
   /** Open another paper in place of this one. */
   onOpenDoc?: (id: string) => void
   /** The app's one confirmation box.  Deleting an annotation is the only
@@ -852,6 +858,10 @@ export default function PdfViewer({
    * The whole layer stands down while highlighting is on.  Marking is a drag
    * across the page, and a link in the way would turn every one of those drags
    * into a jump to somewhere the reader was not going.
+   *
+   * A link that leaves the paper but lands on a paper already in the library
+   * is marked as one and answered here: the arrow over the others becomes
+   * 库内, and the press opens the shelf's own copy instead of a browser.
    */
   // Held in a ref so the layers below can be memoised.  A paper carries
   // dozens of links a page and the whole column is mounted at once, so that
@@ -861,12 +871,15 @@ export default function PdfViewer({
   // the very same element next time and it walks past the whole subtree.
   const revealRef = useRef(reveal)
   revealRef.current = reveal
+  const openDocRef = useRef(onOpenDoc)
+  openDocRef.current = onOpenDoc
 
   const built = useRef<{
     links: Record<number, LinkBox[]>
     marking: boolean
+    own: ((url: string) => Doc | null) | undefined
     out: Record<number, ReactNode>
-  }>({ links: {}, marking: false, out: {} })
+  }>({ links: {}, marking: false, own: undefined, out: {} })
 
   const linkLayers = useMemo(() => {
     const last = built.current
@@ -880,37 +893,56 @@ export default function PdfViewer({
       // and the whole point: rebuilding a thousand anchors while somebody is
       // typing is what put a keystroke at 181ms in continuous mode, where
       // the pages are walked in batches in the background.
-      if (last.out[n] !== undefined && last.links[n] === links[n] && last.marking === marking) {
+      // the library can change under a page that has already been built — a
+      // sync finishing, a paper added — and a link that has since been found
+      // on the shelf has to be rebuilt like any other
+      if (
+        last.out[n] !== undefined &&
+        last.links[n] === links[n] &&
+        last.marking === marking &&
+        last.own === linkDoc
+      ) {
         out[n] = last.out[n]
         continue
       }
-      out[n] = links[n].map((l, i) => (
-        <a
-          key={`l-${i}`}
-          className={l.url ? 'pdf-link ext' : 'pdf-link'}
-          href={l.url ?? `#page-${l.page}`}
-          title={l.url ? l.url : `跳到第 ${l.page} 页`}
-          style={{
-            position: 'absolute',
-            left: `${l.x * 100}%`,
-            top: `${l.y * 100}%`,
-            width: `${l.w * 100}%`,
-            height: `${l.h * 100}%`,
-            // the layer only claims the pointer when it is allowed to answer it
-            pointerEvents: marking ? 'none' : 'auto'
-          }}
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            if (l.page) revealRef.current(l.page)
-            else if (l.url) void window.api.openExternal(l.url)
-          }}
-        />
-      ))
+      out[n] = links[n].map((l, i) => {
+        // What a link out of the paper points at may already be on the shelf,
+        // and then the browser is the wrong answer: the reader pressed a
+        // reference to a paper they own and was handed a landing page for it
+        // instead of the PDF on their own disk.  A link to the paper being
+        // read is left alone, because opening it here would look like nothing
+        // happened at all.
+        const hit = l.url ? linkDoc?.(l.url) ?? null : null
+        const own = hit && hit.id !== doc.id ? hit : null
+        return (
+          <a
+            key={`l-${i}`}
+            className={'pdf-link' + (l.url ? ' ext' : '') + (own ? ' own' : '')}
+            href={l.url ?? `#page-${l.page}`}
+            title={own ? `库内：${own.title ?? ''}` : l.url ? l.url : `跳到第 ${l.page} 页`}
+            style={{
+              position: 'absolute',
+              left: `${l.x * 100}%`,
+              top: `${l.y * 100}%`,
+              width: `${l.w * 100}%`,
+              height: `${l.h * 100}%`,
+              // the layer only claims the pointer when it is allowed to answer it
+              pointerEvents: marking ? 'none' : 'auto'
+            }}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              if (l.page) revealRef.current(l.page)
+              else if (own) openDocRef.current?.(own.id)
+              else if (l.url) void window.api.openExternal(l.url)
+            }}
+          />
+        )
+      })
     }
-    built.current = { links, marking, out }
+    built.current = { links, marking, own: linkDoc, out }
     return out
-  }, [links, marking])
+  }, [links, marking, linkDoc, doc.id])
 
   const linkMarks = (n: number) => linkLayers[n] ?? null
 

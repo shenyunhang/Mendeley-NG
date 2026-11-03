@@ -32,6 +32,8 @@ import { describeSyncFailure } from '../../src/lib/offline'
 import {
   citeNums,
   docForRef,
+  docForUrl,
+  idIndex,
   isRefHead,
   linesOf,
   markersIn,
@@ -2470,7 +2472,9 @@ export async function runSmoke() {
       }
       const extPressed = Number(
         await w.webContents.executeJavaScript(
-          '(()=>{const a=document.querySelector("a.pdf-link.ext");if(!a)return 0;'
+          // one that is not marked as already on the shelf: those are answered
+          // here now, and pressing one would prove nothing about the browser
+          '(()=>{const a=document.querySelector("a.pdf-link.ext:not(.own)");if(!a)return 0;'
           + 'a.click();return 1})()'
         )
       )
@@ -2535,18 +2539,296 @@ export async function runSmoke() {
     ]).size,
     byDoi:
       docForRef(
-        [{ id: 'a', doi: '10.1000/xyz' } as Doc, { id: 'b', doi: '10.2000/other' } as Doc],
+        idIndex([
+          { id: 'a', doi: '10.1000/xyz' } as Doc,
+          { id: 'b', doi: '10.2000/other' } as Doc
+        ]),
         'A. Author. A paper. Journal, 2020. doi:10.1000/xyz.'
       )?.id ?? null,
     // an entry carrying no identifier is not matched to anything: guessing
     // from a title is how the wrong paper gets opened
-    noId: docForRef([{ id: 'a', doi: '10.1000/xyz' } as Doc], 'A. Author. A paper. 2020.')
+    noId:
+      docForRef(
+        idIndex([{ id: 'a', doi: '10.1000/xyz' } as Doc]),
+        'A. Author. A paper. 2020.'
+      ) ?? null
   }
   expect('an appendix numbering its steps is not read as a reference list', citeRules.appendix === 0, citeRules)
   expect('a range of forty is not put under the pointer', citeRules.longRange === null, citeRules)
   expect('two entries are not enough to believe a list', citeRules.short === 0, citeRules)
   expect('a reference is matched to the library by its DOI', citeRules.byDoi === 'a', citeRules)
   expect('a reference with no identifier is matched to nothing', citeRules.noId === null, citeRules)
+
+  // A link out of a paper, and whether the paper it points at is already on
+  // the shelf.  Answered from the identifier the link carries and from
+  // nothing else, for the reason a reference is: guessing from a title is
+  // how the wrong paper gets opened.  A link that cannot be pinned down is
+  // left to the browser, which is both what it did before and what the
+  // reader wants when the answer really is somewhere else.
+  const linkRules = {
+    byDoi:
+      docForUrl(
+        idIndex([{ id: 'a', doi: '10.1000/xyz' } as Doc]),
+        'https://doi.org/10.1000/xyz'
+      )?.id ?? null,
+    other: docForUrl(
+      idIndex([{ id: 'a', doi: '10.1000/xyz' } as Doc]),
+      'https://doi.org/10.9999/nope'
+    ),
+    byArxiv:
+      docForUrl(
+        idIndex([{ id: 'b', arxiv: '2401.01234' } as Doc]),
+        'https://arxiv.org/abs/2401.01234'
+      )?.id ?? null,
+    // what follows a link is not part of the identifier: a link that came out
+    // of somebody else's reference manager carries a query, and `?ref=1` is
+    // not the tail of a DOI
+    query:
+      docForUrl(
+        idIndex([{ id: 'a', doi: '10.1000/xyz' } as Doc]),
+        'https://doi.org/10.1000/xyz?ref=1'
+      )?.id ?? null,
+    plain: docForUrl(idIndex([{ id: 'a', doi: '10.1000/xyz' } as Doc]), 'https://example.com/p')
+  }
+  expect('a link to a paper already in the library is matched', linkRules.byDoi === 'a', linkRules)
+  expect(
+    'a link to a paper that is not in it is matched to nothing',
+    linkRules.other === null,
+    linkRules
+  )
+  expect('an arXiv link is matched by its id', linkRules.byArxiv === 'b', linkRules)
+  expect('what follows a link is not part of the identifier', linkRules.query === 'a', linkRules)
+  expect(
+    'a link carrying no identifier is left to the browser',
+    linkRules.plain === null,
+    linkRules
+  )
+
+  /**
+   * Where a link out of a paper goes when the paper it points at is already
+   * on the shelf.
+   *
+   * A reference to something the reader owns is not a reason to leave for a
+   * landing page: the PDF is on their own disk and the answer to the press is
+   * here.  Both halves are checked, because either alone is a weaker claim —
+   * staying put and doing nothing also reaches no shell, and opening the
+   * wrong paper also opens one.
+   *
+   * The pair is hunted for instead of assumed: whether one paper links to
+   * another that is in the same library is a fact about that pair, and not
+   * something a run can arrange.  The list is sampled across its whole length
+   * rather than from the top, because the papers added first are the oldest
+   * and their PDFs carry almost no links at all.
+   */
+  const ownIx = idIndex(loadLibrary()?.docs ?? [])
+  // The run goes on from here with the whole library in front of it, and a
+  // search box left holding one paper's title would take that away from
+  // everything that follows: the list is how the next twenty checks reach a
+  // paper at all.
+  const clearSearch = async () => {
+    await w.webContents.executeJavaScript(
+      `(()=>{const i=document.querySelector(".toolbar input[placeholder^='搜索']");if(!i)return 0;`
+        + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+        + `set.call(i,"");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+    )
+    await new Promise((r) => setTimeout(r, 1200))
+  }
+  // More than one is looked for, because the second half of this check has to
+  // reach a particular row in a list of five thousand, and a title that
+  // cannot be reached would otherwise turn into a red that says nothing
+  // about the thing being checked.
+  const wantOwn = await (async () => {
+    const lib = loadLibrary()?.docs ?? []
+    const cands = lib.filter((d) => d.localPdf && fs.existsSync(d.localPdf as string))
+    const stride = Math.max(1, Math.floor(cands.length / 120))
+    const found: { doc: (typeof cands)[number]; page: number }[] = []
+    for (let k = 0; k < cands.length && found.length < 6; k += stride) {
+      const d = cands[k]
+      try {
+        const data = new Uint8Array(fs.readFileSync(d.localPdf as string))
+        const pdf = await pdfjs.getDocument({ data, useSystemFonts: false }).promise
+        const last = Math.min(pdf.numPages, 12)
+        let page = 0
+        for (let i = 1; i <= last && !page; i++) {
+          const p = await pdf.getPage(i)
+          const anns = (await p.getAnnotations({ intent: 'display' })) as unknown as {
+            subtype?: string
+            url?: string
+            unsafeUrl?: string
+          }[]
+          for (const a of anns) {
+            if (a.subtype !== 'Link') continue
+            const u = a.url ?? a.unsafeUrl
+            if (!u) continue
+            const hit = docForUrl(ownIx, u)
+            if (hit && hit.id !== d.id) {
+              page = i
+              break
+            }
+          }
+        }
+        await pdf.destroy()
+        if (page) found.push({ doc: d, page })
+      } catch {
+        /* a paper that will not parse simply has no links to offer */
+      }
+    }
+    return found
+  })()
+
+  let ownInfo: Record<string, unknown> = {}
+  if (!wantOwn.length) {
+    ownInfo = { skip: 'no paper in this library links to another paper in it' }
+  } else {
+    // A paper is reached by narrowing the list to it, and what a word in the
+    // search box brings back is a column of cards, not rows: the table is
+    // what the reader gets when the box is empty.  The card pressed is the
+    // one carrying this paper's id, because a search for a title does not
+    // promise to put the paper that was asked for first.  Several are tried,
+    // because a title the list happens not to reach is a fact about the list
+    // and not about the thing being checked; what was actually opened is read
+    // back, so a press that landed somewhere else says so instead of passing.
+    for (const cand of wantOwn) {
+      const title = String(cand.doc.title ?? '').slice(0, 40)
+      await w.webContents.executeJavaScript(
+        `(()=>{const i=document.querySelector(".toolbar input[placeholder^='搜索']");if(!i)return 0;`
+          + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+          + `set.call(i,${JSON.stringify(title)});`
+          + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+      )
+      await new Promise((r) => setTimeout(r, 1500))
+      // How many cards the search left is worth knowing: a press that had
+      // nowhere to land has to say so rather than look like a press that did
+      // nothing.
+      const seen = String(
+        await w.webContents.executeJavaScript(
+          `JSON.stringify({cards:document.querySelectorAll("div.res-row").length,`
+            + `mine:document.querySelectorAll('div.res-row[data-id=${JSON.stringify(cand.doc.id)}]').length})`
+        )
+      )
+      const cardSeen = String(
+        await until(
+          `(document.querySelectorAll('div.res-row[data-id=${JSON.stringify(cand.doc.id)}]').length?'yes':'no')`,
+          (v) => v === 'yes',
+          6000
+        )
+      )
+      let done = false
+      try {
+        if (cardSeen !== 'yes') {
+          ownInfo = { tried: title, seen, why: 'its card was not in the results' }
+        } else {
+          const ownOpened = Number(
+            await w.webContents.executeJavaScript(
+              `(()=>{const r=document.querySelector('div.res-row[data-id=${JSON.stringify(cand.doc.id)}]');`
+                + `if(!r)return 0;r.click();return 1})()`
+            )
+          )
+          await new Promise((r) => setTimeout(r, 1800))
+          // The whole library comes back before anything is pressed.  Where
+          // the reader ends up is read off the selected row, and a row can
+          // only be marked selected when it is in the list: narrowed to the
+          // one paper that was just opened, the list cannot contain the paper
+          // the link points at, and the press would look like it went nowhere.
+          await clearSearch()
+          const ownAt = String(
+            await w.webContents.executeJavaScript(
+              '(()=>{const r=document.querySelector("div.row.sel");return r?r.dataset.id||"":""})()'
+            )
+          )
+          // and the paper under the reader is the one that was scanned: a
+          // press that landed on another is not evidence about this pair, so
+          // it says so and the next candidate is tried
+          if (ownAt !== cand.doc.id) {
+            ownInfo = {
+              title,
+              seen,
+              opened: ownOpened,
+              at: ownAt,
+              why: 'the press opened another paper'
+            }
+          } else {
+            await w.webContents.executeJavaScript(
+              `(()=>{const i=document.querySelector(".pdf-bar input");if(!i)return 0;`
+                + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+                + `set.call(i,${JSON.stringify(String(cand.page))});`
+                + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+            )
+            await new Promise((r) => setTimeout(r, 2500))
+            // Which link is pressed is read out of the page rather than carried
+            // over from the scan: what is in the document is the address after
+            // it has been checked, and the paper that address names is what the
+            // press is then expected to land on.
+            const ownHref = String(
+              await w.webContents.executeJavaScript(
+                '(()=>{const a=document.querySelector("a.pdf-link.own");'
+                  + 'return a?a.getAttribute("href")||"":""})()'
+              )
+            )
+            const want = ownHref ? docForUrl(ownIx, ownHref) : null
+            ownInfo = {
+              title,
+              page: cand.page,
+              href: ownHref,
+              at: ownAt,
+              openedRow: ownOpened,
+              want: want?.id ?? null,
+              seen
+            }
+            if (!want) {
+              ownInfo.why = 'no link marked as on the shelf on the page under the reader'
+            } else {
+              const openedOwn: string[] = []
+              ipcMain.removeHandler('shell:openExternal')
+              ipcMain.handle('shell:openExternal', (_e, url: string) => {
+                openedOwn.push(url)
+                return { ok: true }
+              })
+              try {
+                const clicked = Number(
+                  await w.webContents.executeJavaScript(
+                    '(()=>{const a=document.querySelector("a.pdf-link.own");if(!a)return 0;'
+                      + 'a.click();return 1})()'
+                  )
+                )
+                await new Promise((r) => setTimeout(r, 2500))
+                const got = String(
+                  await w.webContents.executeJavaScript(
+                    '(()=>{const r=document.querySelector("div.row.sel");return r?r.dataset.id||"":""})()'
+                  )
+                )
+                ownInfo.clicked = clicked
+                ownInfo.opened = openedOwn
+                ownInfo.got = got
+                expect(
+                  'a link to a paper already in the library opens it here and not in a browser',
+                  ownOpened === 1 &&
+                    ownAt === cand.doc.id &&
+                    clicked === 1 &&
+                    openedOwn.length === 0 &&
+                    got === want.id,
+                  ownInfo
+                )
+                done = true
+              } finally {
+                ipcMain.removeHandler('shell:openExternal')
+                ipcMain.handle('shell:openExternal', (_e, url: string) => {
+                  shell.openExternal(url)
+                  return { ok: true }
+                })
+              }
+            }
+          }
+        }
+      } finally {
+        // and it stays that way for whatever comes next: the list is how the
+        // next twenty checks reach a paper at all
+        await clearSearch()
+      }
+      if (done) break
+    }
+  }
+  log('a link to a paper on the shelf', ownInfo)
 
   let citeInfo: {
     ok?: boolean

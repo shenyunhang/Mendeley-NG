@@ -120,6 +120,12 @@ export default function SearchResults({
             return (
               <div
                 key={d.id}
+                // which paper a card is cannot be read from where it sits:
+                // the list is virtual, so the third card on screen is the
+                // third of the matches and not the third of the library.  The
+                // table rows carry it for the same reason, and a search is
+                // exactly the case where a check needs to name one paper.
+                data-id={d.id}
                 className={
                   'res-row' + (selectedId === d.id ? ' sel' : '') + (picked ? ' multi' : '')
                 }
