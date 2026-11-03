@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron'
+import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
@@ -97,8 +98,56 @@ export function restoreSmokeConfig() {
  * the only way to confirm both the sync pipeline and the high-DPI rendering
  * from a command line.  It is a development aid, never used by the packaged app.
  */
+/**
+ * Another copy of the app running on this machine, or null.
+ *
+ * The installed build and this one are different executables over the same
+ * userData, and Electron's single-instance lock does not see across them:
+ * both open, both read the library at start, both write the config whenever
+ * they feel like it.  Windows only, because that is where this runs; a check
+ * that cannot run says nothing rather than guessing.
+ */
+function otherInstanceRunning(): string | null {
+  if (process.platform !== 'win32') return null
+  try {
+    const out = execSync('tasklist /NH /FO CSV /FI "IMAGENAME eq Mendeley NG.exe"', {
+      encoding: 'utf8',
+      windowsHide: true
+    })
+    const rows = out
+      .split(/\r?\n/)
+      .filter((l) => l.includes('Mendeley NG.exe'))
+    if (!rows.length) return null
+    const pid = rows[0].split('","')[1] ?? '?'
+    return `${rows.length} 个进程，第一个 pid ${pid}`
+  } catch {
+    // tasklist answers "no tasks match" with a non-zero exit rather than with
+    // an empty list, so this is the common case and not a failure to report
+    return null
+  }
+}
+
 export async function runSmoke() {
   const log = (...a: unknown[]) => console.log('[smoke]', ...a)
+  // This run writes the reader's real config, in the reader's real
+  // userData — that is the point of it, and it is also why a second copy of
+  // the app left running on this machine is fatal to it.  Both hold the same
+  // file; whichever writes last wins, and the loser is not told.  The symptom
+  // is not an error but a check that fails at random — "the new order is
+  // remembered" being handed back a layout the other window wrote ten hours
+  // ago — which is worse than an error, because it looks like a bug in the
+  // thing under test.  Refuse before the run rather than explain after it.
+  const other = otherInstanceRunning()
+  if (other) {
+    const msg =
+      `另一份 Mendeley NG 正在运行（${other}），它和这次冒烟用同一个数据目录 `
+      + `(${dataDir()})，两边会写同一个 config.json，跑出来的红是随机的、`
+      + '而且不是被测代码的错。先关掉它再跑。'
+    log('ANOTHER INSTANCE', other)
+    if (process.env.SMOKE_ALLOW_OTHER_INSTANCE !== '1') throw new Error(msg)
+    log('continuing anyway because SMOKE_ALLOW_OTHER_INSTANCE=1')
+  }
+
   const disp = screen.getPrimaryDisplay()
   log('display', disp.size.width + 'x' + disp.size.height, 'scaleFactor', disp.scaleFactor)
 
@@ -309,20 +358,50 @@ export async function runSmoke() {
     popInfo
   )
   // and what was removed to make room is still reachable
-  await openMenu('更多')
-  await new Promise((r) => setTimeout(r, 300))
-  const moreItems = JSON.parse(
-    await w.webContents.executeJavaScript(
-      'JSON.stringify([...document.querySelectorAll(".menu-pop .menu-item")]'
-      + '.map(x=>x.textContent.trim()))'
-    )
-  )
+  const itemsOf = async (label: string): Promise<string[]> => {
+    await openMenu(label)
+    await new Promise((r) => setTimeout(r, 300))
+    const list = JSON.parse(
+      await w.webContents.executeJavaScript(
+        'JSON.stringify([...document.querySelectorAll(".menu-pop .menu-item")]'
+        + '.map(x=>x.textContent.trim()))'
+      )
+    ) as string[]
+    // the same press closes it again.  Leaving one open would put two menus'
+    // items under the selector above, and a check that reads both at once is
+    // not a check: it would pass on the strength of the wrong menu.
+    await openMenu(label)
+    await new Promise((r) => setTimeout(r, 200))
+    return list
+  }
+  const moreItems = await itemsOf('更多')
   log('under 更多', moreItems)
   expect(
     'the commands that left the bar are still there',
-    ['导入 token', '查重', '全部标注', '回收站', '保存搜索'].every((x) =>
-      moreItems.includes(x)
-    ),
+    ['查重', '全部标注', '回收站', '保存搜索'].every((x) => moreItems.includes(x)),
+    moreItems
+  )
+  // Four of 更多's eight items had a home on the bar and went to it.  What
+  // matters is not only that they arrived but that they left: a command that
+  // lives in two menus is the kind of duplication nobody notices, and the
+  // copy in the wrong place is the one a reader finds first.
+  const importItems = await itemsOf('导入')
+  log('under 导入', importItems)
+  expect(
+    'adding by identifier sits with the other way in',
+    importItems.some((x) => x.includes('按标识符添加')),
+    importItems
+  )
+  const setupItems = await itemsOf('设置')
+  log('under 设置', setupItems)
+  expect(
+    'a token is next to the settings rather than two menus away',
+    setupItems.some((x) => x.includes('导入 token')),
+    setupItems
+  )
+  expect(
+    'nothing that moved is still waiting in 更多',
+    !moreItems.some((x) => /导入 token|按标识符添加|检查更新|项目主页/.test(x)),
     moreItems
   )
 
@@ -337,13 +416,10 @@ export async function runSmoke() {
     return { ok: true }
   })
   try {
-    // the menu is still open from the check above; asking again would press
-    // the toggle and close it
-    await w.webContents.executeJavaScript(
-      '(()=>{if(!document.querySelector(".menu-pop")){'
-      + 'const b=[...document.querySelectorAll(".toolbar button")]'
-      + '.find(x=>x.textContent.trim().startsWith("更多"));if(b)b.click()}return 1})()'
-    )
+    // the project page moved out of 更多 and into 设置, which is where the
+    // other things about this program live; the menu is opened by name so a
+    // later move cannot leave this pressing a toggle that no longer holds it
+    await openMenu('设置')
     await new Promise((r) => setTimeout(r, 300))
     const homePressed = Number(
       await w.webContents.executeJavaScript(
@@ -1468,17 +1544,35 @@ export async function runSmoke() {
   // written earlier in the run — as a failure, and a red that means nothing
   // trains everybody to ignore reds.  Waiting for it to match, with a bound,
   // keeps the check and drops the race: if it never matches, it still fails.
+  // What has to hold is that the order on screen reaches disk.  Reading the
+  // config the instant the mouse came up was reporting a stale value — one
+  // written earlier in the run — as a failure, and a red that means nothing
+  // trains everybody to ignore reds.  Waiting for it to match, with a bound,
+  // keeps the check and drops that race.
+  //
+  // The bound is 10s because the write is not the slow part: it is an
+  // un-awaited invoke from the renderer, and a renderer busy re-laying out
+  // five thousand rows queues it behind that work.  Measured: the first
+  // poll still answers with the layout the previous check left behind, the
+  // second with the one it replaced, and the write lands anywhere in
+  // between.  Four seconds was sometimes not enough and read as a lost
+  // write.  Every value seen is logged, so a future red says whether the
+  // write never arrived or arrived late, instead of only that it is missing.
+  const seenCols: unknown[] = []
   const cfgCols1 = JSON.parse(
     String(
       (await until(
         '(async()=>{const c=await window.api.getConfig();'
           + 'return JSON.stringify(c.cols||null)})()',
-        (v) => v === JSON.stringify(k1),
-        4000
+        (v) => {
+          seenCols.push(v)
+          return v === JSON.stringify(k1)
+        },
+        10000
       )) ?? 'null'
     )
   ) as string[] | null
-  log('cols after', cfgCols1)
+  log('cols after', cfgCols1, 'seen', seenCols)
   expect(
     'the new order is remembered',
     JSON.stringify(cfgCols1) === JSON.stringify(k1),
@@ -4426,13 +4520,12 @@ export async function runSmoke() {
     + 'return JSON.stringify({ftPages:c.ftPages??null,theme:c.theme??null,fontSize:c.fontSize??null})})()'
   )
   log('config before settings', cfgBefore)
-  log(
-    'click 设置',
-    await w.webContents.executeJavaScript(
-      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
-      + '.find(x=>x.textContent.trim()==="设置");if(!b)return "missing";b.click();return "ok"})()'
-    )
-  )
+  // 设置 is a menu now, so the panel is two presses away: the button opens
+  // the menu and the first item opens the panel.  A check that still pressed
+  // the button once would find no panel and report it as a bug in the panel.
+  log('click 设置', await openMenu('设置'))
+  await new Promise((r) => setTimeout(r, 300))
+  log('click 设置…', await clickMenu('设置…'))
   await new Promise((r) => setTimeout(r, 500))
   const setInfo = await w.webContents.executeJavaScript(
     '(()=>{const m=document.querySelector(".settings");if(!m)return JSON.stringify({open:0});'

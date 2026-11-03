@@ -233,7 +233,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 导入 token | 首次使用必读，见下 |
 | 补 PDF | 云端有附件但本地没有的，一键下载到本地 PDF 目录 |
 | 导入 PDF | 把 PDF 拖进窗口就建条目，元数据交给服务端从文件里抽 |
-| 导入书目 | BibTeX / RIS / EndNote XML，先预览再导入，已有的标为重复 |
+| 导入 | 「导入」下两条：读一个 BibTeX / RIS / EndNote XML 文件（先预览，已有的标为重复），或按 DOI / arXiv id / 标题添加——**后者不需要 PDF** |
 | 改元数据 | 右侧详情面板直接编辑，PATCH 回 Mendeley 云端 |
 | 标注同步 | 高亮推到 Mendeley `/annotations`，也能把云端的拉回来 |
 | 导出 | 「导出」下 BibTeX / RIS / EndNote XML 三档，可只导出当前筛选结果或单条；弹保存对话框自己选位置，记住上次目录 |
@@ -242,7 +242,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 检查更新 | 一键从 GitHub Releases 拉新版、下载、安装并重启 |
 | 安装包签名 | CI 已接好，配上证书即签名；`npm run signcheck` 可自查是否签上 |
 
-### 附带（保留，收在「更多」里）
+### 附带（保留，但不占工具栏主位）
 
 | 功能 | 说明 |
 | --- | --- |
@@ -250,7 +250,6 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 批量 | Shift 选范围、Ctrl 加减选、Ctrl+A 选中当前结果全部、Esc 取消多选；批量加入文件夹 / 改字段 / 移入回收站 / 导出 |
 | 回收站 | 移入回收站、恢复、彻底删除 |
 | 补全元数据 | 查 Crossref 与 arXiv，列出候选让你挑，不自动覆盖 |
-| 按标识符添加 | 粘 DOI / arXiv id / 标题，查到后确认再建条目，不需要 PDF |
 | 撤销 | Ctrl+Z：覆盖删除、合并、批量加文件夹、批量改字段 |
 
 ### 应用本身

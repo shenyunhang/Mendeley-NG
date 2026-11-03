@@ -164,35 +164,14 @@ export default function Toolbar(p: Props) {
   // toggle that got in.
   const showClear = p.view.kind === 'fulltext' || searching.length > 0
 
+  /** What is left here is what has no home of its own.  It used to hold eight
+   *  items, four of which were only here because nothing had claimed them:
+   *  adding by identifier is another way of importing, importing a token is
+   *  what makes syncing possible, and checking for updates and opening the
+   *  project page are both about this program rather than about the library.
+   *  A menu called 更多 grows by admitting that a command had nowhere to go,
+   *  so the four that did have somewhere went there. */
   const more: MenuItem[] = [
-    {
-      label: '导入 token',
-      title: '选择 get-token 生成的 token.json',
-      run: () => {
-        void window.api.importToken().then((r) => {
-          if (r?.ok) return p.onSync(false)
-          if (r) p.onErr('导入 token 失败：' + (r.error ?? '未选择文件'))
-        })
-      }
-    },
-    {
-      label: p.upd?.phase === 'available' ? `更新到 ${p.upd.version}` : '检查更新',
-      disabled: !!p.upd && ['checking', 'downloading', 'downloaded'].includes(p.upd.phase),
-      title: p.upd?.current
-        ? `当前 ${p.upd.current}。从 GitHub Releases 拉取最新版本并自动安装重启`
-        : '从 GitHub Releases 拉取最新版本并自动安装重启',
-      run: () => {
-        void window.api.checkUpdate().then((r) => {
-          if (r?.unsupported || r?.error || !r?.available) return
-          void window.api.downloadUpdate()
-        })
-      }
-    },
-    {
-      label: '按标识符添加',
-      title: '按 DOI / arXiv id / 标题添加条目，不需要 PDF',
-      run: () => p.onView({ kind: 'add' })
-    },
     {
       label: '查重',
       disabled: !p.docs.length,
@@ -214,6 +193,65 @@ export default function Toolbar(p: Props) {
       disabled: !p.canSaveSearch,
       title: '把当前的文件夹 + 搜索词 + 筛选存成一个虚拟文件夹',
       run: p.onSaveSearch
+    }
+  ]
+
+  /** The two ways a paper arrives, under the word that already covers both.
+   *  Adding by identifier used to sit two menus away from the button called
+   *  导入文献 while being the same job without a file — and it is the one a
+   *  reader who has no PDF yet needs first. */
+  const imports: MenuItem[] = [
+    {
+      label: '导入文件…',
+      title: '导入 BibTeX / RIS / EndNote XML',
+      run: async () => {
+        const files = await window.api.openRefFiles()
+        const all: Entry[] = []
+        for (const f of files) all.push(...parseAny(f.name, f.text))
+        p.onImportRefs(all)
+      }
+    },
+    {
+      label: '按标识符添加…',
+      title: '按 DOI / arXiv id / 标题添加条目，不需要 PDF',
+      run: () => p.onView({ kind: 'add' })
+    }
+  ]
+
+  /** The program itself: how it is set up, whether it is current, and where
+   *  it lives.  These four were in 更多 for want of anywhere else, not because
+   *  they belong beside 查重 and 回收站.  The settings panel already carries a
+   *  同步 section and its own update button, which is exactly where somebody
+   *  who has just found out that they have no token goes looking. */
+  const setup: MenuItem[] = [
+    {
+      label: '设置…',
+      title: '主题、字号、PDF 目录、命名模板、全文索引',
+      run: () => p.onSettings()
+    },
+    {
+      label: '导入 token…',
+      title: '选择 get-token 生成的 token.json',
+      run: () => {
+        void window.api.importToken().then((r) => {
+          if (r?.ok) return p.onSync(false)
+          if (r) p.onErr('导入 token 失败：' + (r.error ?? '未选择文件'))
+        })
+      }
+    },
+    { sep: true },
+    {
+      label: p.upd?.phase === 'available' ? `更新到 ${p.upd.version}` : '检查更新',
+      disabled: !!p.upd && ['checking', 'downloading', 'downloaded'].includes(p.upd.phase),
+      title: p.upd?.current
+        ? `当前 ${p.upd.current}。从 GitHub Releases 拉取最新版本并自动安装重启`
+        : '从 GitHub Releases 拉取最新版本并自动安装重启',
+      run: () => {
+        void window.api.checkUpdate().then((r) => {
+          if (r?.unsupported || r?.error || !r?.available) return
+          void window.api.downloadUpdate()
+        })
+      }
     },
     {
       // the ↗ is the whole warning: this one leaves the app, which none of
@@ -320,25 +358,17 @@ export default function Toolbar(p: Props) {
         </select>
       </span>
 
-      <button
-        onClick={async () => {
-          const files = await window.api.openRefFiles()
-          const all: Entry[] = []
-          for (const f of files) all.push(...parseAny(f.name, f.text))
-          p.onImportRefs(all)
-        }}
-        title="导入 BibTeX / RIS / EndNote XML"
-      >
-        导入文献
-      </button>
-      <button onClick={() => p.onSettings()} title="主题、字号、PDF 目录、命名模板、全文索引">
-        设置
-      </button>
       <MenuButton
-        label="更多"
-        title="不常用的命令：导入 token、检查更新、按标识符添加、查重、全部标注、回收站、保存搜索、项目主页"
-        items={more}
+        label="导入"
+        title="把条目弄进库里：读一个书目文件，或按 DOI / arXiv id / 标题添加（不需要 PDF）"
+        items={imports}
       />
+      <MenuButton
+        label="设置"
+        title="主题、字号、PDF 目录、命名模板、全文索引；导入 token、检查更新与项目主页也在这里"
+        items={setup}
+      />
+      <MenuButton label="更多" title="查重、全部标注、回收站、保存搜索" items={more} />
       <button
         onClick={p.onUndo}
         disabled={!p.undoLabel}
