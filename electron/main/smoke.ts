@@ -3030,13 +3030,18 @@ export async function runSmoke() {
       refPage: wantCites.refPage,
       on: wantCites.on
     })
-    if (wantCites.on !== 1)
-      await w.webContents.executeJavaScript(
-        `(()=>{const i=document.querySelector(".pdf-bar input");if(!i)return 0;`
-          + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
-          + `set.call(i,${JSON.stringify(String(wantCites.on))});`
-          + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
-      )
+    // The page to hover on is set rather than assumed.  What page a freshly
+    // opened paper lands on is a fact about the paper before it as much as
+    // about this one — the reader carries its page across a change of
+    // document — and a reader left on page eight reads page eight of the new
+    // paper too, which on a reference list is a page with no markers on it.
+    await w.webContents.executeJavaScript(
+      `(()=>{const i=document.querySelector(".pdf-bar input");if(!i)return 0;`
+        + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+        + `set.call(i,${JSON.stringify(String(wantCites.on))});`
+        + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+    )
+    await new Promise((r) => setTimeout(r, 1200))
     // The list is read in the background once the paper is open, so what is
     // waited for is the hotspots rather than a fixed time.
     // Where the hotspots are is as much a part of the answer as what they
@@ -3072,9 +3077,16 @@ export async function runSmoke() {
       hot.n >= 1 && hot.pe === 'auto',
       hot
     )
+    // A marker can be eleven numbers long.  `[27, 39, 25, 45, 55, 36, 4, 59,
+    // 3, 60, 50]` is one marker on the first page of Sohn et al. 2020 and it
+    // measures 0.277 of the page across — the line used to sit at 0.2, which
+    // is a ruler calibrated on `[3]` and one that calls a correct box wrong.
+    // What the box must not be is a line: a coordinate space that is out by a
+    // page puts the boxes outside it, which `outside` catches, and a box laid
+    // over a run instead of over the marker is a column wide.
     expect(
       'the box it offers it from is on the page and no bigger than a marker',
-      hot.outside === 0 && hot.maxW < 0.2 && hot.maxH < 0.06 && hot.maxW > 0,
+      hot.outside === 0 && hot.maxW < 0.4 && hot.maxH < 0.06 && hot.maxW > 0,
       hot
     )
 
@@ -3313,37 +3325,103 @@ export async function runSmoke() {
     citedNumeric
   })
   log('cite style restored', await setStyle(styleBefore))
-  await w.webContents.executeJavaScript(
-    `window.api.copyText(${JSON.stringify(String(clipBefore ?? ''))})`
-  )
+  // The reader's clipboard is put back through the same door it was read
+  // through.  What was on it is not this run's to judge — it can be an image,
+  // a path, or a fragment of a spreadsheet — and a rejected invoke here ends
+  // the whole run, which is the wrong price for leaving it as it was found.
+  await w.webContents
+    .executeJavaScript(`window.api.copyText(${JSON.stringify(String(clipBefore ?? ''))})`)
+    .catch((e) => log('the clipboard was not put back', String(e)))
 
   // The row menu.  Right clicking has to (a) open it where the pointer is,
   // (b) act on the row under the pointer, and (c) close on the next click —
   // a menu that survives its own action is the usual way these go wrong.
   const menuInfo = async () =>
     w.webContents.executeJavaScript(
-      '(()=>{const m=document.querySelector(".row-menu");if(!m)return JSON.stringify({open:0});'
+      // the read is inside its own try: a script that throws ends the run
+        // rather than failing the check, and a run that stops half way leaves
+        // the config for the next one to trip over
+      '(()=>{try{const m=document.querySelector(".row-menu");'
+      + 'if(!m)return JSON.stringify({open:0});'
       + 'const r=m.getBoundingClientRect();'
       + 'return JSON.stringify({open:1,head:(document.querySelector(".row-menu-head")||{}).textContent||null,'
+      // the box itself, and the window it has to fit in: "outside the window"
+      // is four different faults (off the top, off the bottom, off either
+      // side) and a red that only says which one it is saves a whole run
+      + 'rect:{l:Math.round(r.left),t:Math.round(r.top),r:Math.round(r.right),'
+      + 'b:Math.round(r.bottom),w:innerWidth,h:innerHeight},'
       + 'items:[...document.querySelectorAll(".row-menu-item")].map(b=>b.textContent),'
       + 'seps:document.querySelectorAll(".row-menu-sep").length,'
-      + 'inWindow:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})})()'
+      + 'inWindow:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})'
+      + '}catch(e){return JSON.stringify({open:0,err:String(e)})}'
+      + '})()'
     )
+  // and parsed the same careful way: a page that answers with something that
+  // is not JSON is a page to be reported, not a run to be ended
+  const menuRead = async (): Promise<{
+    open: number
+    head?: string | null
+    rect?: { l: number; t: number; r: number; b: number; w: number; h: number }
+    items?: string[]
+    seps?: number
+    inWindow?: boolean
+    err?: string
+  }> => {
+    const raw = await menuInfo()
+    try {
+      return JSON.parse(String(raw ?? 'null')) as {
+        open: number
+        head?: string | null
+        rect?: { l: number; t: number; r: number; b: number; w: number; h: number }
+        items?: string[]
+        seps?: number
+        inWindow?: boolean
+        err?: string
+      }
+    } catch (e) {
+      return { open: 0, err: `unreadable: ${String(e)}` }
+    }
+  }
   await w.webContents.executeJavaScript(
-    '(()=>{const r=[...document.querySelectorAll("div.row")].filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
-    + 'if(!r.length)return 0;const b=r[0].getBoundingClientRect();'
-    + 'r[0].dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,'
-    + 'clientX:Math.round(b.left+40),clientY:Math.round(b.top+8)}));return 1})()'
+    '(()=>{const r=[...document.querySelectorAll("div.row")]'
+      + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"))'
+      // A row the reader cannot see is not one they can right click.  The
+      // virtual list keeps a few rows past the fold, so the first row in the
+      // document is not always the first one on the screen: asked for above
+      // the top edge, the menu opens above the window, which is a fault in
+      // the asking and not in the menu.
+      + '.filter(e=>{const b=e.getBoundingClientRect();return b.top>=0&&b.bottom<=innerHeight});'
+      + 'if(!r.length)return 0;const b=r[0].getBoundingClientRect();'
+      + 'r[0].dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,'
+      + 'clientX:Math.round(b.left+40),clientY:Math.round(b.top+8)}));return 1})()'
   )
-  await new Promise((r) => setTimeout(r, 500))
-  const mi = JSON.parse(await menuInfo())
+  // Waited for rather than read after half a second.  A right click on a row
+  // does two things at once: it selects the row, which puts that paper's PDF
+  // in the right pane, and it asks for the menu.  The menu is cheap and the
+  // PDF is not, and a menu read while the paper is still opening reads a
+  // window that has not drawn it yet — which looks like a right click the app
+  // ignored, and sends the next person looking for a bug in the menu.
+  await until(
+    '(()=>{return document.querySelector(".row-menu")?"yes":"no"})()',
+    (v) => v === 'yes',
+    6000
+  )
+  // and a moment for it to be placed: the card measures itself and pulls
+  // itself back inside the window, so the box read straight after it appears
+  // is the box before that, which is sometimes a box outside the window
+  await new Promise((r) => setTimeout(r, 300))
+  const mi = await menuRead()
   log('row menu', JSON.stringify(mi))
   expect('a right click opens the row menu', mi.open === 1, mi)
   // `|| []` rather than a bare read: a menu that did not open answers with no
   // list at all, and reading `.length` off that throws, which ends the run
   // before the config is put back — one red line turning into a dozen more on
   // every later run, because the next run starts from what this one left.
-  expect('the row menu offers actions and separators', (mi.items || []).length >= 4 && mi.seps >= 1, mi)
+  expect(
+    'the row menu offers actions and separators',
+    (mi.items || []).length >= 4 && (mi.seps || 0) >= 1,
+    mi
+  )
   expect('the row menu stays inside the window', mi.inWindow === true, mi)
   expect(
     'the row menu can hand the file to the OS',
@@ -3432,7 +3510,7 @@ export async function runSmoke() {
     String(titleCopied || '').length > 3 && titleCopied !== clipBefore,
     { titleCopied, clipBefore }
   )
-  expect('the menu closes after an item is chosen', (JSON.parse(await menuInfo())).open === 0, mi)
+  expect('the menu closes after an item is chosen', (await menuRead()).open === 0, mi)
   await w.webContents.executeJavaScript(
     `window.api.copyText(${JSON.stringify(String(clipBefore ?? ''))})`
   )
@@ -3671,6 +3749,19 @@ export async function runSmoke() {
   // In-reader find.  The query is taken from the page's own text layer rather
   // than guessed, so the assertion holds for whichever paper happens to be
   // first in the library, and asks for a real hit instead of a null result.
+  //
+  // Page one is where it is asked, because the check before this one leaves
+  // the reader wherever its own jump landed: a paper with no outline sends it
+  // to a page chosen at random, and a figure page has no words on it to look
+  // for.  A query taken from a page with no text on it is an empty query, and
+  // an empty query finds nothing — which is a red about the page, not about
+  // find.
+  await w.webContents.executeJavaScript(
+    `(()=>{const i=document.querySelector(".pdf-bar input");if(!i)return 0;`
+      + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+      + `set.call(i,"1");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+  )
+  await new Promise((r) => setTimeout(r, 1500))
   log('click 查找', await clickBar('查找'))
   await new Promise((r) => setTimeout(r, 300))
   const query = await w.webContents.executeJavaScript(
