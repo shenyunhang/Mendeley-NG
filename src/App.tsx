@@ -2186,6 +2186,14 @@ export default function App() {
               window.api.setConfig({ dupeIgnores: next })
             }}
             onClose={() => setView(LIBRARY)}
+            onOpen={(d) => {
+              setSelId(d.id)
+              // a paper that has no file on disk opens on its details:
+              // which of two entries has the PDF is very often exactly what
+              // the reader came here to find out
+              setRightTab(d.localPdf ? 'pdf' : 'details')
+            }}
+            openId={selId}
             onMerge={async (g, keeper) => {
               const others = g.docs.filter((d) => d.id !== keeper.id)
               const go = await askConfirm({

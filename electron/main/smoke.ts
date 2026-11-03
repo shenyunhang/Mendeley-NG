@@ -5281,6 +5281,76 @@ export async function runSmoke() {
       )
     )
     expect('undoing clears what was remembered', !clearedCfg || clearedCfg.length === 0, clearedCfg)
+    // A group is a decision between papers, and a list that only describes
+    // them asks for that decision to be made on the titles.  Opening one has
+    // to be one press, and the row being looked at has to be knowable —
+    // three rows under one heading with the same title cannot be told apart
+    // any other way.
+    //
+    // Which paper opened is read back off the row that claims to be open
+    // rather than off the pane: the pane shows a PDF or a set of fields and
+    // neither of them names the paper in a way this run can compare against
+    // the row that was pressed.  The mark is driven by the same selection
+    // the pane is, so it is the same fact read from the cheaper end.
+    const dupeRow = JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(()=>{const r=[...document.querySelectorAll(".dupe-group .trash-row")];'
+        + 'if(!r.length)return JSON.stringify({rows:0});'
+        + 'const id=r[0].dataset.id||"";r[0].click();return JSON.stringify({rows:r.length,id:id})})()'
+      )
+    )
+    await new Promise((r) => setTimeout(r, 2500))
+    const dupeOpened = JSON.parse(
+      await w.webContents.executeJavaScript(
+        'JSON.stringify({open:[...document.querySelectorAll(".dupe-group .trash-row.open")]'
+        + '.map(r=>r.dataset.id||""),'
+        + 'pdf:!!document.querySelector(".pane-right .pdf-bar input, .pdf-bar input"),'
+        + 'det:!!document.querySelector(".pane-right .det, .pane-right .details, .pane-right table"),'
+        + 'empty:(document.querySelector(".pane-right .empty")||{}).textContent||null})'
+      )
+    )
+    log('opened from a duplicate group', { pressed: dupeRow, opened: dupeOpened })
+    expect(
+      'a row in a duplicate group opens that paper',
+      dupeRow.rows > 0 &&
+        dupeOpened.open.length === 1 &&
+        dupeOpened.open[0] === dupeRow.id &&
+        dupeOpened.empty === null &&
+        (dupeOpened.pdf === true || dupeOpened.det === true),
+      { pressed: dupeRow, opened: dupeOpened }
+    )
+    // The row is also a button host: pressing 设为保留 must not open the
+    // paper it belongs to, or a reader comparing two entries loses whichever
+    // one they had up every time they change their mind about the keeper.
+    const dupeKeep = JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(()=>{const r=[...document.querySelectorAll(".dupe-group .trash-row")]'
+        + '.filter(x=>!x.classList.contains("keeper"));'
+        + 'if(!r.length)return JSON.stringify({rows:0});'
+        + 'const b=[...r[0].querySelectorAll("button")]'
+        + '.find(x=>x.textContent.trim()==="设为保留");'
+        + 'if(!b)return JSON.stringify({rows:r.length,btn:0});'
+        + 'b.click();return JSON.stringify({rows:r.length,btn:1,id:r[0].dataset.id||""})})()'
+      )
+    )
+    await new Promise((r) => setTimeout(r, 1200))
+    const dupeAfterKeep = JSON.parse(
+      await w.webContents.executeJavaScript(
+        'JSON.stringify({open:[...document.querySelectorAll(".dupe-group .trash-row.open")]'
+        + '.map(r=>r.dataset.id||""),'
+        + 'keeper:[...document.querySelectorAll(".dupe-group .trash-row.keeper")]'
+        + '.map(r=>r.dataset.id||"")})'
+      )
+    )
+    log('设为保留 pressed inside a group', { pressed: dupeKeep, after: dupeAfterKeep })
+    expect(
+      'pressing 设为保留 does not open that paper instead',
+      dupeKeep.btn === 1 &&
+        dupeAfterKeep.open.length === 1 &&
+        dupeAfterKeep.open[0] === dupeRow.id &&
+        dupeAfterKeep.keeper.includes(dupeKeep.id),
+      { pressed: dupeKeep, after: dupeAfterKeep, before: dupeOpened }
+    )
   }
   await w.webContents.executeJavaScript(
     '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
