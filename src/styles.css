@@ -1791,3 +1791,52 @@ button.danger:hover:not(:disabled) {
 .swatch:hover {
   border-color: var(--fg-dim);
 }
+
+/* A citation in the body.  Nothing is drawn for one until the pointer is on
+   it, for the same reason a link is drawn that way: a page ringed in boxes
+   makes every number look like it goes somewhere.  The ring on hover is the
+   whole answer to "does this one". */
+.cite-hot {
+  cursor: help;
+}
+.cite-hot:hover {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  background: rgba(90, 170, 255, 0.16);
+}
+.cite-pop {
+  z-index: 40;
+  max-width: 460px;
+  padding: 6px 8px;
+  background: var(--panel-head);
+  border: 1px solid var(--sep);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.cite-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.cite-row + .cite-row {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--sep);
+}
+.cite-no {
+  flex: none;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.cite-tx {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+.cite-open {
+  flex: none;
+  padding: 1px 6px;
+  font-size: 0.733rem;
+}

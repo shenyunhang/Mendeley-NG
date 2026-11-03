@@ -36,7 +36,10 @@ import type { LinkBox } from '../lib/pdflinks'
 import { useContinuousPages } from '../lib/hooks/useContinuousPages'
 import { usePdfFind } from '../lib/hooks/usePdfFind'
 import { usePdfLinks } from '../lib/hooks/usePdfLinks'
+import { usePdfRefs } from '../lib/hooks/usePdfRefs'
 import { usePdfAnnotations } from '../lib/hooks/usePdfAnnotations'
+import type { CiteMark } from '../lib/pdfrefs'
+import { spotFor, type Spot } from '../lib/popspot'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -45,6 +48,8 @@ export default function PdfViewer({
   onLocalPdf,
   jumpTo,
   hitQuery,
+  refDoc,
+  onOpenDoc,
   confirm
 }: {
   doc: Doc
@@ -55,6 +60,12 @@ export default function PdfViewer({
   /** The word the library was searched for, to be marked on the paper.  See
    *  the effect that watches it for why it is marked rather than looked up. */
   hitQuery?: string
+  /** The library's own copy of a reference, or null.  Asked for when a
+   *  citation is hovered and not before, so a library of several thousand
+   *  papers is not walked on every page. */
+  refDoc?: (entry: string) => Doc | null
+  /** Open another paper in place of this one. */
+  onOpenDoc?: (id: string) => void
   /** The app's one confirmation box.  Deleting an annotation is the only
    *  destructive thing in here, and it has no way back. */
   confirm: (req: { title: string; body?: string; ok?: string }) => Promise<boolean>
@@ -648,6 +659,18 @@ export default function PdfViewer({
     docKey: doc.localPdf
   })
 
+  const { list, marks } = usePdfRefs({
+    pdf,
+    numPages,
+    continuous,
+    page,
+    docKey: doc.localPdf
+  })
+  /** The page the reference list opens on; markers before it are the body's.
+   *  0 while the list is still being looked for, and nothing is offered until
+   *  it is known. */
+  const refPage = list?.page ?? 0
+
   /** Which layers the selection could have been made in.  In continuous mode
    *  the column has one text layer per page, so they are tried in reading
    *  order; the single page has only its own. */
@@ -891,6 +914,142 @@ export default function PdfViewer({
 
   const linkMarks = (n: number) => linkLayers[n] ?? null
 
+  /**
+   * A citation in the body, answered where the reader is.
+   *
+   * Meeting "[3]" means going to the end of the paper, counting to the third
+   * entry, holding it in mind and coming back — and losing the place on the
+   * way.  It is the most frequent interruption in reading a paper and every
+   * other reader on this desk answers it by putting the entry under the
+   * pointer, so that is what happens here.
+   *
+   * The whole thing is built to be able to say nothing.  A marker whose every
+   * number is not in the list gets no hotspot at all: half a match is how a
+   * reader is sent to a paper they did not ask about, and they have no reason
+   * to doubt it.
+   */
+  const entriesRef = useRef<Map<number, string> | null>(null)
+  entriesRef.current = list?.entries ?? null
+  const refDocRef = useRef(refDoc)
+  refDocRef.current = refDoc
+
+  /** One entry under the pointer: its number, its text, and the library's
+   *  copy of it if there is one. */
+  const [cite, setCite] = useState<{
+    items: { n: number; text: string; doc: { id: string; title?: string } | null }[]
+    anchor: DOMRect
+  } | null>(null)
+  const citeCard = useRef<HTMLDivElement>(null)
+  const [citeSpot, setCiteSpot] = useState<Spot | null>(null)
+  /**
+   * The pointer leaving the marker hides the card, but not at once: the card
+   * has to be reachable, because "打开" is on it.  Without the wait, moving
+   * towards the button closes the thing the button is on.
+   */
+  const hideCite = useRef<number | null>(null)
+  const dropCite = () => {
+    if (hideCite.current !== null) window.clearTimeout(hideCite.current)
+    hideCite.current = window.setTimeout(() => setCite(null), 260)
+  }
+  const keepCite = () => {
+    if (hideCite.current !== null) window.clearTimeout(hideCite.current)
+    hideCite.current = null
+  }
+
+  const showCite = (m: CiteMark, el: HTMLElement) => {
+    const ents = entriesRef.current
+    keepCite()
+    if (!ents) return
+    const items = m.nums
+      .map((n) => ({ n, text: ents.get(n) ?? '' }))
+      .filter((x) => x.text)
+      .map((x) => {
+        const d = refDocRef.current?.(x.text) ?? null
+        return { ...x, doc: d ? { id: d.id, title: d.title } : null }
+      })
+    if (!items.length) return
+    setCite({ items, anchor: el.getBoundingClientRect() })
+  }
+
+  // the card is measured after it is in the document and before it is painted,
+  // so it is never shown at the corner it first lands in
+  useLayoutEffect(() => {
+    if (!cite || !citeCard.current) {
+      setCiteSpot(null)
+      return
+    }
+    setCiteSpot(spotFor(cite.anchor, citeCard.current.getBoundingClientRect()))
+  }, [cite])
+
+  // a card belongs to the marker it was opened for, and that marker is on a
+  // page that has since been left
+  useEffect(() => {
+    setCite(null)
+  }, [page, doc.id])
+
+  useEffect(() => () => keepCite(), [])
+
+  // Built once per page, for the same reason the links are: a column holding
+  // every marker in a fifty-page paper is not to be rebuilt on a keystroke.
+  const citeBuilt = useRef<{
+    marks: Record<number, CiteMark[]>
+    entries: Map<number, string> | null
+    marking: boolean
+    out: Record<number, ReactNode>
+  }>({ marks: {}, entries: null, marking: false, out: {} })
+
+  const citeLayers = useMemo(() => {
+    const last = citeBuilt.current
+    const ents = entriesRef.current
+    const out: Record<number, ReactNode> = {}
+    for (const k of Object.keys(marks)) {
+      const n = Number(k)
+      if (
+        last.out[n] !== undefined &&
+        last.marks[n] === marks[n] &&
+        last.entries === ents &&
+        last.marking === marking
+      ) {
+        out[n] = last.out[n]
+        continue
+      }
+      out[n] = (marks[n] ?? []).flatMap((m, i) =>
+        // every number, not any number: `[1-3]` where 2 cannot be read is not
+        // a citation pointing at 1 and 3
+        !ents || !m.nums.every((x) => ents.has(x))
+          ? []
+          : m.rects.map((r, j) => (
+              <div
+                key={`c-${i}-${j}`}
+                className="cite-hot"
+                style={{
+                  position: 'absolute',
+                  left: `${r.x * 100}%`,
+                  top: `${r.y * 100}%`,
+                  width: `${r.w * 100}%`,
+                  height: `${r.h * 100}%`,
+                  // the layer stands down while highlighting is on, exactly
+                  // as the links do: a drag across the page must not stop on
+                  // a card on its way
+                  pointerEvents: marking ? 'none' : 'auto'
+                }}
+                onMouseEnter={(e) => showCite(m, e.currentTarget)}
+                onMouseLeave={dropCite}
+                onClick={() => {
+                  // and pressing one turns to the list, which is where the
+                  // entry is written out in full
+                  if (refPage) revealRef.current(refPage)
+                }}
+              />
+            ))
+      )
+    }
+    citeBuilt.current = { marks, entries: ents, marking, out }
+    return out
+  }, [marks, list, marking, refPage])
+
+  const citeMarks = (n: number) => (refPage ? (citeLayers[n] ?? null) : null)
+
   const download = async () => {
     if (busy) return
     setBusy(true)
@@ -1122,7 +1281,9 @@ export default function PdfViewer({
         </div>
       )}
 
-      <div className="pdf-body">
+      {/* a card is pinned to a spot on the page, so the page moving out from
+          under it has to take it with it */}
+      <div className="pdf-body" onWheel={() => setCite(null)}>
         {side !== 'none' && (
           <div className="pdf-outline">
             {side === 'outline'
@@ -1183,6 +1344,9 @@ export default function PdfViewer({
               {/* invisible, selectable, the reason highlights follow words */}
               <div className="tx-layer" ref={layerRef} />
               {linkMarks(page)}
+              {/* over the links: a citation that is also a link is a citation
+                  first, and the card says more than the jump does */}
+              {citeMarks(page)}
             </div>
           </div>
         ) : (
@@ -1231,6 +1395,7 @@ export default function PdfViewer({
                       }}
                     />
                     {linkMarks(n)}
+                    {citeMarks(n)}
                   </div>
                 </div>
               )
@@ -1275,6 +1440,46 @@ export default function PdfViewer({
           </div>
         )}
       </div>
+
+      {/* The card hangs off the pane rather than the page: the paper sits in a
+          box that scrolls, and a card inside it would be cut off at that
+          box's edge.  Fixed placement escapes the clip, at the cost of having
+          to be placed by hand — and of having to be moved when the page does,
+          which is why scrolling drops it. */}
+      {cite && (
+        <div
+          ref={citeCard}
+          className="cite-pop"
+          style={{
+            position: 'fixed',
+            left: citeSpot?.left ?? 0,
+            top: citeSpot?.top ?? 0,
+            visibility: citeSpot ? 'visible' : 'hidden'
+          }}
+          onMouseEnter={keepCite}
+          onMouseLeave={dropCite}
+        >
+          {cite.items.map((it, i) => (
+            <div key={i} className="cite-row">
+              <span className="cite-no">[{it.n}]</span>
+              <span className="cite-tx">{it.text}</span>
+              {it.doc && (
+                <button
+                  className="cite-open"
+                  title={it.doc.title ?? ''}
+                  onClick={() => {
+                    const id = it.doc?.id
+                    setCite(null)
+                    if (id) onOpenDoc?.(id)
+                  }}
+                >
+                  打开
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

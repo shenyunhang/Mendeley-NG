@@ -65,6 +65,7 @@ import {
   toRis
 } from './lib/export'
 import { buildTree, byName } from './lib/tree'
+import { docForRef } from './lib/refly'
 import { useConfig } from './lib/hooks/useConfig'
 import { useFullText } from './lib/hooks/useFullText'
 import { useUndo } from './lib/hooks/useUndo'
@@ -1816,6 +1817,15 @@ export default function App() {
    * panes rather than sitting next to them — so opening one does not leave
    * two readers arguing over where the paper was left.
    */
+  /**
+   * Which paper in the library a reference in a PDF is.
+   *
+   * Asked for one entry at a time, on hover, which is why it can afford to
+   * look down the whole list: the alternative is a paper that cites something
+   * already on the shelf and offers no way to get to it.
+   */
+  const refDocFor = useCallback((entry: string) => docForRef(docs, entry), [docs])
+
   const reader = selected ? (
     <PdfViewer
       doc={selected}
@@ -1830,6 +1840,13 @@ export default function App() {
           l ? { ...l, docs: l.docs.map((x) => (x.id === id ? { ...x, localPdf: p } : x)) } : l
         )
       }
+      // asked for when a citation is hovered, so a reference that is already
+      // on the shelf can be opened from the paper that cites it
+      refDoc={refDocFor}
+      onOpenDoc={(id) => {
+        setSelId(id)
+        setRightTab('pdf')
+      }}
     />
   ) : null
 

@@ -25,6 +25,18 @@ import {
   toNotesMarkdown
 } from '../../src/lib/export'
 import { describeSyncFailure } from '../../src/lib/offline'
+// The reference list is read out of the paper in the renderer, but the rules
+// that decide whether it was read correctly are pure, and a popover that
+// names the wrong paper is the kind of mistake that has to be caught on every
+// run rather than believed.
+import {
+  citeNums,
+  docForRef,
+  isRefHead,
+  linesOf,
+  markersIn,
+  parseRefEntries
+} from '../../src/lib/refly'
 import { sync } from './library'
 import {
   ftAdd,
@@ -2496,6 +2508,319 @@ export async function runSmoke() {
     await new Promise((r) => setTimeout(r, 1500))
   }
   log('links in a paper', linkInfo)
+
+  // A citation in the body, answered where the reader is.
+  //
+  // Meeting "[3]" in a paper means going to the end, counting to the third
+  // entry, holding it in mind and coming back.  This is the most frequent
+  // interruption in reading a paper, and the answer to it is only worth
+  // having if it is right: a popover naming the wrong paper sends the reader
+  // to a paper they did not ask about, with no reason to doubt it.  So what
+  // is checked is not that a popover appears but that the entry in it is one
+  // of the entries the paper actually printed.
+  const citeRules = {
+    // an appendix numbering its steps also opens its lines with `1.`
+    appendix: parseRefEntries([
+      '1. Take the first step.',
+      '2. Then take the second one.',
+      '3. And the third.'
+    ]).size,
+    // a range this long is a review's way of saying "many"; it is not
+    // something to put under the pointer
+    longRange: citeNums('[1-40]'),
+    // and two entries are not enough to believe a list was found at all
+    short: parseRefEntries([
+      '[1] A. Author. A paper. 2020.',
+      '[2] B. Author. Another paper. 2021.'
+    ]).size,
+    byDoi:
+      docForRef(
+        [{ id: 'a', doi: '10.1000/xyz' } as Doc, { id: 'b', doi: '10.2000/other' } as Doc],
+        'A. Author. A paper. Journal, 2020. doi:10.1000/xyz.'
+      )?.id ?? null,
+    // an entry carrying no identifier is not matched to anything: guessing
+    // from a title is how the wrong paper gets opened
+    noId: docForRef([{ id: 'a', doi: '10.1000/xyz' } as Doc], 'A. Author. A paper. 2020.')
+  }
+  expect('an appendix numbering its steps is not read as a reference list', citeRules.appendix === 0, citeRules)
+  expect('a range of forty is not put under the pointer', citeRules.longRange === null, citeRules)
+  expect('two entries are not enough to believe a list', citeRules.short === 0, citeRules)
+  expect('a reference is matched to the library by its DOI', citeRules.byDoi === 'a', citeRules)
+  expect('a reference with no identifier is matched to nothing', citeRules.noId === null, citeRules)
+
+  let citeInfo: {
+    ok?: boolean
+    skip?: string
+    hots?: number
+    onPage?: number
+    refPage?: number
+    refHots?: number
+    text?: string
+    second?: string | null
+  } = {}
+  /**
+   * Which paper to read is a property of the library, not of the run, so it
+   * is asked for rather than written down — and what is asked for is not
+   * merely "does this paper have a list" but "does a marker a reader can
+   * actually hover resolve to an entry in it".  The list alone proves
+   * nothing: markers that are not citations, and entries that are not there,
+   * are exactly the failure this is here to catch.
+   */
+  type Runs = { str?: string; transform?: number[] }[]
+  /** One paper's list, read the way the reader reads it. */
+  const scanPaper = async (d: Doc) => {
+    const data = new Uint8Array(fs.readFileSync(d.localPdf as string))
+    const pdf = await pdfjs.getDocument({ data, useSystemFonts: false }).promise
+    try {
+      let entries = new Map<number, string>()
+      let refPage = 0
+      const later: string[] = []
+      for (let n = pdf.numPages; n >= Math.max(1, pdf.numPages - 59); n--) {
+        const pg = await pdf.getPage(n)
+        const rows = linesOf((await pg.getTextContent()).items as unknown as Runs).map(
+          (l) => l.text
+        )
+        const at = rows.findIndex(isRefHead)
+        if (at >= 0) {
+          const got = parseRefEntries([...rows.slice(at + 1), ...later])
+          if (got.size >= 3) {
+            entries = got
+            refPage = n
+            break
+          }
+        }
+        later.unshift(...rows)
+      }
+      if (!refPage) return null
+      // the page to hover on: the first one carrying a marker every number of
+      // which is in the list, since that is the only kind that gets a hotspot
+      let on = 0
+      for (let n = 1; n < refPage && !on; n++) {
+        const pg = await pdf.getPage(n)
+        const lines = linesOf((await pg.getTextContent()).items as unknown as Runs)
+        if (lines.some((l) => markersIn(l.text).some((m) => m.nums.every((x) => entries.has(x)))))
+          on = n
+      }
+      return on ? { refPage, on, entries: [...entries.values()] } : null
+    } finally {
+      await pdf.destroy().catch(() => {})
+    }
+  }
+
+  /**
+   * Which paper to read is a property of the library, not of the run, so it
+   * is asked for rather than written down — and what is asked for is not
+   * merely "does this paper have a list" but "does a marker a reader can
+   * actually hover resolve to an entry in it".  The list alone proves
+   * nothing: markers that are not citations, and entries that are not there,
+   * are exactly the failure this is here to catch.
+   *
+   * The paper is opened first and identified afterwards, from the row the
+   * table says is selected.  A title typed into the search box is not enough
+   * to land on a particular paper — several papers share a beginning, and the
+   * row that comes back first is not always the one that was meant.  This
+   * check first failed that way: it compared a popover against the entries of
+   * a paper it had never opened, and the only thing wrong was the paper.
+   */
+  const openRowByIndex = async (i: number) => {
+    await w.webContents.executeJavaScript(
+      '(()=>{const s=document.querySelector(".table-wrap");if(s)s.scrollTop=0;'
+        + 'const r=[...document.querySelectorAll("div.row")]'
+        + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+        + `if(r.length<=${i})return 0;r[${i}].click();return 1})()`
+    )
+    await new Promise((r) => setTimeout(r, 1800))
+    return String(
+      await w.webContents.executeJavaScript(
+        '(()=>{const r=document.querySelector("div.row.sel");return r?r.dataset.id||"":""})()'
+      )
+    )
+  }
+  const wantCites = await (async () => {
+    const byId = new Map(
+      (loadLibrary()?.docs ?? [])
+        .filter((d) => d.localPdf && fs.existsSync(d.localPdf as string))
+        .map((d) => [d.id, d])
+    )
+    for (let i = 0; i < 6; i++) {
+      const id = await openRowByIndex(i)
+      const d = byId.get(id)
+      if (!d) continue
+      try {
+        const got = await scanPaper(d)
+        if (got) return { doc: d, ...got }
+      } catch {
+        /* a paper that will not parse simply has no list to offer */
+      }
+    }
+    return undefined
+  })()
+
+  if (!wantCites) {
+    citeInfo = { skip: 'no paper in this library has a reference list that can be read' }
+  } else {
+    log('the paper being read', {
+      title: String(wantCites.doc.title ?? '').slice(0, 50),
+      refPage: wantCites.refPage,
+      on: wantCites.on
+    })
+    if (wantCites.on !== 1)
+      await w.webContents.executeJavaScript(
+        `(()=>{const i=document.querySelector(".pdf-bar input");if(!i)return 0;`
+          + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+          + `set.call(i,${JSON.stringify(String(wantCites.on))});`
+          + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+      )
+    // The list is read in the background once the paper is open, so what is
+    // waited for is the hotspots rather than a fixed time.
+    // Where the hotspots are is as much a part of the answer as what they
+    // say: a card that opens on the wrong word is the same wrong answer in a
+    // different place, and nothing about a dispatched hover would notice —
+    // the event lands on the element wherever that element is.  So the boxes
+    // are measured against the page: inside it, and no bigger than a marker
+    // can be.  A rectangle in the wrong coordinate space fails the first, a
+    // rectangle covering a whole run instead of `[3]` fails the second.
+    const HOT =
+      '(()=>{const cur=Number((document.querySelector(".pdf-bar input")||{}).value||0);'
+      + 'const host=document.querySelector(\'[data-page="\'+cur+\'"]\')||document.querySelector(".pdf-scroll");'
+      + 'if(!host)return JSON.stringify({page:cur,n:0,pe:null});'
+      + 'const box=host.querySelector(".pg-box")||host.firstElementChild||host;'
+      + 'const b=box.getBoundingClientRect();'
+      + 'const h=[...host.querySelectorAll(".cite-hot")];'
+      + 'let maxW=0,maxH=0,outside=0;'
+      + 'for(const e of h){const r=e.getBoundingClientRect();'
+      + 'if(b.width>0){maxW=Math.max(maxW,r.width/b.width);maxH=Math.max(maxH,r.height/b.height);'
+      + 'const cx=(r.left+r.right)/2,cy=(r.top+r.bottom)/2;'
+      + 'if(cx<b.left-1||cx>b.right+1||cy<b.top-1||cy>b.bottom+1)outside++;}}'
+      + 'return JSON.stringify({page:cur,n:h.length,'
+      + 'pe:h.length?getComputedStyle(h[0]).pointerEvents:null,'
+      + 'maxW:Math.round(maxW*1000)/1000,maxH:Math.round(maxH*1000)/1000,outside})})()'
+    let hot = JSON.parse(await w.webContents.executeJavaScript(HOT))
+    for (let i = 0; i < 30 && !(hot.n >= 1); i++) {
+      await new Promise((r) => setTimeout(r, 300))
+      hot = JSON.parse(await w.webContents.executeJavaScript(HOT))
+    }
+    log('citations on the page', { page: hot.page, refPage: wantCites.refPage, n: hot.n })
+    expect(
+      'a citation in the body offers the entry it names',
+      hot.n >= 1 && hot.pe === 'auto',
+      hot
+    )
+    expect(
+      'the box it offers it from is on the page and no bigger than a marker',
+      hot.outside === 0 && hot.maxW < 0.2 && hot.maxH < 0.06 && hot.maxW > 0,
+      hot
+    )
+
+    // Hovering one.  React hears `mouseover` at the root and works out the
+    // enter from it, so that is the event to send.
+    const HOVER =
+      '(()=>{const cur=Number((document.querySelector(".pdf-bar input")||{}).value||0);'
+      + 'const host=document.querySelector(\'[data-page="\'+cur+\'"]\')||document.querySelector(".pdf-scroll");'
+      + 'const h=host?[...host.querySelectorAll(".cite-hot")]:[];if(!h.length)return 0;'
+      + 'const e=h[arguments0]||h[0];'
+      + 'e.dispatchEvent(new MouseEvent("mouseover",{bubbles:true,cancelable:true}));'
+      + 'return h.length})()'
+    const POP =
+      '(()=>{const p=document.querySelector(".cite-pop");if(!p)return JSON.stringify({open:false});'
+      + 'const b=p.getBoundingClientRect();'
+      + 'return JSON.stringify({open:true,vis:getComputedStyle(p).visibility,'
+      + 'rows:[...p.querySelectorAll(".cite-row")].map(r=>'
+      + '(r.querySelector(".cite-tx")||{}).textContent||"")})})()'
+    const hover = (which: number) =>
+      w.webContents.executeJavaScript(HOVER.replace('arguments0', String(which)))
+    const popNow = async () => {
+      let p = JSON.parse(await w.webContents.executeJavaScript(POP))
+      for (let i = 0; i < 12 && !p.open; i++) {
+        await new Promise((r) => setTimeout(r, 120))
+        p = JSON.parse(await w.webContents.executeJavaScript(POP))
+      }
+      return p as { open: boolean; vis?: string; rows?: string[] }
+    }
+
+    await hover(0)
+    const pop = await popNow()
+    const flat = (s: string) => s.replace(/\s+/g, ' ').trim()
+    const known = new Set(wantCites.entries.map(flat))
+    const got = flat(String(pop.rows?.[0] ?? ''))
+    log('the entry under the pointer', {
+      open: pop.open,
+      vis: pop.vis,
+      len: got.length,
+      inList: known.has(got)
+    })
+    expect(
+      'what it offers is an entry the paper actually printed',
+      pop.open && pop.vis === 'visible' && got.length > 20 && known.has(got),
+      { vis: pop.vis, got: got.slice(0, 80), rows: pop.rows?.length }
+    )
+
+    // A second marker has to offer its own entry: a popover that answers
+    // every marker with the same paper is the wrong-paper failure in its
+    // plainest form.
+    const many = Number(await hover(1))
+    let second: string | null = null
+    if (many > 1) {
+      const p2 = await popNow()
+      second = flat(String(p2.rows?.[0] ?? ''))
+      log('a second marker', { len: second.length, same: second === got })
+    }
+    citeInfo = {
+      ok: true,
+      hots: hot.n,
+      onPage: hot.page,
+      refPage: wantCites.refPage,
+      text: got.slice(0, 60),
+      second: many > 1 ? second?.slice(0, 60) ?? null : 'only one marker on the page'
+    }
+
+    // While highlighting is on the whole layer stands down: a drag across the
+    // page is a highlight, and a card opening under it would take the drag.
+    const marking = await (async () => {
+      const pressed = Number(
+        await w.webContents.executeJavaScript(
+          '(()=>{const b=[...document.querySelectorAll(".pdf-bar button")]'
+            + '.find(x=>x.textContent.trim()==="高亮");if(!b)return 0;b.click();return 1})()'
+        )
+      )
+      await new Promise((r) => setTimeout(r, 600))
+      const seen = JSON.parse(await w.webContents.executeJavaScript(HOT))
+      await w.webContents.executeJavaScript(
+        '(()=>{const b=[...document.querySelectorAll(".pdf-bar button")]'
+          + '.find(x=>x.textContent.trim()==="高亮");if(b)b.click();return 1})()'
+      )
+      await new Promise((r) => setTimeout(r, 400))
+      return { pressed, seen }
+    })()
+    log('citations while highlighting', marking)
+    expect(
+      'a citation stands down while highlighting is on',
+      marking.pressed === 1 && marking.seen.n >= 1 && marking.seen.pe === 'none',
+      marking
+    )
+
+    // The page the list is on is the list: every line of it opens with a
+    // number in brackets, and ringing all of them would leave a page where
+    // every number looks like a citation.
+    if (wantCites.refPage !== hot.page) {
+      await w.webContents.executeJavaScript(
+        `(()=>{const i=document.querySelector(".pdf-bar input");if(!i)return 0;`
+          + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+          + `set.call(i,${JSON.stringify(String(wantCites.refPage))});`
+          + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+      )
+      await new Promise((r) => setTimeout(r, 2000))
+      const onRef = JSON.parse(await w.webContents.executeJavaScript(HOT))
+      citeInfo.refHots = onRef.n
+      expect(
+        'the reference list itself is not ringed in citations',
+        onRef.n === 0,
+        onRef
+      )
+    }
+
+  }
+  log('citations in a paper', citeInfo)
 
   // Reading is a view of its own: the paper gets the whole window instead of
   // a column beside the table, and one key goes back.  Worth asserting
