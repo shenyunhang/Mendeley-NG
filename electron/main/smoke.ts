@@ -39,7 +39,7 @@ import {
   markersIn,
   parseRefEntries
 } from '../../src/lib/refly'
-import { sync } from './library'
+import { ensureClient, sync } from './library'
 import {
   ftAdd,
   ftBuild,
@@ -5362,6 +5362,208 @@ export async function runSmoke() {
     + '.find(x=>x.textContent.trim()==="取消选择");if(b)b.click();return 1})()'
   )
   await new Promise((r) => setTimeout(r, 300))
+
+  // 148.  The bin used to be a list of names: the only way to see one of
+  //  those papers was to restore it first and go find it in five thousand.
+  //  The rows are the same .trash-row the duplicate group uses, and that
+  //  group gained an open press in 147 — leaving the bin inert would be the
+  //  same bug in the other half of the same class.
+  //
+  //  Whether this account has anything in its bin is not the run's to
+  //  decide, and an assertion that quietly does nothing on an empty bin is
+  //  the 146 lesson all over again.  So the client's trash read is given
+  //  papers of its own.  The real trash:list handler still runs — including
+  //  the title-based pass that attaches local PDF paths — so this also
+  //  checks the one thing that makes "open PDF" possible for a record that
+  //  is no longer in the library at all.
+  const trashLib = loadLibrary()
+  const trashPdfDoc = trashLib?.docs.find((d) => d.localPdf)
+  if (!trashPdfDoc) {
+    expect('the bin has a paper with a local file to open', false, {
+      why: 'no library document carries localPdf; the 148 fixture cannot be built'
+    })
+  } else {
+    const aId = 'smoke-trash-with-pdf'
+    const cId = 'smoke-trash-bare-record'
+    const bId = 'smoke-trash-without-pdf'
+    const fixture: Doc[] = [
+      // A keeps its path, so "clicking opens a PDF" does not depend on the
+      // title matcher happening to agree.
+      { ...trashPdfDoc, id: aId },
+      // C comes back bare, the way a cloud trash record does.  Whether the
+      // handler puts a path back on it is the assertion below.
+      (() => {
+        const bare: Doc = { ...trashPdfDoc, id: cId }
+        delete bare.localPdf
+        return bare
+      })(),
+      {
+        id: bId,
+        title: 'ZZZ 冒烟用：回收站里没有本地文件的那篇 ZZZ',
+        authors: [{ last_name: 'Smoke' }],
+        year: 1999
+      }
+    ]
+    const trashClient = ensureClient()
+    const original = {
+      list: trashClient.listTrash,
+      restore: trashClient.restoreDocument,
+      purge: trashClient.purgeDocument
+    }
+    trashClient.listTrash = async () => fixture.map((d) => ({ ...d }))
+    trashClient.restoreDocument = async (id: string) => ({ id } as Doc)
+    trashClient.purgeDocument = async () => undefined
+    try {
+      await openMenu('更多')
+      await new Promise((r) => setTimeout(r, 300))
+      // openMenu toggles; a menu left open by an earlier press would leave
+      // clickMenu with nothing to press and the whole block would time out
+      let menuHere = await w.webContents.executeJavaScript(
+        '!!document.querySelector(".menu-pop .menu-item")'
+      )
+      if (!menuHere) {
+        await openMenu('更多')
+        await new Promise((r) => setTimeout(r, 300))
+        menuHere = await w.webContents.executeJavaScript(
+          '!!document.querySelector(".menu-pop .menu-item")'
+        )
+      }
+      log('menu for 回收站', menuHere)
+      log('click 回收站', await clickMenu('回收站'))
+      const binReady = await until(
+        '(document.querySelectorAll(".trash-list .trash-row").length===3?"yes":"no")',
+        (v) => v === 'yes',
+        10000
+      )
+      const binInfo = () =>
+        w.webContents.executeJavaScript(
+          'JSON.stringify({'
+          + 'rows:[...document.querySelectorAll(".trash-list .trash-row")]'
+          + '.map(r=>({id:r.dataset.id||"",n:(r.querySelector(".n")||{}).textContent||""})),'
+          + 'open:[...document.querySelectorAll(".trash-list .trash-row.open")].map(r=>r.dataset.id||""),'
+          + 'head:(document.querySelector(".pane-mid .pane-head")||{}).textContent||"",'
+          + 'pdf:!!document.querySelector(".pane-right .pdf-bar input"),'
+          + 'trashDoc:!!document.querySelector(".pane-right .trash-doc"),'
+          + 'banner:(document.querySelector(".pane-right .trash-doc-banner")||{}).textContent||null,'
+          + 'editable:[...document.querySelectorAll(".pane-right .meta-actions button")]'
+          + '.some(b=>b.textContent.trim()==="移入回收站"),'
+          + 'empty:(document.querySelector(".pane-right .empty")||{}).textContent||null})'
+        )
+      const t0 = JSON.parse(await binInfo())
+      log('the bin as given', { binReady, ...t0 })
+      expect(
+        'the bin lists the papers it was given',
+        binReady === 'yes' &&
+          t0.rows.length === 3 &&
+          [aId, cId, bId].every((id) => t0.rows.some((r: { id: string }) => r.id === id)) &&
+          /3\s*\/\s*3/.test(t0.head),
+        { binReady, rows: t0.rows, head: t0.head }
+      )
+      const rowN = (info: { rows: { id: string; n: string }[] }, id: string) =>
+        (info.rows.find((r) => r.id === id)?.n ?? '')
+      expect(
+        'a bare trashed record is matched back to its local PDF',
+        rowN(t0, cId).includes('有PDF') && rowN(t0, bId).includes('无PDF'),
+        { bare: rowN(t0, cId), none: rowN(t0, bId) }
+      )
+      // The row with a file opens as a PDF.  Which paper opened is read off
+      // the row that claims to be open, the same way 147 reads it: the pane
+      // shows pages or fields and neither names the paper in a way this run
+      // can compare against a row.
+      await w.webContents.executeJavaScript(
+        `(()=>{const r=document.querySelector('.trash-list .trash-row[data-id=${JSON.stringify(aId)}]');if(r)r.click();return 1})()`
+      )
+      await until(
+        '(document.querySelector(".pane-right .pdf-bar input")?"yes":"no")',
+        (v) => v === 'yes',
+        10000
+      )
+      const tPdf = JSON.parse(await binInfo())
+      log('opened the row with a file', tPdf)
+      expect(
+        'a row in the bin opens that paper as a PDF',
+        tPdf.open.length === 1 &&
+          tPdf.open[0] === aId &&
+          tPdf.pdf === true &&
+          tPdf.empty === null &&
+          tPdf.trashDoc === false,
+        tPdf
+      )
+      // A record with no file falls to the read-only view rather than an
+      // empty reader.  The editing form must not be handed a document that
+      // is not in the library: its 移入回收站 button would be a
+      // contradiction and its saves would PATCH a document that is gone.
+      await w.webContents.executeJavaScript(
+        `(()=>{const r=document.querySelector('.trash-list .trash-row[data-id=${JSON.stringify(bId)}]');if(r)r.click();return 1})()`
+      )
+      await new Promise((r) => setTimeout(r, 900))
+      const tDetails = JSON.parse(await binInfo())
+      log('opened the row without a file', tDetails)
+      expect(
+        'a row with no local file opens the read-only details',
+        tDetails.open.length === 1 &&
+          tDetails.open[0] === bId &&
+          tDetails.trashDoc === true &&
+          /回收站/.test(tDetails.banner ?? '') &&
+          tDetails.editable === false &&
+          tDetails.empty === null,
+        tDetails
+      )
+      // Both buttons live inside a row that now opens a paper.  Pressing one
+      // must not move the right pane off whichever paper was being read:
+      // 147 learned this with 设为保留, and the bin has two of them.
+      await w.webContents.executeJavaScript(
+        `(()=>{const r=document.querySelector('.trash-list .trash-row[data-id=${JSON.stringify(aId)}]');`
+        + 'if(!r)return 0;const b=[...r.querySelectorAll("button")]'
+        + '.find(x=>x.textContent.trim()==="彻底删除");if(!b)return 0;b.click();return 1})()'
+      )
+      await new Promise((r) => setTimeout(r, 700))
+      const tAsk = JSON.parse(
+        await w.webContents.executeJavaScript(
+          'JSON.stringify({modal:!!document.querySelector(".confirm-modal"),'
+          + 'text:(document.querySelector(".confirm-modal")||{}).textContent||null,'
+          + 'open:[...document.querySelectorAll(".trash-list .trash-row.open")].map(r=>r.dataset.id||"")})'
+        )
+      )
+      log('彻底删除 pressed inside a row', tAsk)
+      expect(
+        'pressing 彻底删除 asks first and does not switch papers',
+        tAsk.modal === true && /不可恢复/.test(tAsk.text ?? '') &&
+          tAsk.open.length === 1 && tAsk.open[0] === bId,
+        tAsk
+      )
+      await w.webContents.executeJavaScript(
+        '(()=>{const b=[...document.querySelectorAll(".modal-acts button")]'
+        + '.find(x=>x.textContent.trim()==="取消");if(b)b.click();return 1})()'
+      )
+      await new Promise((r) => setTimeout(r, 500))
+      await w.webContents.executeJavaScript(
+        `(()=>{const r=document.querySelector('.trash-list .trash-row[data-id=${JSON.stringify(aId)}]');`
+        + 'if(!r)return 0;const b=[...r.querySelectorAll("button")]'
+        + '.find(x=>x.textContent.trim()==="恢复");if(!b)return 0;b.click();return 1})()'
+      )
+      await new Promise((r) => setTimeout(r, 900))
+      const tRestored = JSON.parse(await binInfo())
+      log('恢复 pressed inside a row', tRestored)
+      expect(
+        'pressing 恢复 does not switch papers either',
+        tRestored.rows.length === 2 &&
+          !tRestored.rows.some((r: { id: string }) => r.id === aId) &&
+          tRestored.open.length === 1 &&
+          tRestored.open[0] === bId,
+        tRestored
+      )
+    } finally {
+      trashClient.listTrash = original.list
+      trashClient.restoreDocument = original.restore
+      trashClient.purgeDocument = original.purge
+    }
+    await w.webContents.executeJavaScript(
+      '(()=>{const b=[...document.querySelectorAll(".pane-head button")]'
+      + '.find(x=>x.textContent.trim()==="返回库");if(b)b.click();return 1})()'
+    )
+    await new Promise((r) => setTimeout(r, 400))
+  }
 
   // Ctrl+A is what everybody presses first when they want the whole result,
   // and it used to do nothing at all; Esc is what they press to get out of a

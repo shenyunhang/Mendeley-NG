@@ -4,7 +4,7 @@ import path from 'node:path'
 
 import { ensureClient } from '../library'
 import { lookup, resolveIdentifier } from '../lookup'
-import { parseName } from '../pdfindex'
+import { attachPdfs, parseName } from '../pdfindex'
 import { pdfNameFor } from '../pdfname'
 import { indexAdded } from '../ftops'
 import { DEFAULT_PDF_DIR, loadConfig, loadLibrary, saveLibrary } from '../store'
@@ -35,7 +35,14 @@ export function registerDocsIpc() {
 
   ipcMain.handle('trash:list', async () => {
     const c = ensureClient()
-    return c.listTrash()
+    const docs = await c.listTrash()
+    // Trashing a document does not delete its local PDF.  The bin returns
+    // bare cloud records with no localPdf, so the same title-based pass the
+    // library uses runs here: without it "open this paper" in the bin would
+    // always land on the details, even for a file sitting on this disk.
+    const cfg = loadConfig()
+    if (cfg.pdfDir) attachPdfs(docs, cfg.pdfDir)
+    return docs
   })
 
   ipcMain.handle('trash:restore', async (_e, id: string) => {

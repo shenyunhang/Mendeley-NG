@@ -9,6 +9,7 @@ import type {
 import { DEFAULT_FT_PAGES, DEFAULT_PDF_TEMPLATE } from '../shared/types'
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
+import TrashedDocPanel from './components/TrashedDocPanel'
 import DupesView from './components/DupesView'
 import ImportView from './components/ImportView'
 import AddByIdView from './components/AddByIdView'
@@ -111,6 +112,12 @@ export default function App() {
   const [renameReq, setRenameReq] = useState<{ id: string; n: number } | null>(null)
   const [query, setQuery] = useState('')
   const [selId, setSelId] = useState<string | null>(null)
+  /** A paper the right pane is showing that is not in the library.  The bin
+   *  lists documents that doc:trash already took out of `docs`, so resolving
+   *  the selection from `filtered`/`docs` alone leaves the pane asking to be
+   *  given a paper again the moment one of them is pressed.  Holding the
+   *  record itself is what makes "open it" mean something there. */
+  const [pinned, setPinned] = useState<Doc | null>(null)
   const [rightTab, setRightTab] = useState<'pdf' | 'details'>('details')
   const [err, setErr] = useState<string | null>(null)
   const [upd, setUpd] = useState<UpdateState | null>(null)
@@ -279,7 +286,32 @@ export default function App() {
   /** Opening the trash and switching the theme, named because the toolbar
    *  asks for them rather than doing them. */
   const openTrash = () => {
+    setPinned(null)
     void window.api.listTrash().then((docs) => setView({ kind: 'trash', docs }))
+  }
+  /** Both the bin row and the read-only panel can put a paper back or remove
+   *  it for good.  One implementation, so the two cannot drift into asking
+   *  different questions about the same destructive action. */
+  const restoreTrashed = async (id: string) => {
+    await window.api.restoreDoc(id)
+    setView((v) =>
+      v.kind === 'trash' ? { ...v, docs: v.docs.filter((d) => d.id !== id) } : v
+    )
+    setPinned((p) => (p?.id === id ? null : p))
+  }
+  const purgeTrashed = async (id: string) => {
+    const d = view.kind === 'trash' ? view.docs.find((x) => x.id === id) : undefined
+    const go = await askConfirm({
+      title: `彻底删除「${d?.title || '无标题'}」？`,
+      body: '此操作不可恢复，云端那条记录也会一并删掉。',
+      ok: '彻底删除'
+    })
+    if (!go) return
+    await window.api.purgeDoc(id)
+    setView((v) =>
+      v.kind === 'trash' ? { ...v, docs: v.docs.filter((x) => x.id !== id) } : v
+    )
+    setPinned((p) => (p?.id === id ? null : p))
   }
   const toggleTheme = () => {
     const next = theme === 'light' ? 'dark' : 'light'
@@ -599,9 +631,17 @@ export default function App() {
    * show it.
    */
   const selected = useMemo(
-    () => filtered.find((d) => d.id === selId) ?? docs.find((d) => d.id === selId) ?? null,
-    [filtered, docs, selId]
+    () =>
+      filtered.find((d) => d.id === selId) ??
+      docs.find((d) => d.id === selId) ??
+      (pinned?.id === selId ? pinned : null),
+    [filtered, docs, selId, pinned]
   )
+  /** A paper in the bin is not an editable library document: the panel has
+   *  to say so, and the two buttons it offers are the two that mean anything
+   *  there.  Keyed off the pinned record rather than off view.kind, so a
+   *  library row can never be mistaken for a trashed one. */
+  const pinnedSelected = !!pinned && !!selected && selected.id === pinned.id
 
   /** Saving a search captures the three things that shape the list: the text,
    *  the folder and the starred filter.  Sort order is deliberately not part
@@ -2298,26 +2338,22 @@ export default function App() {
         ) : view.kind === 'trash' ? (
           <TrashView
             docs={view.docs}
-            onClose={() => setView(LIBRARY)}
-            onRestore={async (id) => {
-              await window.api.restoreDoc(id)
-              setView((v) =>
-                v.kind === 'trash' ? { ...v, docs: v.docs.filter((d) => d.id !== id) } : v
-              )
+            onClose={() => {
+              setPinned(null)
+              setSelId(null)
+              setView(LIBRARY)
             }}
-            onPurge={async (id) => {
-              const d = view.docs.find((x) => x.id === id)
-              const go = await askConfirm({
-                title: `彻底删除「${d?.title || '无标题'}」？`,
-                body: '此操作不可恢复，云端那条记录也会一并删掉。',
-                ok: '彻底删除'
-              })
-              if (!go) return
-              await window.api.purgeDoc(id)
-              setView((v) =>
-                v.kind === 'trash' ? { ...v, docs: v.docs.filter((x) => x.id !== id) } : v
-              )
+            onOpen={(d) => {
+              // a trashed record is not in `docs`; hold it so the right pane
+              // has something to show.  A file that survived the trash opens
+              // as a PDF, one that did not falls to the read-only details.
+              setPinned(d)
+              setSelId(d.id)
+              setRightTab(d.localPdf ? 'pdf' : 'details')
             }}
+            openId={pinned?.id ?? null}
+            onRestore={(id) => void restoreTrashed(id)}
+            onPurge={(id) => void purgeTrashed(id)}
           />
         ) : (
         <div className="pane pane-mid">
@@ -2532,6 +2568,13 @@ export default function App() {
           </div>
           {!selected ? (
             <div className="empty">选中左侧一条文献查看详情或 PDF</div>
+          ) : pinnedSelected && rightTab === 'details' ? (
+            <TrashedDocPanel
+              doc={selected}
+              onRestore={() => void restoreTrashed(selected.id)}
+              onPurge={() => void purgeTrashed(selected.id)}
+              onOpenPdf={() => setRightTab('pdf')}
+            />
           ) : rightTab === 'details' ? (
             <DetailsPanel
               doc={selected}

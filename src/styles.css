@@ -1498,19 +1498,44 @@ button.danger:hover:not(:disabled) {
 /* In the duplicate list a row is a way to look at the paper and not a line
    of text about it: which of two same-titled entries to keep is a question
    about their files, and a row that looks inert does not get pressed.  The
-   recycle bin uses the same class for rows that do nothing, so this is
-   scoped to the group. */
-.dupe-group .trash-row {
+   recycle bin is the same, and both are scoped: ImportView uses .trash-row
+   for its result lines, and those are not buttons. */
+.dupe-group .trash-row,
+.trash-list .trash-row {
   cursor: pointer;
 }
-.dupe-group .trash-row:hover {
+.dupe-group .trash-row:hover,
+.trash-list .trash-row:hover {
   background: var(--hover);
 }
 /* which one the right pane is showing.  Outlined rather than filled, so it
    does not fight the keeper's background: a row can be both. */
-.dupe-group .trash-row.open {
+.dupe-group .trash-row.open,
+.trash-list .trash-row.open {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
+}
+/* the read-only view of a paper that is in the bin.  It is not a form, so
+   nothing here looks like a field that could be saved. */
+.trash-doc-banner {
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--hover);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.trash-doc-title {
+  font-size: 1rem;
+  line-height: 1.45;
+}
+.trash-doc-abs {
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.trash-doc-pdf {
+  font-size: 0.8rem;
+  word-break: break-all;
 }
 .app.dropping {
   outline: 2px dashed var(--accent);
