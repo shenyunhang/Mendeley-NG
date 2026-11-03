@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FtStatus, UpdateState } from '../../shared/types'
 import { DEFAULT_FT_PAGES, DEFAULT_PDF_TEMPLATE } from '../../shared/types'
 import logoUrl from '../../assets/logo.svg'
@@ -39,6 +39,12 @@ interface Props {
   ft: FtStatus | null
   ftPages: number
   version: string
+  /** The section to open on, when something other than the settings sheet
+   *  itself sent the reader here.  A sheet that always opens at the top makes
+   *  "去设置里改" into a hunt: the row is four screens down a scrolling box,
+   *  and a reader who was told one number is the answer will not recognise it
+   *  when they finally scroll past it. */
+  focus?: string | null
   /** What the updater is doing, so the two versions can be compared here
    *  rather than in a toolbar line that vanishes. */
   upd?: UpdateState | null
@@ -73,6 +79,7 @@ export default function Settings({
   ft,
   ftPages,
   version,
+  focus,
   upd,
   onCheckUpdate,
   onDownloadUpdate,
@@ -89,6 +96,20 @@ export default function Settings({
   // the page budget is applied on blur rather than on every keystroke: each
   // change drops the index, and an index dropped per digit is not a setting
   const [pages, setPages] = useState(String(ftPages))
+  const sheet = useRef<HTMLDivElement>(null)
+
+  // Scrolls to the section that was asked for.  It cannot be done by id: the
+  // sections are headings in a scrolling box and there is nowhere to put an
+  // anchor that does not move the layout.  Read from the live box rather than
+  // from a map of names, so a section that is renamed cannot leave the reader
+  // at the top of a sheet that claims to have taken them somewhere.
+  useEffect(() => {
+    if (!focus) return
+    const sec = [...(sheet.current?.querySelectorAll('.set-sec') ?? [])].find(
+      (s) => (s.textContent ?? '').trim() === focus
+    )
+    sec?.scrollIntoView({ block: 'start' })
+  }, [focus])
 
   const commit = () => {
     const n = Number(pages)
@@ -102,7 +123,12 @@ export default function Settings({
 
   return (
     <div className="modal-veil" onMouseDown={onClose}>
-      <div className="modal settings" onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className="modal settings"
+        ref={sheet}
+        data-focus={focus ?? undefined}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div className="modal-head">设置</div>
 
         <div className="set-sec">外观</div>

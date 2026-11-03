@@ -17,6 +17,11 @@ interface Props {
   onBuild: (rebuild: boolean) => void
   onCancel: () => void
   onClear: () => void
+  /** Open the settings sheet on the section that holds the page budget.
+   *  Saying "去设置里改" is half an answer when the number is four screens
+   *  down a scrolling box: the reader has been told which knob and still has
+   *  to find it, which is the part they were already failing at. */
+  onOpenSettings: () => void
 }
 
 /**
@@ -34,7 +39,8 @@ export default function FullTextView({
   onOpen,
   onBuild,
   onCancel,
-  onClear
+  onClear,
+  onOpenSettings
 }: Props) {
   const byId = useMemo(() => {
     const m = new Map<string, Doc>()
@@ -243,8 +249,23 @@ export default function FullTextView({
           {!query.trim() ? (
             <div className="empty">输入要找的词</div>
           ) : !groups.length ? (
+            /* An empty answer over a part of every paper is not an empty
+               answer over the library, and the reader has no way to tell the
+               two apart unless the difference is stated: read as "this is not
+               in my library" it sends them off to import a paper they already
+               have.  So it names how far the index read, says what that does
+               not prove, and offers the one press that widens it. */
             <div className="empty">
-              正文里没找到「{query}」。注意只索引了每篇的前 {status.pages} 页。
+              <p>正文里没找到「{query}」。</p>
+              <p className="sub">
+                只索引了每篇的前 {status.pages} 页——也就是标题、摘要和引言开头。
+                所以「这里没找到」<strong>不等于</strong>「这篇里没有」：正文后面的部分还没读过。
+                要连正文一起搜，去「设置 ▸ 全文检索」把「每篇索引页数」调大，改完重建一次
+                （{status.total} 篇，大约每篇 90 毫秒）。
+              </p>
+              <button style={{ marginTop: 10 }} onClick={onOpenSettings}>
+                打开设置
+              </button>
             </div>
           ) : (
             groups.map(({ id, hs: list, d }) => {

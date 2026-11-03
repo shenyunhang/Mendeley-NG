@@ -2416,6 +2416,33 @@ export async function runSmoke() {
   )
   await new Promise((r) => setTimeout(r, 1500))
 
+  // Emptying the search box, and waiting for the table to come back.  Used
+  // wherever a check narrows the list to reach one paper and then has to read
+  // that paper back off the table: with a word in the box the middle pane is
+  // result cards and not rows, so a row cannot be read back from a pane that
+  // is not showing rows.  The run also goes on from here with the whole
+  // library in front of it — a box left holding one paper's title would take
+  // that away from everything that follows.
+  const clearSearch = async () => {
+    await w.webContents.executeJavaScript(
+      `(()=>{const i=document.querySelector(".toolbar input[placeholder^='搜索']");if(!i)return 0;`
+        + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+        + `set.call(i,"");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+    )
+    await new Promise((r) => setTimeout(r, 1200))
+  }
+  // Typing into a box the way a reader does.  React keeps its own value on
+  // the element, so setting `.value` alone is invisible to it and the change
+  // never happens: the native setter has to be called and the input event
+  // dispatched, which is what a keystroke does.
+  const setInput = (sel: string, v: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const i=document.querySelector(${JSON.stringify(sel)});if(!i)return 0;`
+      + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+      + `set.call(i,${JSON.stringify(v)});`
+      + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+    )
+
   // Links inside a paper.  A reference list is only worth having if a
   // citation can be followed and a DOI in the margin only if it can be
   // opened, so the run presses one of each kind and checks where it ended
@@ -2705,18 +2732,6 @@ export async function runSmoke() {
    * and their PDFs carry almost no links at all.
    */
   const ownIx = idIndex(loadLibrary()?.docs ?? [])
-  // The run goes on from here with the whole library in front of it, and a
-  // search box left holding one paper's title would take that away from
-  // everything that follows: the list is how the next twenty checks reach a
-  // paper at all.
-  const clearSearch = async () => {
-    await w.webContents.executeJavaScript(
-      `(()=>{const i=document.querySelector(".toolbar input[placeholder^='搜索']");if(!i)return 0;`
-        + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
-        + `set.call(i,"");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
-    )
-    await new Promise((r) => setTimeout(r, 1200))
-  }
   // More than one is looked for, because the second half of this check has to
   // reach a particular row in a list of five thousand, and a title that
   // cannot be reached would otherwise turn into a red that says nothing
@@ -4395,6 +4410,73 @@ export async function runSmoke() {
   )
   expect('a hit carries a page number', /^p\d+$/.test(ftOut.pages[0] ?? ''), ftOut.pages)
 
+  // The other answer a search can give, and the one that decides whether the
+  // reader trusts the one above it.  The index reads the first few pages of
+  // each paper, so "not found here" is not "not in your library" — and read
+  // the other way round it sends somebody off to import a paper they already
+  // have, which is worse than a search that says nothing.  What is checked is
+  // that the difference is stated: how far the index reads, that this does
+  // not prove absence, and one press that widens it.
+  await setInput('.toolbar input', 'zzzz-not-a-word-anywhere-zzzz')
+  await new Promise((r) => setTimeout(r, 1200))
+  const ftNoHit = JSON.parse(
+    await w.webContents.executeJavaScript(
+      'JSON.stringify({rows:document.querySelectorAll(".ft-row").length,'
+      + 'text:(document.querySelector(".pane-mid .empty")||{}).textContent||null,'
+      + 'btns:[...document.querySelectorAll(".pane-mid .empty button")].map(b=>b.textContent)})'
+    )
+  )
+  log('ft with nothing found', ftNoHit)
+  expect(
+    'a search that finds nothing says how far the index reads',
+    ftNoHit.rows === 0 &&
+      /没找到/.test(ftNoHit.text ?? '') &&
+      new RegExp(`前 ${ftStat1.pages} 页`).test(ftNoHit.text ?? ''),
+    ftNoHit
+  )
+  expect(
+    'and says that this is not the same as the library not having it',
+    /不等于/.test(ftNoHit.text ?? '') && /每篇索引页数/.test(ftNoHit.text ?? ''),
+    ftNoHit
+  )
+  expect(
+    'the wider index is one press away',
+    (ftNoHit.btns ?? []).some((t: string) => /打开设置/.test(t)),
+    ftNoHit
+  )
+  // and the press has to land on the number, not merely on the sheet holding
+  // it: a settings box that opens at the top makes "去设置里改" into a hunt
+  // through four screens of scrolling for a row the reader cannot name
+  await w.webContents.executeJavaScript(
+    '(()=>{const b=[...document.querySelectorAll(".pane-mid .empty button")]'
+    + '.find(x=>/打开设置/.test(x.textContent||""));if(!b)return 0;b.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 700))
+  const ftSet = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const m=document.querySelector(".modal.settings");if(!m)return JSON.stringify({open:0});'
+      + 'const b=m.getBoundingClientRect();'
+      + 'const sec=[...m.querySelectorAll(".set-sec")].find(s=>(s.textContent||"").trim()==="全文检索");'
+      + 'const sb=sec?sec.getBoundingClientRect():null;'
+      + 'return JSON.stringify({open:1,focus:m.dataset.focus||null,'
+      + 'secs:[...m.querySelectorAll(".set-sec")].map(s=>(s.textContent||"").trim()),'
+      + 'seen:sb?sb.top>=b.top-2&&sb.bottom<=b.bottom+2:false})})()'
+    )
+  )
+  log('settings from the full-text panel', ftSet)
+  expect(
+    'the press opens the settings on the page budget',
+    ftSet.open === 1 && ftSet.focus === '全文检索' && ftSet.seen === true,
+    ftSet
+  )
+  await w.webContents.executeJavaScript(
+    'window.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}))'
+  )
+  await new Promise((r) => setTimeout(r, 500))
+  // put the word back: everything below reads hits off the screen
+  await setInput('.toolbar input', 'the')
+  await new Promise((r) => setTimeout(r, 1200))
+
   // Seventy-eight rows on screen is not proof that the text was read, only
   // that some string matched somewhere.  An index that wrote the same paper
   // into twenty slots, or one that kept the offsets of a table it no longer
@@ -4572,13 +4654,6 @@ export async function runSmoke() {
   // Reproduced by narrowing the catalogue to nothing and then opening a hit:
   // whatever paper the hit belongs to, it is not in the list.  The word in
   // the full-text box is left alone, so the hits are still there.
-  const setInput = (sel: string, v: string) =>
-    w.webContents.executeJavaScript(
-      `(()=>{const i=document.querySelector(${JSON.stringify(sel)});if(!i)return 0;`
-      + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
-      + `set.call(i,${JSON.stringify(v)});`
-      + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
-    )
   await setInput('.toolbar input', 'zzzzqqq')
   await new Promise((r) => setTimeout(r, 800))
   const narrowRows = JSON.parse(

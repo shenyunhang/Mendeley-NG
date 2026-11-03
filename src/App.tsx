@@ -233,6 +233,9 @@ export default function App() {
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string } | null>(null)
   const [batchEdit, setBatchEdit] = useState(false)
   const [settings, setSettings] = useState(false)
+  /** Which section the settings sheet opens on, when it is opened because
+   *  something else named a setting rather than because 设置 was pressed. */
+  const [setSec, setSetSec] = useState<string | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   /** Local notes, kept here only so the search box can look inside them.
    *  They are written by the details panel, which reports back after saving. */
@@ -314,6 +317,10 @@ export default function App() {
         if (settings) {
           e.preventDefault()
           setSettings(false)
+          // and the section it was opened on: a sheet asked for from the
+          // full-text panel opens on 全文检索, and one asked for from the
+          // toolbar has no business landing there the next time
+          setSetSec(null)
           return
         }
         // out of the reading view and back to the table, which is where the
@@ -2126,6 +2133,10 @@ export default function App() {
               clearIndex()
             }}
             onCancel={cancelIndex}
+            onOpenSettings={() => {
+              setSetSec('全文检索')
+              setSettings(true)
+            }}
             onOpen={(d, p) => {
               setSelId(d.id)
               // A hit is a hit into a file that was read, but the file can
@@ -2582,11 +2593,15 @@ export default function App() {
           ft={ftStat}
           ftPages={ftPages}
           version={version}
+          focus={setSec}
           upd={upd}
           onCheckUpdate={() => void window.api.checkUpdate()}
           onDownloadUpdate={() => void window.api.downloadUpdate()}
           onInstallUpdate={() => void window.api.installUpdate()}
-          onClose={() => setSettings(false)}
+          onClose={() => {
+            setSettings(false)
+            setSetSec(null)
+          }}
           onTheme={(t) => {
             setTheme(t)
             void window.api.setConfig({ theme: t })
