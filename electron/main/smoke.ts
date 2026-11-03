@@ -3649,13 +3649,43 @@ export async function runSmoke() {
       + 'const s=f.querySelector("select");'
       + 'return {has:!!(f.querySelector("input")||s),select:!!s,'
       + 'opts:s?[...s.options].map(o=>o.value):null}};'
+      + 'const idx=n=>fs.findIndex(f=>lab(f)===n);'
+      + 'const absF=at("摘要");const ta=absF?absF.querySelector("textarea"):null;'
       + 'return JSON.stringify({labels:fs.map(lab),type:kind("类型"),'
+      + 'abs:{at:idx("摘要"),tags:idx("标签（逗号分隔）"),'
+      + 'note:fs.findIndex(f=>lab(f).indexOf("笔记")===0),'
+        + 'len:ta?(ta.value||"").length:0,'
+        + 'h:ta?Math.round(ta.getBoundingClientRect().height):0,'
+        + 'sh:ta?ta.scrollHeight:0,ch:ta?ta.clientHeight:0},'
       + 'volume:!!at("卷"),issue:!!at("期"),pages:!!at("页码"),'
       + 'publisher:!!at("出版社 / 机构"),keywords:!!at("关键词（逗号分隔）"),'
       + 'url:!!at("链接")})})()'
     )
   )
   log('details fields', detFields)
+  // The abstract is the field the decision to read a paper is made on, and it
+  // used to sit below the tags, the note and the two switches — so the one
+  // thing worth reading was the one thing that needed a scroll to reach.
+  expect(
+    'the abstract is not buried under the tags and the note',
+    detFields.abs.at >= 0 && detFields.abs.at < detFields.abs.tags &&
+      detFields.abs.at < detFields.abs.note,
+    detFields.abs
+  )
+  // And it has to be readable where it is: a box three lines tall is a box
+  // that has to be scrolled inside, which is the panel asking the reader to
+  // do the panel's job.  The box grows to fit what is in it and stops at the
+  // height it is allowed to take, so what is asked is that it is at least as
+  // tall as its contents need, up to that cap.
+  //
+  // Measured rather than inferred from the length of the abstract: a fixed
+  // box happens to fit a short one, so asking only of a long abstract would
+  // have made the case that looks like a pass the case that is not checked.
+  expect(
+    'the abstract can be read without scrolling inside its box',
+    detFields.abs.ch > 0 && detFields.abs.ch >= Math.min(detFields.abs.sh, 258),
+    detFields.abs
+  )
   expect(
     'the panel carries the rest of the citation',
     detFields.volume &&

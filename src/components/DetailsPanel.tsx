@@ -291,6 +291,25 @@ export default function DetailsPanel({
             />
           </div>
         </div>
+        {/* The abstract sits here and not at the bottom of the panel, where
+            it used to be behind the tags, the note and the two switches.
+            Deciding whether to read a paper is what this panel is for, and
+            the title alone is not enough to decide it on — least of all
+            across fields, where the title's own words are the unfamiliar
+            ones.  It is the last of the four things that say what the paper
+            is, and deliberately not in the middle of them: the title, the
+            authors, the year and the venue are one block, and a box the
+            height of a paragraph dropped between the authors and the year
+            would cut that block in half. */}
+        <div className="field">
+          <label>摘要</label>
+          <textarea
+            className="abs-box"
+            value={form.abstract}
+            placeholder="这篇还没有摘要"
+            onChange={(e) => setForm({ ...form, abstract: e.target.value })}
+          />
+        </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <div className="field" style={{ flex: 1 }}>
             <label>citation key</label>
@@ -428,14 +447,6 @@ export default function DetailsPanel({
             标签 / 星标 / 已读都存在云端，跟着账号走
           </span>
         </div>
-        <div className="field">
-          <label>摘要</label>
-          <textarea
-            value={form.abstract}
-            onChange={(e) => setForm({ ...form, abstract: e.target.value })}
-          />
-        </div>
-
         <div className="field">
           <label>文件夹归属（点击切换，会同步到云端）</label>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
