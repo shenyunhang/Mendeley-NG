@@ -3823,28 +3823,51 @@ export async function runSmoke() {
   await new Promise((r) => setTimeout(r, 1500))
   log('click 查找', await clickBar('查找'))
   await new Promise((r) => setTimeout(r, 300))
-  const query = await w.webContents.executeJavaScript(
-    '(()=>{const sp=[...document.querySelectorAll(".tx-layer span.tx")]'
-    + '.map(s=>(s.textContent||"").trim()).filter(t=>t.length>=4);return sp[0]||""})()'
-  )
+  // The word is the one the page repeats most often, not the first one on it.
+  //
+  // Taking the first span made the next assertion depend on which paper
+  // happened to be first in the list: a word that occurs once cannot step,
+  // and `stepping moves the find caret` was gated on there being more than
+  // one hit, so a paper whose first span is a rare term silently lost the
+  // check — and "silently" is the whole of the problem, because a check that
+  // did not run looks exactly like one that passed.  Counting first and
+  // taking the most frequent makes the gate depend on the page rather than
+  // on luck, and the runners-up are kept so a future skip can say what was
+  // available to look for.
+  const findWords = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const sp=[...document.querySelectorAll(".tx-layer span.tx")]'
+      + '.map(s=>(s.textContent||"").trim()).filter(t=>t.length>=4);'
+      + 'const n=new Map();for(const t of sp)n.set(t,(n.get(t)||0)+1);'
+      + 'return JSON.stringify([...n.entries()].sort((a,b)=>b[1]-a[1]).slice(0,4)'
+      + '.map(([t,c])=>({t:t,c:c})))})()'
+    )
+  ) as { t: string; c: number }[]
+  log('find word candidates', findWords)
+  let query = ''
+  let findInfo = '{}'
+  for (const cand of findWords) {
+    query = cand.t
+    await w.webContents.executeJavaScript(
+      '(()=>{const i=document.querySelector(".pdf-find input");if(!i)return 0;'
+      + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+      + `set.call(i,${JSON.stringify(query)});i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+    )
+    // the scan walks every page and only finishes when it reaches the last one
+    await new Promise((r) => setTimeout(r, 4000))
+    findInfo = await w.webContents.executeJavaScript(
+      '(()=>{const d=document.documentElement.dataset;'
+      + 'const marks=[...document.querySelectorAll(".find-hit")];'
+      + 'const cur=document.querySelector(".find-hit.cur");'
+      + 'return JSON.stringify({hits:d.findHits,page:d.findPage,marks:marks.length,'
+      + 'current:!!cur,count:(document.querySelector(".find-count")||{}).textContent||null,'
+      + 'box:marks[0]?{w:Math.round(marks[0].getBoundingClientRect().width),'
+      + 'h:Math.round(marks[0].getBoundingClientRect().height)}:null})})()'
+    )
+    log('find', { word: query, info: findInfo })
+    if (Number((JSON.parse(findInfo) as { hits?: number }).hits ?? 0) > 1) break
+  }
   log('find query', JSON.stringify(query))
-  await w.webContents.executeJavaScript(
-    '(()=>{const i=document.querySelector(".pdf-find input");if(!i)return 0;'
-    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
-    + `set.call(i,${JSON.stringify(query)});i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
-  )
-  // the scan walks every page and only finishes when it reaches the last one
-  await new Promise((r) => setTimeout(r, 4000))
-  const findInfo = await w.webContents.executeJavaScript(
-    '(()=>{const d=document.documentElement.dataset;'
-    + 'const marks=[...document.querySelectorAll(".find-hit")];'
-    + 'const cur=document.querySelector(".find-hit.cur");'
-    + 'return JSON.stringify({hits:d.findHits,page:d.findPage,marks:marks.length,'
-    + 'current:!!cur,count:(document.querySelector(".find-count")||{}).textContent||null,'
-    + 'box:marks[0]?{w:Math.round(marks[0].getBoundingClientRect().width),'
-    + 'h:Math.round(marks[0].getBoundingClientRect().height)}:null})})()'
-  )
-  log('find', findInfo)
   const fi = JSON.parse(findInfo)
   expect('find reports hits', Number(fi.hits) > 0, fi)
   expect('find draws a mark for them', fi.marks > 0, fi)
@@ -3917,6 +3940,17 @@ export async function runSmoke() {
   log('find step', stepped)
   if (Number(fi.hits) > 1) {
     expect('stepping moves the find caret', stepped !== findInfo, { fi, stepped })
+  } else {
+    // One hit is not nothing to check, and it is not a reason to check
+    // nothing: the stepping assertion used to be skipped in this case, which
+    // is how a whole check came to be missing from the run without a word
+    // about it.  With nowhere to step to, what has to hold is that the caret
+    // stays on the one hit and the hit is not lost.
+    expect(
+      'stepping with nowhere to go keeps the one hit',
+      Number((JSON.parse(stepped) as { hits?: number }).hits ?? 0) === 1 && stepped !== '',
+      { word: query, words: findWords, fi, stepped }
+    )
   }
   // leaving the reader in find mode would leave an orange box on the user's
   // paper the next time they open it
