@@ -2459,6 +2459,12 @@ export async function runSmoke() {
     ok?: boolean
     skip?: string
     title?: string
+    /** Which paper was scanned, and which one the reader ended up on.  They
+     *  are both recorded because a check about links is only a check about
+     *  this paper when they are the same paper. */
+    want?: string
+    card?: string
+    at?: string
     anchors?: number
     pageFrom?: number
     pageTo?: number
@@ -2508,6 +2514,15 @@ export async function runSmoke() {
     const title = String(wantLinks.doc.title ?? '').slice(0, 40)
     // The table only draws the rows it can see, so a paper that is not on
     // screen cannot be clicked; narrowing the list to it is the way in.
+    //
+    // And the way in used to be "click the first row with a PDF dot", which
+    // is a row that does not exist: with a word in the search box the middle
+    // pane is result cards.  Nothing was clicked, so what was read was
+    // whichever paper was already open — and "a page with links on it" is
+    // true of a great many papers, so the check passed on whichever one it
+    // happened to be looking at.  What was scanned is named by its own id
+    // now, and what ended up under the reader is read back before anything is
+    // pressed.
     await w.webContents.executeJavaScript(
       `(()=>{const i=document.querySelector(".toolbar input[placeholder^='搜索']");if(!i)return 0;`
       + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
@@ -2515,99 +2530,128 @@ export async function runSmoke() {
       + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
     )
     await new Promise((r) => setTimeout(r, 1500))
+    const linkCard = String(
+      await until(
+        `(document.querySelectorAll('div.res-row[data-id=${JSON.stringify(wantLinks.doc.id)}]').length?'yes':'no')`,
+        (v) => v === 'yes',
+        6000
+      )
+    )
     await w.webContents.executeJavaScript(
-      '(()=>{const r=[...document.querySelectorAll("div.row")]'
-      + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
-      + 'if(!r.length)return 0;r[0].click();return 1})()'
+      `(()=>{const r=document.querySelector('div.res-row[data-id=${JSON.stringify(wantLinks.doc.id)}]');`
+      + `if(!r)return 0;r.click();return 1})()`
     )
     await new Promise((r) => setTimeout(r, 5000))
+    await clearSearch()
+    const linkAt = String(
+      await w.webContents.executeJavaScript(
+        '(()=>{const r=document.querySelector("div.row.sel");return r?r.dataset.id||"":""})()'
+      )
+    )
     // reopening a paper opens where it was left, and the links are read for
     // the page being read
     await paneKey('Home')
     await new Promise((r) => setTimeout(r, 1200))
-    const seen = JSON.parse(
-      await w.webContents.executeJavaScript(
-        '(()=>{const a=[...document.querySelectorAll("a.pdf-link")];'
-        + 'return JSON.stringify({n:a.length,'
-        + 'ext:a.filter(x=>x.classList.contains("ext")).length,'
-        + 'href:(a.find(x=>x.classList.contains("ext"))||{}).href||null,'
-        + 'marked:a.length?getComputedStyle(a[0]).pointerEvents:null})})()'
-      )
-    )
-    log('links on the page', seen)
-    expect(
-      'a paper that carries links gets a link to press',
-      seen.n >= 1 && seen.marked === 'auto',
-      seen
-    )
-    // an internal link is pressed only if it points somewhere else: a link to
-    // the page it is on turning the page to the page it is on proves nothing
-    const pageFrom = await pageNow()
-    const pressed = Number(
-      await w.webContents.executeJavaScript(
-        '(()=>{const cur=Number((document.querySelector(".pdf-bar input")||{}).value||0);'
-        + 'const a=[...document.querySelectorAll("a.pdf-link")]'
-        + '.filter(x=>!x.classList.contains("ext"))'
-        + '.find(x=>{const m=(x.getAttribute("href")||"").match(/^#page-(\\d+)$/);'
-        + 'return m&&Number(m[1])!==cur});'
-        + 'if(!a)return 0;a.click();return 1})()'
-      )
-    )
-    await new Promise((r) => setTimeout(r, 1200))
-    const pageTo = await pageNow()
-    log('internal link', { pressed, pageFrom, pageTo })
-    expect(
-      'pressing a link inside the paper turns to the page it points at',
-      pressed === 1 && pageTo !== pageFrom,
-      { pressed, pageFrom, pageTo }
-    )
-    // An external link has to reach the shell and nowhere else.  The channel
-    // is taken over for the press, because a smoke run that really opened the
-    // browser on the user's desktop would be a worse bug than the one being
-    // looked for; what is checked is that the address arrives intact.
-    const opened: string[] = []
-    ipcMain.removeHandler('shell:openExternal')
-    ipcMain.handle('shell:openExternal', (_e, url: string) => {
-      opened.push(url)
-      return { ok: true }
-    })
-    try {
-      if (wantLinks.extPage !== null) {
-        await w.webContents.executeJavaScript(
-          `(()=>{const i=document.querySelector(".pdf-bar input");if(!i)return 0;`
-          + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
-          + `set.call(i,${JSON.stringify(String(wantLinks.extPage))});`
-          + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
-        )
-        await new Promise((r) => setTimeout(r, 2500))
+    const onTheScannedOne = linkCard === 'yes' && linkAt === wantLinks.doc.id
+    // A press that landed somewhere else is not evidence about this paper at
+    // all, so the rest is not run rather than answered about a different one:
+    // it says so instead, and loudly, because a check that quietly did not
+    // happen is the one that cannot be told apart from a check that passed.
+    if (!onTheScannedOne) {
+      linkInfo = {
+        skip: 'the press did not land on the paper that was scanned',
+        want: wantLinks.doc.id,
+        card: linkCard,
+        at: linkAt,
+        title
       }
-      const extPressed = Number(
+      expect('the links are read off the paper that was scanned', false, linkInfo)
+    }
+    if (onTheScannedOne) {
+      const seen = JSON.parse(
         await w.webContents.executeJavaScript(
-          // one that is not marked as already on the shelf: those are answered
-          // here now, and pressing one would prove nothing about the browser
-          '(()=>{const a=document.querySelector("a.pdf-link.ext:not(.own)");if(!a)return 0;'
-          + 'a.click();return 1})()'
+          '(()=>{const a=[...document.querySelectorAll("a.pdf-link")];'
+          + 'return JSON.stringify({n:a.length,'
+          + 'ext:a.filter(x=>x.classList.contains("ext")).length,'
+          + 'href:(a.find(x=>x.classList.contains("ext"))||{}).href||null,'
+          + 'marked:a.length?getComputedStyle(a[0]).pointerEvents:null})})()'
         )
       )
-      await new Promise((r) => setTimeout(r, 800))
-      log('external link', { extPage: wantLinks.extPage, extPressed, opened })
-      if (wantLinks.extPage === null) {
-        log('no external link in this paper, press not checked')
-      } else {
-        expect(
-          'a link out of the paper reaches the shell and nothing else',
-          extPressed === 1 && opened.length === 1 && /^https?:\/\//.test(opened[0] ?? ''),
-          { extPage: wantLinks.extPage, extPressed, opened }
+      log('links on the page', seen)
+      expect(
+        'a paper that carries links gets a link to press',
+        seen.n >= 1 && seen.marked === 'auto',
+        seen
+      )
+      // an internal link is pressed only if it points somewhere else: a link to
+      // the page it is on turning the page to the page it is on proves nothing
+      const pageFrom = await pageNow()
+      const pressed = Number(
+        await w.webContents.executeJavaScript(
+          '(()=>{const cur=Number((document.querySelector(".pdf-bar input")||{}).value||0);'
+          + 'const a=[...document.querySelectorAll("a.pdf-link")]'
+          + '.filter(x=>!x.classList.contains("ext"))'
+          + '.find(x=>{const m=(x.getAttribute("href")||"").match(/^#page-(\\d+)$/);'
+          + 'return m&&Number(m[1])!==cur});'
+          + 'if(!a)return 0;a.click();return 1})()'
         )
-      }
-    } finally {
+      )
+      await new Promise((r) => setTimeout(r, 1200))
+      const pageTo = await pageNow()
+      log('internal link', { pressed, pageFrom, pageTo })
+      expect(
+        'pressing a link inside the paper turns to the page it points at',
+        pressed === 1 && pageTo !== pageFrom,
+        { pressed, pageFrom, pageTo }
+      )
+      // An external link has to reach the shell and nowhere else.  The channel
+      // is taken over for the press, because a smoke run that really opened the
+      // browser on the user's desktop would be a worse bug than the one being
+      // looked for; what is checked is that the address arrives intact.
+      const opened: string[] = []
       ipcMain.removeHandler('shell:openExternal')
       ipcMain.handle('shell:openExternal', (_e, url: string) => {
-        shell.openExternal(url)
+        opened.push(url)
         return { ok: true }
       })
+      try {
+        if (wantLinks.extPage !== null) {
+          await w.webContents.executeJavaScript(
+            `(()=>{const i=document.querySelector(".pdf-bar input");if(!i)return 0;`
+            + `const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;`
+            + `set.call(i,${JSON.stringify(String(wantLinks.extPage))});`
+            + `i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
+          )
+          await new Promise((r) => setTimeout(r, 2500))
+        }
+        const extPressed = Number(
+          await w.webContents.executeJavaScript(
+            // one that is not marked as already on the shelf: those are answered
+            // here now, and pressing one would prove nothing about the browser
+            '(()=>{const a=document.querySelector("a.pdf-link.ext:not(.own)");if(!a)return 0;'
+            + 'a.click();return 1})()'
+          )
+        )
+        await new Promise((r) => setTimeout(r, 800))
+        log('external link', { extPage: wantLinks.extPage, extPressed, opened })
+        if (wantLinks.extPage === null) {
+          log('no external link in this paper, press not checked')
+        } else {
+          expect(
+            'a link out of the paper reaches the shell and nothing else',
+            extPressed === 1 && opened.length === 1 && /^https?:\/\//.test(opened[0] ?? ''),
+            { extPage: wantLinks.extPage, extPressed, opened }
+          )
+        }
+      } finally {
+        ipcMain.removeHandler('shell:openExternal')
+        ipcMain.handle('shell:openExternal', (_e, url: string) => {
+          shell.openExternal(url)
+          return { ok: true }
+        })
+      }
+      linkInfo = { ok: true, title, anchors: seen.n, pageFrom, pageTo, opened }
     }
-    linkInfo = { ok: true, title, anchors: seen.n, pageFrom, pageTo, opened }
     // back to the whole library: what follows looks at the rows near the top
     await w.webContents.executeJavaScript(
       `(()=>{const i=document.querySelector(".toolbar input[placeholder^='搜索']");if(!i)return 0;`
