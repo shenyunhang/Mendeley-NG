@@ -33,7 +33,8 @@ export function useExport({
   noteMap,
   anns,
   setErr,
-  setBatchMsg,
+  flashBatch,
+  showBatch,
   askConfirm
 }: {
   target: Doc[]
@@ -41,7 +42,8 @@ export function useExport({
   noteMap: Record<string, string>
   anns: Annotation[]
   setErr: (m: string | null) => void
-  setBatchMsg: (m: string | null) => void
+  flashBatch: (m: string, ms: number) => void
+  showBatch: (m: string) => void
   askConfirm: (req: {
     title: string
     body?: string
@@ -63,8 +65,7 @@ export function useExport({
     const r = await window.api.saveText(`library.${fmt}`, text, kind, fmt)
     if (r.error) setErr(`导出失败：${r.error}`)
     else if (r.path) {
-      setBatchMsg(`已导出 ${target.length} 条到 ${r.path}`)
-      setTimeout(() => setBatchMsg(null), 6000)
+      flashBatch(`已导出 ${target.length} 条到 ${r.path}`, 6000)
     }
   }
   const exportBib = () => void exportAs('bib')
@@ -91,8 +92,7 @@ export function useExport({
     )
     if (r.error) setErr(`导出失败：${r.error}`)
     else if (r.path) {
-      setBatchMsg(`已导出 ${withNotes.length} 条笔记到 ${r.path}`)
-      setTimeout(() => setBatchMsg(null), 6000)
+      flashBatch(`已导出 ${withNotes.length} 条笔记到 ${r.path}`, 6000)
     }
   }
   /** Whether there is anything to export, so the item can say so rather than
@@ -136,8 +136,7 @@ export function useExport({
     )
     if (r.error) setErr(`导出失败：${r.error}`)
     else if (r.path) {
-      setBatchMsg(`已导出 ${picked.length} 条标注到 ${r.path}`)
-      setTimeout(() => setBatchMsg(null), 6000)
+      flashBatch(`已导出 ${picked.length} 条标注到 ${r.path}`, 6000)
     }
   }
   /**
@@ -198,7 +197,7 @@ export function useExport({
       files.push({ name: 'annotations.md', text: toAnnotationsMarkdown(target, annsOut, docs) })
     }
     const off = window.api.onLeaveProgress((p) => {
-      if (p.phase === 'pdf') setBatchMsg(`复制 PDF ${p.done}/${p.total}…`)
+      if (p.phase === 'pdf') showBatch(`复制 PDF ${p.done}/${p.total}…`)
     })
     try {
       const r = await window.api.leaveLibrary(dir, files, copies)
@@ -207,8 +206,7 @@ export function useExport({
         const bits = [`${target.length} 篇`, `${files.length} 个文件`]
         if (copies.length) bits.push(`${r.copied ?? 0} 份 PDF`)
         if (r.failed?.length) bits.push(`${r.failed.length} 份失败`)
-        setBatchMsg(`已放到 ${dir}：${bits.join(' · ')}`)
-        setTimeout(() => setBatchMsg(null), 12000)
+        flashBatch(`已放到 ${dir}：${bits.join(' · ')}`, 12000)
       }
     } finally {
       off()

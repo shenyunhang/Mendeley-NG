@@ -54,6 +54,7 @@ import { useLibrary } from './lib/hooks/useLibrary'
 import { useSelection } from './lib/hooks/useSelection'
 import { usePaneWidths } from './lib/hooks/usePaneWidths'
 import { useExport } from './lib/hooks/useExport'
+import { useFlashMessage } from './lib/hooks/useFlashMessage'
 import { LIBRARY, type View } from './lib/view'
 
 
@@ -915,12 +916,10 @@ export default function App() {
    */
   const reportBatch = (what: string, ok: number, failed: string[]) => {
     if (!failed.length) {
-      setBatchMsg(`${what} ${ok} 条`)
-      setTimeout(() => setBatchMsg(null), 2500)
+      flashBatch(`${what} ${ok} 条`, 2500)
       return
     }
-    setBatchMsg(`${what} ${ok} 条，${failed.length} 条失败`)
-    setTimeout(() => setBatchMsg(null), 5000)
+    flashBatch(`${what} ${ok} 条，${failed.length} 条失败`, 5000)
     setErr(
       `${what}时有 ${failed.length} 条没成功（其余 ${ok} 条已生效）：\n` +
         failed.join('\n')
@@ -1001,7 +1000,7 @@ export default function App() {
     )
   }, [docs.length, query, folderId, folders, filters, view.kind, ftStat, clearFilters])
 
-  const [batchMsg, setBatchMsg] = useState<string | null>(null)
+  const { message: batchMsg, flash: flashBatch, show: showBatch } = useFlashMessage()
 
   const { undo, pushUndo, doUndo, undoRef } = useUndo(setErr)
   navRef.current = {
@@ -1111,8 +1110,7 @@ export default function App() {
         // a count of renamed files is not an error, and the red banner was
         // the only place it had to go, so it landed there reading as one
         if (r.renamed) {
-          setBatchMsg(`已重命名 ${r.renamed} 个文件${r.skipped ? `，跳过 ${r.skipped} 个` : ''}`)
-          setTimeout(() => setBatchMsg(null), 3000)
+          flashBatch(`已重命名 ${r.renamed} 个文件${r.skipped ? `，跳过 ${r.skipped} 个` : ''}`, 3000)
         }
       }
     })
@@ -1130,8 +1128,7 @@ export default function App() {
     const inside = (d: Doc) => (d.folder_uuids ?? []).includes(folderId)
     const todo = list.filter((d) => (op === 'add' ? !inside(d) : inside(d)))
     if (!todo.length) {
-      setBatchMsg(op === 'add' ? '这些文献已经在这个文件夹里' : '这些文献不在这个文件夹里')
-      setTimeout(() => setBatchMsg(null), 2500)
+      flashBatch(op === 'add' ? '这些文献已经在这个文件夹里' : '这些文献不在这个文件夹里', 2500)
       return
     }
     const verb = op === 'add' ? '加入' : '移出'
@@ -1142,7 +1139,7 @@ export default function App() {
         if (op === 'add') await window.api.addToFolder(folderId, d.id)
         else await window.api.removeFromFolder(folderId, d.id)
       },
-      (done, total) => setBatchMsg(`正在${verb}文件夹 ${done}/${total}…`)
+      (done, total) => showBatch(`正在${verb}文件夹 ${done}/${total}…`)
     )
     // only what actually landed, so a paper that failed is not recorded as
     // moved and then shown as undoable
@@ -1245,8 +1242,7 @@ export default function App() {
   const batchDownload = async (list: Doc[]) => {
     const need = needsPdf(list)
     if (!need.length) {
-      setBatchMsg('这些本地都已经有 PDF 了')
-      setTimeout(() => setBatchMsg(null), 2500)
+      flashBatch('这些本地都已经有 PDF 了', 2500)
       return
     }
     dlStop.current = false
@@ -1291,8 +1287,7 @@ export default function App() {
     setDlRun(null)
     const okN = need.length - failed.length - queue.length
     if (stopped) {
-      setBatchMsg(`已停止，下载了 ${okN} 篇`)
-      setTimeout(() => setBatchMsg(null), 3000)
+      flashBatch(`已停止，下载了 ${okN} 篇`, 3000)
       return
     }
     reportBatch('已下载', okN, failed)
@@ -1327,8 +1322,7 @@ export default function App() {
         /* one failure should not abandon the rest of the batch */
       }
     }
-    setBatchMsg(`${label} ${n} 条`)
-    setTimeout(() => setBatchMsg(null), 2200)
+    flashBatch(`${label} ${n} 条`, 2200)
     if (n) {
       pushUndo(`${label} ${n} 条`, async () => {
         await Promise.all(
@@ -1414,7 +1408,7 @@ export default function App() {
       async (d) => {
         await setFlags(d, patchFor(d))
       },
-      (done, total) => setBatchMsg(`批量修改 ${done}/${total}…`)
+      (done, total) => showBatch(`批量修改 ${done}/${total}…`)
     )
     reportBatch('已修改', n, failed)
     if (n) {
@@ -1449,7 +1443,7 @@ export default function App() {
       async (d) => {
         await window.api.trashDoc(d.id)
       },
-      (done, total) => setBatchMsg(`正在移入回收站 ${done}/${total}…`)
+      (done, total) => showBatch(`正在移入回收站 ${done}/${total}…`)
     )
     const goneIds = new Set(
       list.filter((d) => !failed.includes(d.title || d.id)).map((d) => d.id)
@@ -1558,7 +1552,7 @@ export default function App() {
     leaveLibrary,
     canExportNotes,
     canExportAnnotations
-  } = useExport({ target, docs, noteMap, anns, setErr, setBatchMsg, askConfirm })
+  } = useExport({ target, docs, noteMap, anns, setErr, flashBatch, showBatch, askConfirm })
 
   /**
    * Put a formatted citation on the clipboard.  This is the single most
@@ -1571,10 +1565,10 @@ export default function App() {
     if (!list.length) return
     const text = formatCitation(list, style)
     await window.api.copyText(text)
-    setBatchMsg(
-      list.length > 1 ? `已复制 ${list.length} 条引文` : `已复制引文：${text.split('\n')[0]}`
+    flashBatch(
+      list.length > 1 ? `已复制 ${list.length} 条引文` : `已复制引文：${text.split('\n')[0]}`,
+      2400
     )
-    setTimeout(() => setBatchMsg(null), 2400)
   }
   // the shortcut lives in a listener installed once, so it reads the current
   // selection through a ref instead of a stale closure
@@ -1584,7 +1578,7 @@ export default function App() {
   }
 
   const [dropping, setDropping] = useState(false)
-  const [importMsg, setImportMsg] = useState<string | null>(null)
+  const { message: importMsg, flash: flashImport, show: showImport } = useFlashMessage()
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault()
@@ -1595,7 +1589,7 @@ export default function App() {
     if (!files.length) return
     for (let i = 0; i < files.length; i++) {
       const f = files[i]
-      setImportMsg(`导入 ${i + 1}/${files.length}：${f.name}`)
+      showImport(`导入 ${i + 1}/${files.length}：${f.name}`)
       try {
         // One read feeds both steps.  Reading the file twice was the whole
         // cost of the import for a large PDF, and it only looked necessary
@@ -1609,8 +1603,7 @@ export default function App() {
         setErr(`导入「${f.name}」失败：${String(err)}`)
       }
     }
-    setImportMsg(files.length > 1 ? `已导入 ${files.length} 篇` : '导入完成')
-    setTimeout(() => setImportMsg(null), 2500)
+    flashImport(files.length > 1 ? `已导入 ${files.length} 篇` : '导入完成', 2500)
   }
 
   /**

@@ -25,6 +25,10 @@ import {
   toNotesMarkdown
 } from '../../src/lib/export'
 import { describeSyncFailure } from '../../src/lib/offline'
+// One short-lived message and one pending clear, checked with a clock that
+// is advanced by hand: a timeout that outlives the message that asked for it
+// is a race, and a race cannot be checked by sleeping and hoping.
+import { createFlashMessage, type FlashClock } from '../../src/lib/flash'
 // The reference list is read out of the paper in the renderer, but the rules
 // that decide whether it was read correctly are pure, and a popover that
 // names the wrong paper is the kind of mistake that has to be caught on every
@@ -2170,6 +2174,118 @@ export async function runSmoke() {
     [netFail, authFail, otherFail].every((f) => /照常能用/.test(f.text)),
     otherFail.text
   )
+
+  // A message used to be shown with `setMsg(text); setTimeout(clear, ms)`
+  // repeated at a dozen call sites. Each timeout cleared whatever was on
+  // screen when it fired, not the message that asked for it — so copying a
+  // citation and then exporting wiped the export result after 2.4 seconds.
+  // The clock here is advanced by hand: this is a race, and waiting 2.4 real
+  // seconds would make the check depend on how busy the machine is, which is
+  // precisely the kind of assertion that goes red for no reason (11.11).
+  {
+    type Job = { at: number; fn: () => void; live: boolean }
+    const jobs: Job[] = []
+    let clockNow = 0
+    const clock: FlashClock = {
+      set: (fn, ms) => {
+        const job: Job = { at: clockNow + ms, fn, live: true }
+        jobs.push(job)
+        return job
+      },
+      clear: (h) => {
+        ;(h as Job).live = false
+      }
+    }
+    const advanceTo = (t: number) => {
+      clockNow = t
+      for (const j of jobs) {
+        if (j.live && j.at <= clockNow) {
+          j.live = false
+          j.fn()
+        }
+      }
+    }
+    // Control: the same two messages through the fire-and-forget version
+    // that was in the app before. It never cancels a pending clear, so the
+    // later message has to be wiped at 2400ms. If it were not, the checks
+    // below would be asserting nothing — an assertion that cannot fail looks
+    // exactly like one that passes (142 / 145 / 146).
+    {
+      const oldJobs: Job[] = []
+      let oldNow = 0
+      const oldClock: FlashClock = {
+        set: (fn, ms) => {
+          const j: Job = { at: oldNow + ms, fn, live: true }
+          oldJobs.push(j)
+          return j
+        },
+        clear: (h) => {
+          ;(h as Job).live = false
+        }
+      }
+      let oldShown: string | null = null
+      const naiveFlash = (text: string, ms: number) => {
+        oldShown = text
+        oldClock.set(() => {
+          oldShown = null
+        }, ms)
+      }
+      naiveFlash('已复制引文', 2400)
+      oldNow = 1000
+      naiveFlash('已导出 12 条', 6000)
+      oldNow = 2500
+      for (const j of oldJobs) {
+        if (j.live && j.at <= oldNow) {
+          j.live = false
+          j.fn()
+        }
+      }
+      expect(
+        'the old fire-and-forget version really does wipe the later message',
+        oldShown === null,
+        { oldShown, oldNow }
+      )
+    }
+
+    let shown: string | null = null
+    const msg = createFlashMessage((t) => {
+      shown = t
+    }, clock)
+
+    msg.flash('已复制引文', 2400)
+    clockNow = 1000
+    msg.flash('已导出 12 条', 6000)
+    advanceTo(2500)
+    expect(
+      'a later message is not wiped by an earlier timeout',
+      shown === '已导出 12 条',
+      { shown, clockNow, live: jobs.filter((j) => j.live).length }
+    )
+    advanceTo(7100)
+    expect(
+      'and the later message still clears on its own',
+      shown === null,
+      { shown, clockNow }
+    )
+
+    msg.flash('已修改 5 条', 2200)
+    msg.show('正在移入回收站 3/10…')
+    advanceTo(9500)
+    expect(
+      'a progress line survives a stale timeout',
+      shown === '正在移入回收站 3/10…',
+      { shown, clockNow }
+    )
+
+    msg.flash('即将卸载', 1000)
+    msg.dispose()
+    advanceTo(20000)
+    expect(
+      'unmount cancels the pending clear without rendering',
+      !msg.hasPending() && shown === '即将卸载',
+      { shown, clockNow, pending: msg.hasPending() }
+    )
+  }
 
   // The way out as one action.  Four exports the reader has to know about and
   // run one after another is not an answer to "can I leave", so the folder
