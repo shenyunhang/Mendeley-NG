@@ -18,6 +18,7 @@
     "electron.vite.config.ts",
     "src/lib/export.ts",
     "src/lib/flash.ts",
+    "src/lib/latestSearch.ts",
     "src/lib/offline.ts",
     "src/lib/refly.ts"
   ]

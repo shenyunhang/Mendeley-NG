@@ -5,6 +5,10 @@ import { compareDocs, type SortKey } from '../lib/columns'
 interface Props {
   query: string
   hits: FtHit[]
+  /** A lookup for this word is still out. Old hits must not stand in for it:
+   *  they belong to a word the reader has already replaced, and an empty
+   *  list must not be read as "not found" before anybody has looked. */
+  searching: boolean
   docs: Doc[]
   /** How the reader has asked for papers to be ordered.  The same answer
    *  governs this list as the catalogue's: a hit is a place inside a paper,
@@ -32,6 +36,7 @@ interface Props {
 export default function FullTextView({
   query,
   hits,
+  searching,
   docs,
   sort,
   status,
@@ -255,6 +260,8 @@ export default function FullTextView({
         <div className="ft-list">
           {!query.trim() ? (
             <div className="empty">输入要找的词</div>
+          ) : searching ? (
+            <div className="empty">正在查找「{query}」…</div>
           ) : !groups.length ? (
             /* An empty answer over a part of every paper is not an empty
                answer over the library, and the reader has no way to tell the

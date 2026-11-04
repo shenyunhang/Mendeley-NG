@@ -199,10 +199,9 @@ export default function App() {
     ftQuery,
     setFtQuery,
     ftHits,
-    setFtHits,
+    ftSearching,
     ftStat,
     setFtStat,
-    ftEpoch,
     build: buildIndex,
     cancel: cancelIndex,
     clear: clearIndex
@@ -1900,6 +1899,7 @@ export default function App() {
           <FullTextView
             query={ftQuery}
             hits={ftHits}
+            searching={ftSearching}
             docs={docs}
             sort={sort}
             status={ftStat}

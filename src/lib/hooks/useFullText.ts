@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FtHit, FtStatus } from '../../../shared/types'
+import {
+  answerFor,
+  createLatestSearch,
+  type LatestSearch,
+  type SearchAnswer
+} from '../latestSearch'
 
 /**
  * Full-text search, as a state of its own.
@@ -21,7 +27,12 @@ import type { FtHit, FtStatus } from '../../../shared/types'
  */
 export function useFullText(active: boolean) {
   const [ftQuery, setFtQuery] = useState('')
-  const [ftHits, setFtHits] = useState<FtHit[]>([])
+  /**
+   * An answer is kept with the word that produced it. The old plain array
+   * could not say that, and the view would render hits from a word the
+   * reader had already replaced. See `latestSearch.ts`.
+   */
+  const [answer, setAnswer] = useState<SearchAnswer<string, FtHit[]> | null>(null)
   const [ftStat, setFtStat] = useState<FtStatus | null>(null)
 
   /**
@@ -35,6 +46,21 @@ export function useFullText(active: boolean) {
    * change, so only the index finishing can be what prompts the second look.
    */
   const [ftEpoch, setFtEpoch] = useState(0)
+
+  /**
+   * The controller lives in a ref, as `useUndo`'s stack and
+   * `useFlashMessage`'s timer do: it is built once, closes over React's stable
+   * `setState`, and must outlive the effect that starts each lookup.
+   */
+  const search = useRef<LatestSearch<string, FtHit[]> | null>(null)
+  if (search.current === null) {
+    search.current = createLatestSearch<string, FtHit[]>(
+      (q) => window.api.ftSearch(q),
+      setAnswer,
+      []
+    )
+  }
+  useEffect(() => () => search.current?.cancel(), [])
 
   const wasBuilding = useRef(false)
   useEffect(() => {
@@ -72,33 +98,44 @@ export function useFullText(active: boolean) {
   const clear = useCallback(() => {
     window.api.ftClear().then((s) => {
       setFtStat(s)
-      setFtHits([])
+      search.current?.cancel()
+      setAnswer(null)
     })
   }, [])
 
   // The search runs in the main process against the whole corpus, so it is
   // debounced: typing a word should not start one scan per keystroke.
+  // There is deliberately no cleanup on this effect. `ask` supersedes the
+  // previous question itself, so a cleanup would only do the same thing
+  // twice; the permanent unmount cleanup above is the one that matters.
   useEffect(() => {
-    if (!active) return
     const q = ftQuery.trim()
-    if (q.length < 2) {
-      setFtHits([])
+    if (!active || q.length < 2) {
+      search.current?.cancel()
       return
     }
-    const t = setTimeout(() => {
-      window.api.ftSearch(q).then(setFtHits).catch(() => setFtHits([]))
-    }, 250)
-    return () => clearTimeout(t)
+    search.current?.ask(q, 250)
   }, [active, ftQuery, ftEpoch])
+
+  const current = ftQuery.trim()
+  const matching = answerFor(answer, current)
+  const ftHits = matching ?? []
+  /**
+   * An answer tagged with an older word is not an answer to this one, and
+   * neither is no answer at all. Both mean a lookup is still out, which is
+   * the truth to put on screen instead of old rows or a premature "没找到".
+   * Empty results are *not* `null`, so a real "not found" is still a "not
+   * found" rather than a search that never ends.
+   */
+  const ftSearching = current.length >= 2 && matching === null
 
   return {
     ftQuery,
     setFtQuery,
     ftHits,
-    setFtHits,
+    ftSearching,
     ftStat,
     setFtStat,
-    ftEpoch,
     build,
     cancel,
     clear

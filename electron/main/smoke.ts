@@ -29,6 +29,15 @@ import { describeSyncFailure } from '../../src/lib/offline'
 // is advanced by hand: a timeout that outlives the message that asked for it
 // is a race, and a race cannot be checked by sleeping and hoping.
 import { createFlashMessage, type FlashClock } from '../../src/lib/flash'
+// A debounced lookup that may only answer the word still on screen, checked
+// with a clock advanced by hand and promises resolved by hand: cancelling a
+// timer is not the same as cancelling the request it already started.
+import {
+  answerFor,
+  createLatestSearch,
+  type SearchAnswer,
+  type SearchClock
+} from '../../src/lib/latestSearch'
 // The reference list is read out of the paper in the renderer, but the rules
 // that decide whether it was read correctly are pure, and a popover that
 // names the wrong paper is the kind of mistake that has to be caught on every
@@ -2284,6 +2293,208 @@ export async function runSmoke() {
       'unmount cancels the pending clear without rendering',
       !msg.hasPending() && shown === '即将卸载',
       { shown, clockNow, pending: msg.hasPending() }
+    )
+  }
+
+  // The full-text box used to debounce a lookup with
+  // `setTimeout(() => ftSearch(q).then(setHits), 250)` and clean up with
+  // `clearTimeout(t)`. That cancels the timer, not the request it already
+  // started: empty the box while a lookup is in flight and the old hits land
+  // in state a moment later, then sit on screen under whatever word is typed
+  // next. The view never asked which word produced its rows either. A clock
+  // advanced by hand and promises resolved by hand make both halves of this
+  // checkable without sleeping or real IPC.
+  {
+    type Job = { at: number; fn: () => void; live: boolean }
+    const makeClock = () => {
+      const jobs: Job[] = []
+      let now = 0
+      const clock: SearchClock = {
+        set: (fn, ms) => {
+          const job: Job = { at: now + ms, fn, live: true }
+          jobs.push(job)
+          return job
+        },
+        clear: (h) => {
+          ;(h as Job).live = false
+        }
+      }
+      const advanceTo = (t: number) => {
+        now = t
+        for (const j of jobs) {
+          if (j.live && j.at <= now) {
+            j.live = false
+            j.fn()
+          }
+        }
+      }
+      return { clock, advanceTo, live: () => jobs.filter((j) => j.live).length }
+    }
+    type Sent = {
+      q: string
+      resolve: (hits: string[]) => void
+      reject: (why: unknown) => void
+    }
+    const makeRun = () => {
+      const sent: Sent[] = []
+      const run = (q: string) =>
+        new Promise<string[]>((resolve, reject) => sent.push({ q, resolve, reject }))
+      return { run, sent }
+    }
+    // Resolving a promise only queues a microtask. setImmediate lets it run
+    // without sleeping, so none of these checks can go red because the
+    // machine happened to be busy (11.11).
+    const flush = () => new Promise<void>((r) => setImmediate(() => r()))
+
+    // Control, one: the pre-152 effect with the same clock and the same
+    // order of events. It really does leave stale hits behind; if it did
+    // not, everything below would be asserting nothing (142 / 145 / 146 / 151).
+    {
+      const { clock, advanceTo } = makeClock()
+      const { run, sent } = makeRun()
+      let oldHits: string[] = []
+      const pending = clock.set(() => {
+        run('protein').then((h) => {
+          oldHits = h
+        })
+      }, 250)
+      advanceTo(250)
+      // The box is emptied. The old cleanup clears only the timer, and the
+      // short-query branch clears the rows — but the lookup is already out.
+      clock.clear(pending)
+      oldHits = []
+      sent[0].resolve(['protein p1'])
+      await flush()
+      expect(
+        'the old debounce really does put stale hits back after the box is cleared',
+        oldHits.length === 1 && oldHits[0] === 'protein p1',
+        { oldHits, sent: sent.map((s) => s.q) }
+      )
+    }
+
+    // Control, two: once two lookups are out, no cleanup can stop either.
+    // An index build that finishes mid-lookup is the case that made this
+    // one matter — the older "not found" lands last and wins.
+    {
+      const { clock, advanceTo } = makeClock()
+      const { run, sent } = makeRun()
+      let oldHits: string[] = []
+      const naive = (q: string) =>
+        clock.set(() => {
+          run(q).then((h) => {
+            oldHits = h
+          })
+        }, 0)
+      naive('before build')
+      naive('after build')
+      advanceTo(0)
+      sent[1].resolve(['after build p2'])
+      await flush()
+      sent[0].resolve(['before build p1'])
+      await flush()
+      expect(
+        'and without a generation guard an older answer arriving last wins',
+        oldHits[0] === 'before build p1',
+        { oldHits, sent: sent.map((s) => s.q) }
+      )
+    }
+
+    const { clock, advanceTo, live } = makeClock()
+    const { run, sent } = makeRun()
+    // Held on an object rather than a bare `let`: the render callback is the
+    // only writer, and TypeScript narrows a captured `let` to its initial
+    // `null`, which would make every read below look like a type error.
+    const box: { answer: SearchAnswer<string, string[]> | null } = { answer: null }
+    const renders: (SearchAnswer<string, string[]> | null)[] = []
+    const search = createLatestSearch<string, string[]>(
+      run,
+      (a) => {
+        box.answer = a
+        renders.push(a)
+      },
+      [],
+      clock
+    )
+
+    search.ask('pro', 250)
+    search.ask('protein', 250)
+    advanceTo(250)
+    expect(
+      'typing again before the debounce fires sends only the last word',
+      sent.length === 1 && sent[0].q === 'protein' && !search.hasPendingTimer(),
+      { sent: sent.map((s) => s.q), live: live() }
+    )
+
+    sent[0].resolve(['protein p1'])
+    await flush()
+    expect(
+      'the new scheduler still delivers a normal answer',
+      (answerFor(box.answer, 'protein') ?? [])[0] === 'protein p1',
+      { answer: box.answer }
+    )
+
+    // The exact shape of control one, through the new scheduler. Cancelling
+    // does not render and does not touch the old answer: the tag is what
+    // keeps that answer off the screen, so there is no state write to make
+    // and no extra render to perturb the table (152).
+    search.ask('kinase', 250)
+    advanceTo(500)
+    search.cancel()
+    const beforeCancel = renders.length
+    sent[1].resolve(['kinase p2'])
+    await flush()
+    expect(
+      'a lookup already in flight cannot answer after the box is cleared',
+      renders.length === beforeCancel &&
+        answerFor(box.answer, 'kinase') === null &&
+        answerFor(box.answer, '') === null,
+      { answer: box.answer, renders: renders.length, beforeCancel }
+    )
+
+    // The exact shape of control two, through the new scheduler.
+    search.ask('alpha', 250)
+    advanceTo(750)
+    search.ask('beta', 250)
+    advanceTo(1000)
+    sent[3].resolve(['beta p2'])
+    await flush()
+    sent[2].resolve(['alpha p1'])
+    await flush()
+    expect(
+      'an older answer arriving last cannot overwrite the newer one',
+      (answerFor(box.answer, 'beta') ?? [])[0] === 'beta p2' &&
+        box.answer?.question === 'beta',
+      { answer: box.answer, sent: sent.map((s) => s.q) }
+    )
+
+    // An empty result is still an answer. If it were not, a search that
+    // genuinely found nothing would sit at 正在查找 forever.
+    expect(
+      'an answer only belongs to the word that produced it',
+      answerFor({ question: 'alpha', result: ['alpha p1'] }, 'beta') === null &&
+        answerFor({ question: 'beta', result: [] }, 'beta') !== null,
+      { answer: box.answer }
+    )
+
+    search.ask('gamma', 250)
+    advanceTo(1250)
+    sent[4].reject(new Error('ft:search went away'))
+    await flush()
+    expect(
+      'a failed lookup answers with no hits instead of searching forever',
+      answerFor(box.answer, 'gamma') !== null &&
+        (answerFor(box.answer, 'gamma') ?? []).length === 0,
+      { answer: box.answer }
+    )
+
+    search.ask('delta', 250)
+    const beforeUnmount = renders.length
+    search.cancel()
+    advanceTo(2000)
+    expect(
+      'a cancel on unmount drops the pending lookup without rendering',
+      !search.hasPendingTimer() && sent.length === 5 && renders.length === beforeUnmount,
+      { sent: sent.map((s) => s.q), renders: renders.length, beforeUnmount, live: live() }
     )
   }
 
