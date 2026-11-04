@@ -27,18 +27,7 @@ import {
   type ColKey,
   type SortKey
 } from './lib/columns'
-import {
-  DEFAULT_LEFT_W,
-  DEFAULT_RIGHT_PCT,
-  LEFT_MAX,
-  LEFT_MIN,
-  MID_MIN,
-  RIGHT_MAX,
-  RIGHT_MIN,
-  clampLeft,
-  clampNum,
-  clampRight
-} from './lib/panes'
+import { DEFAULT_LEFT_W, DEFAULT_RIGHT_PCT } from './lib/panes'
 import {
   FILTER_LABEL,
   FILTER_TEST,
@@ -71,6 +60,8 @@ import { useConfig } from './lib/hooks/useConfig'
 import { useFullText } from './lib/hooks/useFullText'
 import { useUndo } from './lib/hooks/useUndo'
 import { useLibrary } from './lib/hooks/useLibrary'
+import { useSelection } from './lib/hooks/useSelection'
+import { usePaneWidths } from './lib/hooks/usePaneWidths'
 import { LIBRARY, type View } from './lib/view'
 
 
@@ -111,13 +102,7 @@ export default function App() {
    */
   const [renameReq, setRenameReq] = useState<{ id: string; n: number } | null>(null)
   const [query, setQuery] = useState('')
-  const [selId, setSelId] = useState<string | null>(null)
-  /** A paper the right pane is showing that is not in the library.  The bin
-   *  lists documents that doc:trash already took out of `docs`, so resolving
-   *  the selection from `filtered`/`docs` alone leaves the pane asking to be
-   *  given a paper again the moment one of them is pressed.  Holding the
-   *  record itself is what makes "open it" mean something there. */
-  const [pinned, setPinned] = useState<Doc | null>(null)
+  const { selId, setSelId, pinned, setPinned, multi, setMulti, lastIdx } = useSelection()
   const [rightTab, setRightTab] = useState<'pdf' | 'details'>('details')
   const [err, setErr] = useState<string | null>(null)
   const [upd, setUpd] = useState<UpdateState | null>(null)
@@ -183,8 +168,6 @@ export default function App() {
   const [showFilters, setShowFilters] = useState(false)
   const [showSort, setShowSort] = useState(false)
   const [showCols, setShowCols] = useState(false)
-  const [multi, setMulti] = useState<string[]>([])
-  const lastIdx = useRef<number | null>(null)
   const [activeSearch, setActiveSearch] = useState<string | null>(null)
   const [ask, setAsk] = useState<{
     title: string
@@ -243,7 +226,6 @@ export default function App() {
   /** Which section the settings sheet opens on, when it is opened because
    *  something else named a setting rather than because 设置 was pressed. */
   const [setSec, setSetSec] = useState<string | null>(null)
-  const bodyRef = useRef<HTMLDivElement>(null)
   /** Local notes, kept here only so the search box can look inside them.
    *  They are written by the details panel, which reports back after saving. */
   const [noteMap, setNoteMap] = useState<Record<string, string>>({})
@@ -1103,63 +1085,12 @@ export default function App() {
     setFtStat(await window.api.ftStatus())
   }
 
-  /**
-   * Dragging a pane edge.  Both are clamped against the same floor for the
-   * middle pane, so neither drag can squeeze the document list out of
-   * existence, and the clamp is recomputed from the live box because the
-   * window can be resized between two drags.
-   */
-  const dragLeft = (x: number) => {
-    const box = bodyRef.current?.getBoundingClientRect()
-    if (!box || box.width <= 0) return
-    const rightPx = (box.width * rightPct) / 100
-    const hi = Math.max(LEFT_MIN, Math.min(LEFT_MAX, box.width - rightPx - MID_MIN))
-    setLeftW(Math.round(clampNum(x - box.left, LEFT_MIN, hi)))
-  }
-
-  const dragRight = (x: number) => {
-    const box = bodyRef.current?.getBoundingClientRect()
-    if (!box || box.width <= 0) return
-    // the right pane is a share of the window, so the drag is converted to a
-    // percentage: the width the user chose then survives a resize
-    const hi = ((box.width - leftW - MID_MIN) / box.width) * 100
-    const pct = ((box.right - x) / box.width) * 100
-    setRightPct(Math.round(clampNum(pct, RIGHT_MIN, Math.min(RIGHT_MAX, hi)) * 10) / 10)
-  }
-
-  /**
-   * Remember the widths, but only once the drag has stopped.
-   *
-   * Saving from the drag's own "mouse up" instead of here is the obvious
-   * version and it is wrong: that handler closes over the state of the render
-   * it was created in, so releasing inside the same frame as the last move
-   * saves the width from before the move.  Waiting on the state settles the
-   * question, and the debounce means one write per drag rather than one per
-   * frame, which is a hundred writes to a file nobody asked to touch.
-   */
-  const panesTouched = useRef(false)
-  useEffect(() => {
-    // the first run is the mount, not a change
-    if (!panesTouched.current) {
-      panesTouched.current = true
-      return
-    }
-    const t = setTimeout(() => {
-      void window.api.setConfig({ paneLeft: leftW, paneRight: rightPct })
-    }, 400)
-    return () => clearTimeout(t)
-  }, [leftW, rightPct])
-
-  const setLeft = (w: number) => {
-    const next = clampLeft(w)
-    setLeftW(next)
-    void window.api.setConfig({ paneLeft: next })
-  }
-  const setRight = (p: number) => {
-    const next = clampRight(p)
-    setRightPct(next)
-    void window.api.setConfig({ paneRight: next })
-  }
+  const { bodyRef, dragLeft, dragRight, setLeft, setRight } = usePaneWidths({
+    leftW,
+    rightPct,
+    setLeftW,
+    setRightPct
+  })
 
   const askNameTemplate = () => {
     setAsk({
