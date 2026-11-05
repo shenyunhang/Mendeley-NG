@@ -4691,6 +4691,21 @@ export async function runSmoke() {
       + `set.call(i,"1");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
   )
   await new Promise((r) => setTimeout(r, 1500))
+  // That sleep is only a floor, not a guarantee. On a busy machine pdf.js had
+  // not drawn a single usable span when the word was picked: `find word
+  // candidates []`, query "", and six assertions went red saying nothing at
+  // all about find (156 r1). Wait for the words themselves, and if they never
+  // arrive say so once, plainly, instead of six times and obliquely.
+  const WORD_SPANS =
+    'String([...document.querySelectorAll(".tx-layer span.tx")]'
+    + '.filter(s=>(s.textContent||"").trim().length>=4).length)'
+  const wordSpans = Number(
+    (await until(WORD_SPANS, (v) => Number(v) > 0, 12000)) ?? 0
+  )
+  log('word spans ready before find', wordSpans)
+  expect('the page has words to look for before find is asked', wordSpans > 0, {
+    wordSpans
+  })
   log('click 查找', await clickBar('查找'))
   await new Promise((r) => setTimeout(r, 300))
   // The word is the one the page repeats most often, not the first one on it.
