@@ -3,6 +3,17 @@ import type * as pdfjs from 'pdfjs-dist'
 import type { MutableRefObject } from 'react'
 import type { FindHit, TextRun } from '../pdfgeom'
 import { findInPage } from '../pdffind'
+import {
+  answerBusy,
+  answerHits,
+  createFindScan,
+  type FindScan,
+  type ScanAnswer
+} from '../findScan'
+
+/** One stable empty list. Deriving `findHits` must not hand a new array to the
+ *  keyboard listener and the DOM dataset effects on every render. */
+const NO_HITS: FindHit[] = []
 
 /**
  * Finding a word in the open paper.
@@ -36,22 +47,34 @@ export function usePdfFind(o: {
 
   const [findOpen, setFindOpen] = useState(false)
   const [findQ, setFindQ] = useState('')
-  const [findHits, setFindHits] = useState<FindHit[]>([])
+  const [answer, setAnswer] = useState<ScanAnswer<string, FindHit> | null>(null)
   const [findAt, setFindAt] = useState(0)
-  const [findBusy, setFindBusy] = useState(false)
 
   /** Text runs of every page already pulled, so a second query never asks
    *  pdf.js for the same page twice.  Thrown away on a document change. */
   const textCache = useRef(new Map<number, TextRun[]>())
-  /** Bumped on every query; a scan that notices it moved stops early. */
-  const scanId = useRef(0)
   const findInput = useRef<HTMLInputElement>(null)
+
+  /** The word the answer belongs to. A lower-cased word, because that is what
+   *  `findInPage` was asked about. */
+  const key = findQ.trim().toLowerCase()
+  const findHits = answerHits(answer, key) ?? NO_HITS
+  const findBusy = answerBusy(answer, key)
+
+  /** Built once, like `useUndo`'s stack: a scan is started from an effect and
+   *  outlives it, so the controller must not close over a stale render. */
+  const scan = useRef<FindScan<string, FindHit> | null>(null)
+  const finishRef = useRef<(_q: string, _hits: FindHit[]) => void>(() => {})
+  if (scan.current === null) {
+    scan.current = createFindScan<string, FindHit>(setAnswer, (q, hits) =>
+      finishRef.current(q, hits)
+    )
+  }
 
   useEffect(() => {
     textCache.current.clear()
-    scanId.current++
+    scan.current?.cancel()
     setFindQ('')
-    setFindHits([])
     setFindAt(0)
     setFindOpen(false)
   }, [o.docKey])
@@ -67,11 +90,16 @@ export function usePdfFind(o: {
   const queryDriven = useRef(false)
 
   /** Shutting the box takes its marks with it: an orange box left on the page
-   *  with nothing saying which word it belongs to is worse than none. */
+   *  with nothing saying which word it belongs to is worse than none.
+   *
+   *  The cancel matters as much as the clearing. A scan still walking the
+   *  pages used to survive this and, on its last page, call `setFindOpen(true)`
+   *  — the box the reader had just closed popped back open with the old
+   *  word's marks. */
   const closeFind = useCallback(() => {
+    scan.current?.cancel()
     queryDriven.current = false
     setFindQ('')
-    setFindHits([])
     setFindAt(0)
     setFindOpen(false)
   }, [])
@@ -114,52 +142,57 @@ export function usePdfFind(o: {
     o.onJump(h.page)
   }
 
+  /** The last page of a walk decides whether the bar opens.  It lives in a ref
+   *  because the controller is built once, while the page being read and the
+   *  jump function belong to the current render. */
+  finishRef.current = (_q, hits) => {
+    if (!hits.length) return
+    setFindOpen(true)
+    // A term from the library search must not move the reader: a hit in the
+    // list carries its own page, and the reader is already on it.  Only the
+    // caret is placed, on the first hit of the page being read, so that the
+    // count and the ↑ ↓ mean something from where the reader is standing.
+    if (queryDriven.current) {
+      const onThis = hits.findIndex((h) => h.page === pageRef.current)
+      setFindAt(onThis >= 0 ? onThis : 0)
+      return
+    }
+    gotoHit(0, hits)
+  }
+
   /**
    * Walk every page.  Hits are published as they are found rather than at the
    * end, so a long paper reports its first matches while the rest is still
-   * being read.
+   * being read.  Every publish and the final `finish` go through the scan
+   * handle, so a word that has been replaced cannot write again.
    */
   const runFind = useCallback(
     async (q: string) => {
       const needle = q.trim().toLowerCase()
       if (!pdf || needle.length < 2) {
-        setFindHits([])
+        // No state write: the word in the box is now too short for the old
+        // answer to match, which is already an empty, non-busy view.
+        scan.current?.cancel()
         setFindAt(0)
-        setFindBusy(false)
         return
       }
-      const id = ++scanId.current
-      setFindBusy(true)
+      const s = scan.current!.start(needle)
       const all: FindHit[] = []
       for (let n = 1; n <= numPages; n++) {
-        if (id !== scanId.current) return
+        if (!s.alive()) return
         try {
           const hits = await findInPage(pdf, textCache.current, n, needle)
-          if (id !== scanId.current) return
+          if (!s.alive()) return
           if (hits.length) {
             all.push(...hits)
-            setFindHits([...all])
+            s.publish([...all])
           }
         } catch {
           /* a page that will not give up its text costs a hit, not the scan */
         }
       }
-      setFindBusy(false)
-      if (!all.length) return
-      setFindOpen(true)
-      // A term from the library search must not move the reader: a hit in the
-      // list carries its own page, and the reader is already on it.  Only the
-      // caret is placed, on the first hit of the page being read, so that the
-      // count and the ↑ ↓ mean something from where the reader is standing.
-      if (queryDriven.current) {
-        const onThis = all.findIndex((h) => h.page === pageRef.current)
-        setFindAt(onThis >= 0 ? onThis : 0)
-        return
-      }
-      gotoHit(0, all)
-      // gotoHit reads page/scale through the closure on purpose: a stale copy
-      // would only mean one extra scroll
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+      if (!s.alive()) return
+      s.finish(all)
     },
     [pdf, numPages]
   )
@@ -172,7 +205,14 @@ export function usePdfFind(o: {
   useEffect(() => {
     if (!findOpen && !queryDriven.current) return
     const t = setTimeout(() => runFind(findQ), 250)
-    return () => clearTimeout(t)
+    return () => {
+      clearTimeout(t)
+      // Clearing the timer only stops a scan that has not started.  One that
+      // is already walking the pages has to be invalidated too: otherwise it
+      // keeps publishing the old word's hits during these 250ms and, on its
+      // last page, opens the bar for a word no longer in the box.
+      scan.current?.cancel()
+    }
     // `findOpen` is left out on purpose.  The scan is what opens the box when
     // the term came from the library search, so having the box's own state in
     // here would start a second walk of every page the moment the first one

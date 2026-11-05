@@ -46,6 +46,16 @@ import {
   valueForDocument,
   type ForDocument
 } from '../../src/lib/documentScope'
+// A find scan publishes hits page by page and opens the bar on its last page.
+// Both writes belong to the word that started it: closing the box used to
+// clear the state but leave the walk running, so the bar came back with the
+// old word's marks. Checked by resolving one page at a time, not by sleeping.
+import {
+  answerBusy,
+  answerHits,
+  createFindScan,
+  type ScanAnswer
+} from '../../src/lib/findScan'
 // The reference list is read out of the paper in the renderer, but the rules
 // that decide whether it was read correctly are pure, and a popover that
 // names the wrong paper is the kind of mistake that has to be caught on every
@@ -2637,6 +2647,144 @@ export async function runSmoke() {
         (valueForDocument<string | null>({ docId: 'paper-b', value: 'b1' }, 'paper-b') ?? '') ===
           'b1',
       {}
+    )
+  }
+
+  // 154: closing the find bar cleared the state but did not bump the scan id,
+  // so a walk still reading the pages kept publishing the old word's hits and,
+  // on its last page, called setFindOpen(true) — the bar the reader had just
+  // closed came back. The same missing tag showed the old word's count under a
+  // newly typed word for the whole 250ms of debounce.
+  {
+    type Hit = { page: number }
+    const flush = () => new Promise<void>((r) => setImmediate(() => r()))
+
+    // Control: the pre-154 walk with one page still in flight. If this did not
+    // really reopen the bar, every assertion below would be testing nothing
+    // (142 / 145 / 146 / 151 / 152 / 153).
+    {
+      // Counters, not booleans: TypeScript narrows a `let` that is only
+      // assigned inside a callback to its initial literal (see 152).
+      const old: { hits: Hit[]; opens: number; busyStops: number } = {
+        hits: [],
+        opens: 0,
+        busyStops: 0
+      }
+      let oldResolve!: (hits: Hit[]) => void
+      const page = new Promise<Hit[]>((r) => {
+        oldResolve = r
+      })
+      const oldWalk = (async () => {
+        const got = await page
+        old.hits = got
+        old.opens += 1
+        old.busyStops += 1
+        return old.hits
+      })()
+      // closeFind cleared these, and left the walk alone
+      old.hits = []
+      old.opens = 0
+      oldResolve([{ page: 3 }])
+      await oldWalk
+      expect(
+        'the old find walk really does reopen a bar the reader closed',
+        old.opens === 1 && old.hits.length === 1 && old.busyStops === 1,
+        { opens: old.opens, hits: old.hits, busyStops: old.busyStops }
+      )
+    }
+
+    const box: { answer: ScanAnswer<string, Hit> | null; renders: number } = {
+      answer: null,
+      renders: 0
+    }
+    const opened: string[] = []
+    const scan = createFindScan<string, Hit>(
+      (a) => {
+        box.answer = a
+        box.renders += 1
+      },
+      (q, hits) => {
+        if (!hits.length) return
+        opened.push(q + ':' + hits.length)
+      }
+    )
+
+    const alpha = scan.start('alpha')
+    expect(
+      'starting a walk answers its own word with an empty, busy list',
+      answerHits(box.answer, 'alpha') !== null &&
+        (answerHits(box.answer, 'alpha') ?? []).length === 0 &&
+        answerBusy(box.answer, 'alpha') === true &&
+        answerHits(box.answer, '') === null,
+      { answer: box.answer, renders: box.renders }
+    )
+
+    alpha.publish([{ page: 1 }])
+    const beta = scan.start('beta')
+    expect(
+      'a newly typed word no longer shows the previous word hits',
+      answerHits(box.answer, 'alpha') === null &&
+        (answerHits(box.answer, 'beta') ?? []).length === 0 &&
+        answerBusy(box.answer, 'beta') === true,
+      { answer: box.answer }
+    )
+
+    alpha.publish([{ page: 9 }])
+    alpha.finish([{ page: 9 }])
+    await flush()
+    expect(
+      'an outdated walk cannot append hits under the word now in the box',
+      (answerHits(box.answer, 'beta') ?? []).length === 0 && opened.length === 0,
+      { answer: box.answer, opened }
+    )
+
+    beta.publish([{ page: 4 }, { page: 7 }])
+    expect(
+      'hits found so far are published while the rest of the pages are read',
+      (answerHits(box.answer, 'beta') ?? []).length === 2 &&
+        answerBusy(box.answer, 'beta') === true,
+      { answer: box.answer }
+    )
+
+    beta.finish([{ page: 4 }, { page: 7 }])
+    expect(
+      'the last page opens the bar once, for the word that produced the hits',
+      opened.length === 1 &&
+        opened[0] === 'beta:2' &&
+        answerBusy(box.answer, 'beta') === false,
+      { opened, answer: box.answer }
+    )
+
+    const gamma = scan.start('gamma')
+    gamma.finish([])
+    expect(
+      'a word with no hits is still an answer, not an endless spinner',
+      answerHits(box.answer, 'gamma') !== null &&
+        (answerHits(box.answer, 'gamma') ?? []).length === 0 &&
+        answerBusy(box.answer, 'gamma') === false &&
+        opened.length === 1,
+      { answer: box.answer, opened }
+    )
+
+    const delta = scan.start('delta')
+    expect(
+      'a superseded walk cannot leave the old word busy forever',
+      answerBusy(box.answer, 'gamma') === false &&
+        answerBusy(box.answer, 'delta') === true,
+      { answer: box.answer }
+    )
+
+    const beforeCancel = box.renders
+    scan.cancel()
+    delta.publish([{ page: 99 }])
+    delta.finish([{ page: 99 }])
+    expect(
+      'closing the box cancels the walk without a state write or a reopen',
+      box.renders === beforeCancel &&
+        !delta.alive() &&
+        opened.length === 1 &&
+        (answerHits(box.answer, 'delta') ?? []).length === 0,
+      { renders: box.renders, beforeCancel, opened, answer: box.answer }
     )
   }
 
