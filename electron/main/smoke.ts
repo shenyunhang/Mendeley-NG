@@ -38,6 +38,14 @@ import {
   type SearchAnswer,
   type SearchClock
 } from '../../src/lib/latestSearch'
+// The reader keeps one component across papers, so a highlight read has to be
+// tied to the paper that asked for it. Ordering is checked by resolving the
+// reads by hand, not by hoping the disk answers in the order it was asked.
+import {
+  createDocumentLoad,
+  valueForDocument,
+  type ForDocument
+} from '../../src/lib/documentScope'
 // The reference list is read out of the paper in the renderer, but the rules
 // that decide whether it was read correctly are pure, and a popover that
 // names the wrong paper is the kind of mistake that has to be caught on every
@@ -2495,6 +2503,140 @@ export async function runSmoke() {
       'a cancel on unmount drops the pending lookup without rendering',
       !search.hasPendingTimer() && sent.length === 5 && renders.length === beforeUnmount,
       { sent: sent.map((s) => s.q), renders: renders.length, beforeUnmount, live: live() }
+    )
+  }
+
+  // The reader is not keyed by document: clicking another paper re-renders
+  // PdfViewer in place. usePdfAnnotations used to hold one bare array, so the
+  // previous paper's marks stayed on the new PDF until the new file came back,
+  // and a slow read for the old paper could land last and win. The PDF itself,
+  // the outline, the links and the references each had a `dead` flag in that
+  // same component; the annotation read was the one keyed load without one.
+  {
+    type Pending = {
+      docId: string
+      resolve: (marks: string[]) => void
+      reject: (why: unknown) => void
+    }
+    const makeLoad = () => {
+      const sent: Pending[] = []
+      const load = (docId: string) =>
+        new Promise<string[]>((resolve, reject) => sent.push({ docId, resolve, reject }))
+      return { load, sent }
+    }
+    const flush = () => new Promise<void>((r) => setImmediate(() => r()))
+
+    // Control: the pre-153 read with the same two papers and the same order of
+    // answers. It has no tag and no generation, so the late answer for the
+    // paper no longer on screen really does win. If it did not, every check
+    // below would be asserting nothing (142 / 145 / 146 / 151 / 152).
+    {
+      const { load, sent } = makeLoad()
+      let oldAnns: string[] = []
+      const oldEffect = (docId: string) =>
+        load(docId).then((all) => {
+          oldAnns = all
+        })
+      oldEffect('paper-a')
+      oldEffect('paper-b')
+      sent[1].resolve(['b1'])
+      await flush()
+      sent[0].resolve(['a1', 'a2'])
+      await flush()
+      expect(
+        'the old annotation read really does let the previous paper win',
+        oldAnns.length === 2 && oldAnns[0] === 'a1',
+        { oldAnns, sent: sent.map((s) => s.docId) }
+      )
+    }
+
+    const { load, sent } = makeLoad()
+    const box: { written: ForDocument<string[]> | null } = { written: null }
+    const renders: ForDocument<string[]>[] = []
+    const loader = createDocumentLoad<string[]>(
+      load,
+      (state) => {
+        box.written = state
+        renders.push(state)
+      },
+      []
+    )
+
+    // The exact order of the control, through the guarded read.
+    loader.start('paper-a')
+    loader.start('paper-b')
+    sent[1].resolve(['b1'])
+    await flush()
+    sent[0].resolve(['a1', 'a2'])
+    await flush()
+    expect(
+      'a late answer for the previous paper cannot overwrite the current one',
+      renders.length === 1 &&
+        box.written?.docId === 'paper-b' &&
+        (valueForDocument(box.written, 'paper-b') ?? [])[0] === 'b1',
+      { renders: renders.map((r) => r.docId), written: box.written }
+    )
+
+    // The zero-frame half: while this paper's read is still out, nothing that
+    // belongs to another paper may be drawn on it.
+    loader.start('paper-c')
+    expect(
+      "no other paper's marks are visible while this one is still loading",
+      valueForDocument(box.written, 'paper-c') === undefined,
+      { written: box.written }
+    )
+
+    const beforeCancel = renders.length
+    loader.cancel()
+    sent[2].resolve(['c1'])
+    await flush()
+    expect(
+      'a read in flight when the paper changes cannot write',
+      renders.length === beforeCancel && box.written?.docId === 'paper-b',
+      { renders: renders.length, beforeCancel, written: box.written }
+    )
+
+    loader.start('paper-c')
+    sent[3].reject(new Error('annotations.json is gone'))
+    await flush()
+    expect(
+      "a failed annotation read answers with no marks, not the last paper's",
+      box.written?.docId === 'paper-c' &&
+        (valueForDocument(box.written, 'paper-c') ?? []).length === 0,
+      { written: box.written }
+    )
+
+    // A highlight made by hand must not be replaced by file contents that
+    // were already on their way when it was drawn.
+    loader.start('paper-d')
+    const beforeEdit = renders.length
+    loader.cancel()
+    box.written = { docId: 'paper-d', value: ['made-by-hand'] }
+    sent[4].resolve(['from-disk'])
+    await flush()
+    expect(
+      'a highlight made by hand beats a read already in flight',
+      renders.length === beforeEdit &&
+        (valueForDocument(box.written, 'paper-d') ?? [])[0] === 'made-by-hand',
+      { renders: renders.length, beforeEdit, written: box.written }
+    )
+
+    // An empty list is still this paper's answer; a cleared selection is still
+    // an answer; and neither may be borrowed from another paper.
+    expect(
+      'an empty mark list and a cleared selection are still answers',
+      valueForDocument<string[]>({ docId: 'paper-b', value: [] }, 'paper-b') !== undefined &&
+        valueForDocument<string | null>({ docId: 'paper-b', value: null }, 'paper-b') === null &&
+        valueForDocument<string[]>(null, 'paper-b') === undefined,
+      {}
+    )
+    expect(
+      'the selected mark and the undo affordance are scoped to their paper',
+      valueForDocument<string | null>({ docId: 'paper-a', value: 'a1' }, 'paper-b') ===
+        undefined &&
+        (valueForDocument<string | null>({ docId: 'paper-b', value: 'b1' }, 'paper-b') ?? '') ===
+          'b1',
+      {}
     )
   }
 

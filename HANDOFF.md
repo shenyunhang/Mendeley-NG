@@ -11,7 +11,7 @@
 **还没做的：无。** 第 9.1 的待办已经清空，第 9 节剩下的是竞品对照快照
 （9.2）、"差距可以接受，先不做"（9.3）和"明确不做"（9.4）。
 
-编号 1–152 全部已落地，按版本记在第 10 节。
+编号 1–153 全部已落地，按版本记在第 10 节。
 
 **改完代码必做的两件事**：
 
@@ -22,11 +22,12 @@
    忘了这一步的后果不是报错，是**安静地全绿**：新加的断言根本没被编译进去，
    屏幕上跑的还是上一版，而你手里多了一份"测试通过"的错觉。判别办法是看日志里
    有没有你新写的断言名——没有就是没跑。
-3. `npm run smoke`——358 个 `expect` 调用点，跑的是真实库。冒烟会真的读 PDF、真的建索引，
-   所以"功能还在但测试找不到它"这类假失败也能被抓到。**口径**：358 是源码里的调用点，
+3. `npm run smoke`——366 个 `expect` 调用点，跑的是真实库。冒烟会真的读 PDF、真的建索引，
+   所以"功能还在但测试找不到它"这类假失败也能被抓到。**口径**：366 是源码里的调用点，
    一轮日志的 PASS 数会少几条（有 4 条是分支断言，只在满足数据条件时才跑，见 145 / 146）。
    之前这里写的 342 是错的——用同一把尺子量 git 历史：147 版 337、148 版 344、
-   149 / 150 版 344、151 版 349、152 版 358，148 那一行记的「336 → 342」也少算了两条。
+   149 / 150 版 344、151 版 349、152 版 358、153 版 366，
+   148 那一行记的「336 → 342」也少算了两条。
    **计数用 `grep -cE "^[[:space:]]*expect\(" electron/main/smoke.ts`，不要凭印象写**。
 
 **往 `build` 里加东西时，同一个动作要问一遍 `dist` 要不要**：
@@ -186,6 +187,7 @@ src/                        renderer
     useFlashMessage 短消息：一个待触发的清除，卸载时收干净，见 151
   lib/flash.ts      与 React 无关的消息调度器，时钟可注入，见 151
   lib/latestSearch.ts 只答当前那一个词的防抖调度器，时钟与请求可注入，见 152
+  lib/documentScope.ts 按文献 id 给状态贴标签、给读盘加代次，不依赖 React，见 153
   lib/panes.ts      三栏宽度与各栏的地板（拖拽与 useConfig 共用）
   lib/columns.ts    列的定义、迁移与排序取值
   components/       视图组件
@@ -203,7 +205,7 @@ src/                        renderer
     useUndo.ts          撤销栈
     useContinuousPages  连续滚动的账本：哪几页画过、画在什么缩放、哪几页在视野里
     usePdfFind          在这一篇里找一个词
-    usePdfAnnotations   这篇的标注：本地、云端、选中的那条
+    usePdfAnnotations   这篇的标注：本地、云端、选中的那条，都带 docId 标签（见 153）
 shared/types.ts             main / preload / renderer 三端共享类型
 scripts/                    start.mjs 启动器、demo.mjs 假库与截图、get-token.mjs、check-api.mjs、hooks/
 docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
@@ -414,7 +416,7 @@ docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
 
 ## 9. 还没做的
 
-这一节**只剩快照与决定**，没有待办：9.1 已经清空，编号 1–152 全部落在第 10 节。
+这一节**只剩快照与决定**，没有待办：9.1 已经清空，编号 1–153 全部落在第 10 节。
 
 ### 9.0 能力边界：三件事，和它们的层级
 
@@ -923,7 +925,7 @@ Word 插件、分组协作、通用文献管理器的功能军备竞赛。
 | 93 | **两套把手会打架** | 宽度把手在列头右缘，它的 mousedown 冒泡到列头就同时启动了"换位置" | 把手里 `e.stopPropagation()` |
 | 94 | **落点位置说不清** | 高亮某一列回答的是"哪一列"，而读者问的是"插在哪两列之间" | 在**间隙**上画一条 2px 竖线，按指针在列中线的哪一侧决定插到哪 |
 
-### 10.3 95–152（2026-10-31 起）
+### 10.3 95–153（2026-10-31 起）
 
 先盘了一遍现状，把"还没做"的列出来。编号接着 9.2l 的 94 往下走。
 **已做过的不再重复**（错误条可关闭、Esc 关浮层、主题、幽灵文献、文件夹按名排、
@@ -968,6 +970,7 @@ SetupGuide、批量进度、拖列宽、拖列换顺序、添加时间默认列�
 | 105 | **批量下载 PDF 没有**：只能一篇一篇点阅读器里那个按钮 | 批量栏加「下载 PDF（N）」，N 是选中里"云端有、本地没有"的篇数（为 0 就禁用并说明）；**三条并发**（S3 预签名 URL 并发高了直接被拒，两百条一起发只会失败更多）；有进度、可停止、失败只赔那一篇；路径**成批写回**而不是一篇一次——一次写回就要重跑一遍筛选和排序——**已落地（v0.1.49）** | 9.2c-41 / 9.2d-41「批量下载 PDF 没有」 |
 | 108 | **启动不会自动同步**：磁盘上的库只是云端的一份缓存，而"只在你记得点「同步云端」时才刷新"的缓存，落后的正好是另一台机器上干的那些活 | 有 token 时启动后自己拉一次**增量**（全量五六千篇久到会被察觉，而启动这个位置不需要它；删除只有全量能发现，那是按钮的活）；**静默**——失败 `.catch` 掉不出声（每次启动都因为恰好离线而弹一条红，比一份晚几小时的列表更糟）；`startedSync` ref 保证一次启动只拉一次；设置 → 同步 → 「打开软件时自动同步一次」可关（`syncOnStart`，默认开）——**已落地（v0.1.52）** | 9.2c-38 / 9.2d-38「启动不会自动同步」 |
 | 127 | **PDF 里的链接点不动**：参考文献、图表的交叉引用、正文里的 DOI / arXiv 链接，画在纸上却只是纸——内部章节跳不了，外部地址也开不了。1.19.8 里它们是能点的 | 读 pdf.js 的 link annotation（`getAnnotations({intent:'display'})` 里的 `subtype:'Link'`），画一层透明的 `<a>`：内部目标（可能是字符串名字，要 `getDestination` + `getPageIndex`）解析成页码走 `reveal`，外部地址过一遍**协议白名单**（`http:` / `https:` / `mailto:`，其余丢弃——PDF 是别人写的文件，它的链接是数据不是代码）。**默认不画框**——一篇论文几十个链接，满屏蓝框比没有链接更糟——只在悬停时给一圈描边和手型光标，外部链接加个 ↗；**开着拖选高亮时整层让位**（`pointer-events: none`），否则画高亮的每一次拖动都可能变成一次跳转。两处性能是量出来才做的：一篇十二页的论文有近千个锚点，**按页 memo 掉**（元素引用不变 React 整棵跳过重建），否则搜索框每敲一键都要重造它们——实测按键 194ms → 42ms；连续模式**攒够一屏再写一次 state**，一页一次的话五十页就是五十次全量重渲染。冒烟加三条：**哪篇有链接是问出来的不是写死的**（主进程已有 pdf.js，扫出首页确实带链接的那篇再按标题搜过去），内部链接点了 `1 → 4`，外部链接走打桩的 `shell:openExternal` 收到且只收到一条 `https://orcid.org/…`（不能真开浏览器）——**已落地（v0.1.56）** | 2026-11-02「pdf里面的超链接无法点击 内部章节跳转和外部网页跳转都不能用」 |
+| 153 | **换一篇论文，上一篇的高亮还画在新 PDF 上**：`<PdfViewer doc={selected} …/>` 没有按 `doc` 加 `key`，换论文时阅读器组件不卸载、state 不重置；`usePdfAnnotations` 却用三个裸 state 存"属于这一篇"的东西——`anns` / `sel` / `justMade`。可复现：A 论文画了高亮、选中了某条、"撤销刚才的高亮"还在 8 秒窗口里，切到 B 论文，这一帧 B 的页面上画的是 A 的高亮、A 的选中框和 A 的撤销按钮。更坏的是加载 effect 写成 `setSel(null); window.api.loadAnnotations().then(all => setAnns(all.filter(a => a.docId === o.docId)))`，**没有 `dead` / `cancelled` / 代次**：A 的读盘慢一拍回来就把 A 的列表写进 B 正在看的屏幕，或者把用户刚在 B 上画的那一笔覆盖掉。同一个阅读器里 PDF 文档、outline、连续页、links、refs 的异步读都有 `dead` 标志，标注读盘是唯一漏掉的那条键控读取。这一轮先按"先证明用户看得见错、再动手"做体检，它是唯一能坐实的真 bug，所以**继续修 bug 而不是转去重构**，也刻意不碰仍与 `setLib` / `pushUndo` 耦合的批量簇和行菜单簇（149 / 150 的设计边界） | ①新建 `src/lib/documentScope.ts`：`ForDocument<T>` 是带 `docId` 的值，`valueForDocument(state, docId)` 只认同一篇、别的论文一律当"还没答"；`createDocumentLoad(load, render, empty)` 每次 `start` 递增 generation，只有 `mine === generation` 才 render，`cancel()` **只作废、不写 state**，失败用 `empty` 作答。**不复用 152 的 `latestSearch`**：读盘不是按击键触发，没有 timer 和防抖；"词"和"文献"是两种键，硬合并只会让两边都难读。②`usePdfAnnotations` 三个 state 全部改成带标签的答案，`anns` / `sel` / `justMade` 按当前 `o.docId` 读出；`NO_ANNOTATIONS` 是一个稳定空数组，避免每次渲染给 memo 新引用；`setAnns` 先 `cancel()` 再写，**本地手工高亮胜过在飞读盘**；effect cleanup 调 `cancel()`，切论文或卸载后不再 setState。`justMade` 的 8 秒 timer 仍有 cleanup，只是现在作用域也随 docId 走。③`tsconfig.node.json` include 加 `src/lib/documentScope.ts`（同 132 / 136 / 151 / 152 的跨边界代价）。**冒烟八条，零 sleep**：受控 Promise 手动 resolve / reject 加 `setImmediate`；**一条是对照实验**（旧 fire-and-forget 读盘确实让上一篇赢），否则后面七条等于没测（142 / 145 / 146 / 151 / 152 那条纪律）；其余覆盖旧论文迟到结果不覆盖当前、加载中不显示别论文标注、切论文后在飞读取不写、失败读盘落空数组、本地高亮胜过在飞读盘、空列表与清空的选中仍是答案、`sel` / `justMade` 按 docId 隔离。断言 358 → 366。**验证**：`typecheck` / `build` 通过；r1 有 5 条红（4 条行菜单 `{"open":0}` 加 1 条窗口聚焦），全是 11.11 记过的时序噪声类，同一份代码 r2 / r3 均 EXIT=0 / 362 PASS / 0 FAIL、8 条新断言全部真的跑了，红点整片消失，**所以判为机器噪声、不做回退验证**。r1 里 `row menu in a folder` 拿到 9 项、`row menu on a row without a pdf` 仍是 `{"n":8,"reveal":true}`，也说明不是菜单逻辑坏了。**已落地（v0.1.80）** | 2026-11-05「继续优化 如果不能优化就重构」 |
 | 152 | **全文检索的旧结果会挂在新词下面**：`useFullText` 的防抖是 `setTimeout(() => ftSearch(q).then(setFtHits), 250)` 加 cleanup `clearTimeout(t)`——**清掉的只是"还没触发的 timer"，取消不了已经飞出去的 IPC**。可复现：打了词、请求已发出、清空输入框，短词分支先 `setFtHits([])`，随后旧 Promise 把命中写回 state；再打一个新词，这 250ms 里 `FullTextView` 拿 `hits` 直接建行、**从不问这些命中属于哪个词**，于是上一个词的结果挂在新词下面。`ftEpoch`（索引建完重跑搜索）也会被建索引前那份旧"没找到"反向覆盖，正是 hook 里那段注释想防的事。这一轮先做了一整遍体检（timer / listener / `.then` 的 cancelled 标志），这是唯一能证明"用户看得见错答案"的优化点，所以**修 bug 而不是再抽一个 hook** | ①新建 `src/lib/latestSearch.ts`：答案带 `question` 标签（`answerFor` 只认当前词，`[]` 是答案、`null` 才是"还没答"）；每次 `ask` 递增 generation，被取代的请求**含已在飞的**一律不许 deliver；`cancel` **只作废、完全不写 state**——答案带词标签，`answerFor` 已经把旧答案挡在屏幕外，没必要再清一遍，删索引那条路自己 `setAnswer(null)`；`cancel` 同时用于卸载（不 setState、也不设永久 disposed 标志，StrictMode 二次挂载仍能再 ask）；时钟与 `run` 可注入，失败用 `empty` 作答，免得"正在查找"永不结束。**这一条是被一轮真实回归逼出来的**：第一版 `withdraw()` 在 effect 里 `render(null)`，连"全文面板根本没打开"的挂载那一瞬间也写一次 `setAnswer(null)`，多出一次顶层渲染；结果 `the shell actions are disabled when there is no file` 连续两轮读作 `{"n":0}`（菜单压根没弹），而历史 7 轮都是 `{"n":8,"reveal":true}`。按 11.11 做**回退验证**：整体 stash、重跑 v0.1.78 构建 → `n:8` / EXIT=0，确认不是机器噪声；改成不写 state 后恢复全绿。**顺带纠正一次误判**：当时还观察到清空搜索后虚拟行数 50 → 74（正好多一个 `overscan: 24`），一度以为因此找不到 `.no-pdf` 行；但修好后仍是 74 行却 `n:8`，**说明行数差异与失败无关——相关性不是因果**。②`useFullText` 把裸 `FtHit[]` 换成带标签的答案，`ftHits = answerFor(answer, 当前词) ?? []`，`ftSearching = 词长够 && 还没答`；effect **刻意不写 cleanup**（`ask` 自己会取代前一次，写两遍只是重复），只留一次卸载 `cancel`。③`FullTextView` 加 `searching`：防抖那 250ms 说「正在查找「x」…」，不再拿旧行顶数，也不再提前说「正文里没找到」。④删掉 `App.tsx` 里**只解构、从未使用**的 `setFtHits` 与 `ftEpoch`。**冒烟九条，零 sleep**：假时钟手动推进 + 手动 resolve / reject + `setImmediate` 冲微任务；**两条是对照实验**（旧实现清空输入框后确实把 stale hits 写回、无 generation guard 时旧答案后到确实会赢），否则后面七条等于没测（142 / 145 / 146 / 151 那条纪律）；其余覆盖防抖只发最后一个词、正常答案仍能送达、cancel 后在飞请求不许作答且不 render、旧答案后到不能覆盖新答案、空结果仍是答案、失败不挂死、卸载再 cancel 也不 render。`tsconfig.node.json` include 加 `src/lib/latestSearch.ts`（同 136 / 151 的跨边界代价）。断言 349 → 358。**验证**：`typecheck` / `build` 通过；r1 / r2 各 1 条红（同一条行菜单断言 `{"n":0}`，r2 另有一条窗口聚焦时序噪声），v0.1.78 回退对照 EXIT=0 / 345 PASS，修正后 r3 / r4 均 EXIT=0 / 354 PASS / 0 FAIL、9 条新断言全部真的跑了。**已落地（v0.1.79）** | 2026-11-04「继续优化 如果不能优化就重构」 |
 | 151 | **一条短消息会被另一条短消息提前抹掉**：全项目有 13 处 `setMsg(x); setTimeout(() => setMsg(null), ms)`（App 里 9 处、`useExport` 里 4 处），每个 timer 都是射后不理——**它到点清的是"当时屏幕上那条"，不是"创建它那条"**。可复现：t=0 复制引文（2400ms 清），t=1s 导出（6000ms 清），**t=2.4s 前一个 timer 把才显示 1.4 秒的导出结果清掉了**；批量进度同理被更早的完成 timer 抹掉；组件卸载后 timer 还在 setState。前两轮都在做纯搬家，这轮换成**修一个真 bug**——不是再抽一个 hook，是让已经抽出去的地方共用一套正确的时序 | ①新建 `src/lib/flash.ts`：一个**可注入时钟**的 `createFlashMessage`，一次只持有一个待触发 timer；`flash(text, ms)` 显示并安排清除、`show(text)` 显示进度且**取消旧清除**（进度不该被旧 timer 截断）、`clear`、`dispose`（卸载用）、`hasPending`（给断言看）。②`src/lib/hooks/useFlashMessage.ts` 把它包成 React state，控制器进 ref（同 `useUndo` 的理由：装在一次的函数不能闭包住旧 state），卸载 `dispose`。`batchMsg` 和 `importMsg` **各一个实例**——屏幕上两条独立消息，各管各的 timer。③13 处旧调用点改成 `flashBatch` / `showBatch` / `flashImport` / `showImport`，`useExport` 的接口从 `setBatchMsg` 换成 `flashBatch` + `showBatch`。**冒烟五条，不靠 sleep**：假时钟把每次 `set` 记成 `{at, fn, live}`，手动推进时间触发到期回调，精确复现 t=0 / t=1s / t=2.4s 那一幕；再验"后一条自己仍会按时消失"、"进度消息撑过旧 timer"、"卸载后没有待触发清除"。**第五条是对照实验**：把同样的两条消息喂给旧的 fire-and-forget 实现，断言它**确实**会把后一条抹掉——否则上面四条等于什么都没测（142 / 145 / 146 那条纪律：**一条永远不会失败的断言和一条通过的断言，从结果上看不出来**）。时钟可注入正是为了这个：竞态不能用"睡 2.4 秒再看"来测，那会让断言取决于机器忙不忙（11.11）。`tsconfig.node.json` 的 include 加 `src/lib/flash.ts`（主进程要 import 渲染层的纯函数，与 136 同一笔代价）。断言 344 → 349。**顺带修文档**：§0 原来写「342 条」是错的，量 git 历史是 147 版 337、148 版 344、149/150 版 344，148 行记的「336 → 342」也少算两条，已按 `grep -cE "^[[:space:]]*expect\("` 校准并把口径写进 §0。**已落地（v0.1.78）** | 2026-11-04「继续优化」 |
 | 150 | **149 抽完两簇就停了，但导出那一簇其实是三簇里唯一真正自包含的，当时一并划进了「不抽」是划宽了**：批量、导出、行菜单三簇里，只有导出不碰 `setLib` / `pushUndo`——它读库、写文件或剪贴板、汇报结果，**对库是只读的**。149 把它跟另外两簇一起归为「要穿 5–6 个闭包依赖、diff 大到没法肉眼确认纯搬家」，是没分清三簇的差别 | 抽成 `src/lib/hooks/useExport.ts`：`exportBib` / `exportRis` / `exportEndnote` / `exportNotes` / `exportAnnotations` / `leaveLibrary` + 两个 `canExport*`，整块搬走。依赖只有四个只读数据（`target` / `docs` / `noteMap` / `anns`）和三个回调（`setErr` / `setBatchMsg` / `askConfirm`），**函数每次渲染重建、每次都拿到当次的 `target`，跟它们住在 App 里时完全一样，所以没有 stale closure**。App.tsx 2632 → 2460 行，`lib/export.ts` 的七个纯函数的 import 随之移到 hook 里。**仍然没抽**批量簇和行菜单簇：它们必须写 `setLib`（改库）并 `pushUndo`（记反悔），那正是 149 说的、也是 `useLibrary` 注释里「none of this hook's business」划下的线——跨过这条线，hook 就得反过来被库的状态牵着走，比留在 App 更乱。断言数不变（342，纯搬家）。**已落地（v0.1.77）** | 2026-11-04「继续」（接 149） |
@@ -1901,6 +1904,18 @@ demo 假设你知道，产品在你需要的时候告诉你。
   里发出的 `setState` 都要问一句"这个组件现在真的需要重渲染吗"；②看着最像凶手的
   数字未必是——同一批日志里虚拟行数从 50 变成 74（正好一个 `overscan: 24`），
   修好后仍是 74 却全绿，**相关性不是因果**，得靠能同时改变两者的对照去排除。
+
+- **153 组件没按数据加 `key`，那 state 就得自己带上数据的 id**：`PdfViewer`
+  换论文不重新挂载，于是任何"属于这一篇"的 state 都成了跨文献共享的裸值；
+  光在 effect 里补一句 `setSel(null)` 只清得掉一个字段，异步读盘的结果照样迟到
+  写回。排查方法是把所有按某个 id 发起的异步读列出来（`loadAnnotations` /
+  `getDocument` / outline / links / refs），逐个问有没有 `dead` 或代次——同一个
+  组件里别的都有、只剩一条没有，那就是它。**给值贴 id 标签比"切换时手动清空"
+  更稳**：即使哪处清理漏了，渲染时的 `valueForDocument` 也会把别篇的答案挡在
+  屏幕外；这也让"取消"只需作废代次、不必再补一次 `setState`，正是 152 那次
+  多余顶层渲染换来的教训。顺带留一次噪声样本：153 的 r1 红了 5 条（4 条行菜单
+  `{"open":0}` 加 1 条窗口聚焦），同一份代码 r2 / r3 全绿、红点整片消失，
+  所以按本节的判据不必做回退验证。
 
 - **file:// 别用 `navigator.clipboard`**：渲染进程是 `loadFile` 出来的 file://
   页面，异步剪贴板能不能用取决于权限策略，静默失败最难查。走 Electron 的

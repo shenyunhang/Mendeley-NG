@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Annotation, PdfPos } from '../../../shared/types'
 import { fromCloudPositions, posToRect, rectToPos, type Rect, type Size } from '../pdfgeom'
+import {
+  createDocumentLoad,
+  valueForDocument,
+  type DocumentLoad,
+  type ForDocument
+} from '../documentScope'
+
+/** One stable empty list, so a paper with no marks does not hand a new array
+ *  to every memo that depends on `anns` on every render. */
+const NO_ANNOTATIONS: Annotation[] = []
 
 /**
  * The annotations of one paper: highlights, their notes, and the cloud's copy
@@ -29,33 +39,76 @@ export function usePdfAnnotations(o: {
   onBusy: (b: boolean) => void
   onMsg: (m: string | null) => void
 }) {
-  const [anns, setAnns] = useState<Annotation[]>([])
-  const [sel, setSel] = useState<string | null>(null)
   /**
-   * A highlight that was just made out of a text selection, so that it can be
-   * taken back in one click.
-   *
-   * Only that kind.  Dragging a box over the page is an unambiguous request to
-   * mark it, where picking words is exactly what somebody does to copy them —
-   * and the mode may have been left on from the last paper.  Without a way
-   * back, one forgotten switch fills a paper with marks that then have to be
-   * found and deleted one at a time.
+   * Three pieces of state that all belong to one paper. Each carries the id it
+   * was produced for, so switching papers cannot show even one frame of the
+   * previous paper's marks, selection or undo affordance. The reader is not
+   * keyed by document, so a bare array used to survive the switch.
    */
-  const [justMade, setJustMade] = useState<string | null>(null)
+  const [annotationsAnswer, setAnnotationsAnswer] =
+    useState<ForDocument<Annotation[]> | null>(null)
+  const [selectedAnswer, setSelectedAnswer] =
+    useState<ForDocument<string | null> | null>(null)
+  const [justMadeAnswer, setJustMadeAnswer] =
+    useState<ForDocument<string | null> | null>(null)
 
-  // load annotations for this document
+  /**
+   * The one read behind a generation guard. Built once and kept in a ref, as
+   * `useUndo`'s stack is: it is started by an effect and outlives it, and it
+   * must not close over a stale `docId`.
+   */
+  const loader = useRef<DocumentLoad<Annotation[]> | null>(null)
+  if (loader.current === null) {
+    loader.current = createDocumentLoad<Annotation[]>(
+      (docId) =>
+        window.api
+          .loadAnnotations()
+          .then((all) => all.filter((a) => a.docId === docId)),
+      (state) => setAnnotationsAnswer(state),
+      NO_ANNOTATIONS
+    )
+  }
+
+  // Load for this document. Cleanup invalidates the read on a switch or on
+  // unmount, so an old paper's file can never write into the new paper's
+  // list and nothing calls setState after the reader is gone.
   useEffect(() => {
-    setSel(null)
-    window.api.loadAnnotations().then((all) => {
-      setAnns(all.filter((a) => a.docId === o.docId))
-    })
+    loader.current?.start(o.docId)
+    return () => loader.current?.cancel()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [o.docId])
 
+  const anns = valueForDocument(annotationsAnswer, o.docId) ?? NO_ANNOTATIONS
+  /** `null` is a real answer here — "nothing selected" — and
+   *  `valueForDocument` returns it for a matching document, `undefined` for
+   *  another one. Both mean the same thing to the reader. */
+  const sel = valueForDocument(selectedAnswer, o.docId) ?? null
+  const justMade = valueForDocument(justMadeAnswer, o.docId) ?? null
+
+  const setSel = (id: string | null) =>
+    setSelectedAnswer({ docId: o.docId, value: id })
+  const setJustMade = (id: string | null) =>
+    setJustMadeAnswer({ docId: o.docId, value: id })
+
+  /** A local edit wins over a read that is already on its way. Without the
+   *  cancel, making a highlight just as the file comes back would have the
+   *  old file contents silently replace the mark that was just drawn. */
+  const setAnns = (next: Annotation[]) => {
+    loader.current?.cancel()
+    setAnnotationsAnswer({ docId: o.docId, value: next })
+  }
+
+  // A highlight that was just made out of a text selection, so that it can be
+  // taken back in one click. Only that kind: dragging a box over the page is
+  // an unambiguous request to mark it, where picking words is exactly what
+  // somebody does to copy them — and the mode may have been left on from the
+  // last paper. Without a way back, one forgotten switch fills a paper with
+  // marks that then have to be found and deleted one at a time.
   useEffect(() => {
     if (!justMade) return
     const t = setTimeout(() => setJustMade(null), 8000)
     return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justMade])
 
   /** Rects to draw for `a` on page `n`, in 0..1 with y from the top. */

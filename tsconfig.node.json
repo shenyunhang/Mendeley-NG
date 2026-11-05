@@ -16,6 +16,7 @@
     "electron/**/*.ts",
     "shared/**/*.ts",
     "electron.vite.config.ts",
+    "src/lib/documentScope.ts",
     "src/lib/export.ts",
     "src/lib/flash.ts",
     "src/lib/latestSearch.ts",
