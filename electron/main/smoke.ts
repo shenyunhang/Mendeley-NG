@@ -60,6 +60,18 @@ import {
 // on a paper change does not stop a read of the old PDF from landing a moment
 // later, so the order is controlled by resolving each page read by hand.
 import { createLazyPages, type PageAnswer } from '../../src/lib/lazyPages'
+// A fixed citation card measured once stays at its old coordinates when the
+// window changes. The placement rule takes its viewport as an argument so a
+// resize can be checked by handing it a smaller one, rather than resizing a
+// real window in the middle of a run full of coordinate assertions.
+import {
+  createCardSpotter,
+  spotFor,
+  GAP,
+  type Box,
+  type Spot,
+  type Viewport
+} from '../../src/lib/cardSpot'
 // The reference list is read out of the paper in the renderer, but the rules
 // that decide whether it was read correctly are pure, and a popover that
 // names the wrong paper is the kind of mistake that has to be caught on every
@@ -3038,6 +3050,120 @@ export async function runSmoke() {
       'flash still works with an object payload',
       box.card === null && !card.hasPending(),
       { card: box.card, pending: card.hasPending() }
+    )
+  }
+
+  // A citation card hung off a marker in a PDF, measured exactly once. When
+  // the reader narrowed the window the card kept its old `left`, so it sat
+  // outside the new viewport with its Open button out of reach. The rule is
+  // pure now and the controller re-reads both boxes on resize, so hand it
+  // two viewports instead of moving a real window. One assertion is a
+  // control: if the old one-shot placement could not be shown to fail,
+  // the rest would be seven assertions that can never fail.
+  {
+    const anchor: Box = { top: 100, bottom: 120, left: 900, width: 20, height: 20 }
+    const card: Box = { top: 0, bottom: 0, left: 0, width: 300, height: 140 }
+    const wide: Viewport = { width: 1400, height: 900 }
+    const narrow: Viewport = { width: 800, height: 900 }
+
+    const oldSpot: Spot = spotFor(anchor, card, wide)
+    expect(
+      'the old one-shot placement really does leave the card outside a narrower window',
+      oldSpot.left + card.width > narrow.width - GAP,
+      { oldSpot, narrowWidth: narrow.width }
+    )
+
+    const box: { spot: Spot | null; writes: number; closed: number } = {
+      spot: null, writes: 0, closed: 0
+    }
+    const state: { anchor: Box | null; card: Box | null; view: Viewport } = {
+      anchor, card, view: wide
+    }
+    const spotter = createCardSpotter(
+      () => ({ anchor: state.anchor, card: state.card, view: state.view }),
+      (v) => {
+        box.spot = v
+        box.writes += 1
+      },
+      () => {
+        box.closed += 1
+      }
+    )
+
+    spotter.measure()
+    expect(
+      'the first measurement puts the card under its marker',
+      box.spot !== null && box.spot.left === oldSpot.left && box.spot.top === oldSpot.top,
+      { spot: box.spot, oldSpot }
+    )
+
+    // A resize moves the marker as well as the viewport: the page reflows.
+    state.view = narrow
+    state.anchor = { ...anchor, left: 400, bottom: 130 }
+    const beforeResize = box.writes
+    spotter.resize()
+    expect(
+      'a resize re-places the card for the new window and the marker that moved',
+      box.spot !== null &&
+        box.spot.left + card.width <= narrow.width - GAP &&
+        box.spot.left === state.anchor.left &&
+        box.writes === beforeResize + 1,
+      { spot: box.spot, writes: box.writes, beforeResize }
+    )
+
+    const lowAnchor: Box = { top: 700, bottom: 720, left: 100, width: 20, height: 20 }
+    const shortView: Viewport = { width: 1400, height: 760 }
+    const flipped = spotFor(lowAnchor, card, shortView)
+    expect(
+      'a short window puts the card above its marker instead of off the bottom',
+      flipped.top + card.height <= shortView.height - GAP && flipped.top < lowAnchor.top,
+      { flipped, shortHeight: shortView.height }
+    )
+
+    state.card = null
+    const beforeHidden = box.writes
+    spotter.measure()
+    expect(
+      'a card that has not been laid out is hidden rather than placed anywhere',
+      box.spot === null && box.writes === beforeHidden + 1 && box.closed === 0,
+      { spot: box.spot, writes: box.writes, closed: box.closed }
+    )
+
+    state.anchor = null
+    const beforeGone = box.writes
+    spotter.resize()
+    expect(
+      'a resize whose marker is gone closes the card instead of placing it from stale coordinates',
+      box.closed === 1 && box.writes === beforeGone && box.spot === null,
+      { closed: box.closed, writes: box.writes, beforeGone, spot: box.spot }
+    )
+
+    const early: { spot: Spot | null; closed: number } = { spot: null, closed: 0 }
+    const earlySpotter = createCardSpotter(
+      () => ({ anchor: null, card, view: wide }),
+      (v) => {
+        early.spot = v
+      },
+      () => {
+        early.closed += 1
+      }
+    )
+    earlySpotter.measure()
+    expect(
+      'a missing marker on the first measure is layout timing, not a reason to close',
+      early.spot === null && early.closed === 0,
+      early
+    )
+
+    spotter.dispose()
+    const beforeDispose = { writes: box.writes, closed: box.closed }
+    state.anchor = anchor
+    state.card = card
+    spotter.resize()
+    expect(
+      'a disposed placement never writes again after the card is gone',
+      box.writes === beforeDispose.writes && box.closed === beforeDispose.closed,
+      { beforeDispose, writes: box.writes, closed: box.closed }
     )
   }
 

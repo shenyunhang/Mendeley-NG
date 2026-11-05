@@ -991,7 +991,7 @@ export default function PdfViewer({
         return { ...x, doc: d ? { id: d.id, title: d.title } : null }
       })
     if (!items.length) return
-    showCard(items, el.getBoundingClientRect())
+    showCard(items, el)
   }
 
   // Built once per page, for the same reason the links are: a column holding

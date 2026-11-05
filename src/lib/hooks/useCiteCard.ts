@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createFlashMessage, type FlashMessage } from '../flash'
-import { spotFor, type Spot } from '../popspot'
+import { createCardSpotter, type Spot } from '../cardSpot'
 
 export interface CiteItem {
   n: number
@@ -12,7 +12,10 @@ export interface CiteItem {
  *  copy of it if there is one. */
 export interface CiteCard {
   items: CiteItem[]
-  anchor: DOMRect
+  /** The marker itself, not a rectangle copied from it. A resize reflows the
+   *  page and moves the marker; a snapshot would put the card back where
+   *  the marker used to be. */
+  anchor: HTMLElement
 }
 
 /** How long the pointer has to get from the marker to the card's "打开"
@@ -61,17 +64,40 @@ export function useCiteCard(scope: { page: number; docId: string }) {
   /** Something moved out from under the card, or the reader opened a paper. */
   const close = () => timer.current?.clear()
   /** Put a resolved entry under the pointer. */
-  const show = (items: CiteItem[], anchor: DOMRect) =>
+  const show = (items: CiteItem[], anchor: HTMLElement) =>
     timer.current?.show({ items, anchor })
 
-  // The card is measured after it is in the document and before it is
-  // painted, so it is never shown at the corner it first lands in.
+  // Measured after the card is in the document and before it is painted, so
+  // it is never shown at the corner it first lands in. Measured again when
+  // the window changes size: a `position: fixed` card does not move with
+  // the page, and one placed at the old width can sit outside the new one
+  // with its "打开" button out of reach. If the marker was torn down with
+  // its page, the card closes rather than being placed from stale
+  // coordinates. The controller is rebuilt with the card so its `read`
+  // never closes over a previous marker.
   useLayoutEffect(() => {
-    if (!cite || !cardRef.current) {
+    if (!cite) {
       setSpot(null)
       return
     }
-    setSpot(spotFor(cite.anchor, cardRef.current.getBoundingClientRect()))
+    const spotter = createCardSpotter(
+      () => ({
+        anchor: cite.anchor.isConnected
+          ? cite.anchor.getBoundingClientRect()
+          : null,
+        card: cardRef.current?.getBoundingClientRect() ?? null,
+        view: { width: window.innerWidth, height: window.innerHeight }
+      }),
+      setSpot,
+      () => timer.current?.clear()
+    )
+    const onResize = () => spotter.resize()
+    spotter.measure()
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      spotter.dispose()
+    }
   }, [cite])
 
   // A card belongs to the marker it was opened for, and that marker is on a
