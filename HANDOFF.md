@@ -11,7 +11,7 @@
 **还没做的：无。** 第 9.1 的待办已经清空，第 9 节剩下的是竞品对照快照
 （9.2）、"差距可以接受，先不做"（9.3）和"明确不做"（9.4）。
 
-编号 1–159 全部已落地，按版本记在第 10 节。
+编号 1–160 全部已落地，按版本记在第 10 节。
 
 **改完代码必做的两件事**：
 
@@ -22,12 +22,12 @@
    忘了这一步的后果不是报错，是**安静地全绿**：新加的断言根本没被编译进去，
    屏幕上跑的还是上一版，而你手里多了一份"测试通过"的错觉。判别办法是看日志里
    有没有你新写的断言名——没有就是没跑。
-3. `npm run smoke`——400 个 `expect` 调用点，跑的是真实库。冒烟会真的读 PDF、真的建索引，
-   所以"功能还在但测试找不到它"这类假失败也能被抓到。**口径**：400 是源码里的调用点，
+3. `npm run smoke`——402 个 `expect` 调用点，跑的是真实库。冒烟会真的读 PDF、真的建索引，
+   所以"功能还在但测试找不到它"这类假失败也能被抓到。**口径**：402 是源码里的调用点，
    一轮日志的 PASS 数会少几条（有 4 条是分支断言，只在满足数据条件时才跑，见 145 / 146）。
    之前这里写的 342 是错的——用同一把尺子量 git 历史：147 版 337、148 版 344、
    149 / 150 版 344、151 版 349、152 版 358、153 版 366、154 版 375、
-   155 版 383、156 版 391、157 版 392、158 版仍 392、159 版 400，148 那一行记的「336 → 342」也少算了两条。
+   155 版 383、156 版 391、157 版 392、158 版仍 392、159 版 400、160 版 402，148 那一行记的「336 → 342」也少算了两条。
    **计数用 `grep -cE "^[[:space:]]*expect\(" electron/main/smoke.ts`，不要凭印象写**。
 
 **往 `build` 里加东西时，同一个动作要问一遍 `dist` 要不要**：
@@ -930,7 +930,7 @@ Word 插件、分组协作、通用文献管理器的功能军备竞赛。
 | 93 | **两套把手会打架** | 宽度把手在列头右缘，它的 mousedown 冒泡到列头就同时启动了"换位置" | 把手里 `e.stopPropagation()` |
 | 94 | **落点位置说不清** | 高亮某一列回答的是"哪一列"，而读者问的是"插在哪两列之间" | 在**间隙**上画一条 2px 竖线，按指针在列中线的哪一侧决定插到哪 |
 
-### 10.3 95–159（2026-10-31 起）
+### 10.3 95–160（2026-10-31 起）
 
 先盘了一遍现状，把"还没做"的列出来。编号接着 9.2l 的 94 往下走。
 **已做过的不再重复**（错误条可关闭、Esc 关浮层、主题、幽灵文献、文件夹按名排、
@@ -975,6 +975,7 @@ SetupGuide、批量进度、拖列宽、拖列换顺序、添加时间默认列�
 | 105 | **批量下载 PDF 没有**：只能一篇一篇点阅读器里那个按钮 | 批量栏加「下载 PDF（N）」，N 是选中里"云端有、本地没有"的篇数（为 0 就禁用并说明）；**三条并发**（S3 预签名 URL 并发高了直接被拒，两百条一起发只会失败更多）；有进度、可停止、失败只赔那一篇；路径**成批写回**而不是一篇一次——一次写回就要重跑一遍筛选和排序——**已落地（v0.1.49）** | 9.2c-41 / 9.2d-41「批量下载 PDF 没有」 |
 | 108 | **启动不会自动同步**：磁盘上的库只是云端的一份缓存，而"只在你记得点「同步云端」时才刷新"的缓存，落后的正好是另一台机器上干的那些活 | 有 token 时启动后自己拉一次**增量**（全量五六千篇久到会被察觉，而启动这个位置不需要它；删除只有全量能发现，那是按钮的活）；**静默**——失败 `.catch` 掉不出声（每次启动都因为恰好离线而弹一条红，比一份晚几小时的列表更糟）；`startedSync` ref 保证一次启动只拉一次；设置 → 同步 → 「打开软件时自动同步一次」可关（`syncOnStart`，默认开）——**已落地（v0.1.52）** | 9.2c-38 / 9.2d-38「启动不会自动同步」 |
 | 127 | **PDF 里的链接点不动**：参考文献、图表的交叉引用、正文里的 DOI / arXiv 链接，画在纸上却只是纸——内部章节跳不了，外部地址也开不了。1.19.8 里它们是能点的 | 读 pdf.js 的 link annotation（`getAnnotations({intent:'display'})` 里的 `subtype:'Link'`），画一层透明的 `<a>`：内部目标（可能是字符串名字，要 `getDestination` + `getPageIndex`）解析成页码走 `reveal`，外部地址过一遍**协议白名单**（`http:` / `https:` / `mailto:`，其余丢弃——PDF 是别人写的文件，它的链接是数据不是代码）。**默认不画框**——一篇论文几十个链接，满屏蓝框比没有链接更糟——只在悬停时给一圈描边和手型光标，外部链接加个 ↗；**开着拖选高亮时整层让位**（`pointer-events: none`），否则画高亮的每一次拖动都可能变成一次跳转。两处性能是量出来才做的：一篇十二页的论文有近千个锚点，**按页 memo 掉**（元素引用不变 React 整棵跳过重建），否则搜索框每敲一键都要重造它们——实测按键 194ms → 42ms；连续模式**攒够一屏再写一次 state**，一页一次的话五十页就是五十次全量重渲染。冒烟加三条：**哪篇有链接是问出来的不是写死的**（主进程已有 pdf.js，扫出首页确实带链接的那篇再按标题搜过去），内部链接点了 `1 → 4`，外部链接走打桩的 `shell:openExternal` 收到且只收到一条 `https://orcid.org/…`（不能真开浏览器）——**已落地（v0.1.56）** | 2026-11-02「pdf里面的超链接无法点击 内部章节跳转和外部网页跳转都不能用」 |
+| 160 | **「更多」菜单从来没被定位过**：`usePopSpot` 的五个调用者里四个是「组件随卡片一起挂载」（`FilterMenu` / `SortMenu` / `ColumnPicker`），只有 `MenuButton` 是组件常驻、卡片写成 `{open && ...}`。而 `useLayoutEffect` 的依赖是 `[anchor, card]` 两个 `useRef` 对象——**从挂载到卸载都不变，所以 effect 只跑一次**，挂载那刻 `pop.current` 是 `null`，`place()` 直接返回，`spot` 永远是 `null`，`style={spot ?? undefined}` 不给 `left` / `top`。卡片于是靠 `position: fixed` 的静态位置摆放，`spotFor` 的窗口边缘 clamp、向上翻、resize 重算对工具栏上这四个 MenuButton **一次都没生效过**。旧冒烟没抓到，是因为 `cards that open below the bar` 只问「是不是 `elementFromPoint` 命中的顶层」和「矩形在不在窗口里」，静态位置碰巧都满足 | **先跑对照轮再动手**：只加两条断言、**产品代码一个字不改**，build 出的 renderer 产物 hash 与 v0.1.86 完全相同；r0 拿到 `more` 的 `placed:false` 且 `inlineLeft` / `inlineTop` 都是空字符串，FAIL，同时 `filter` 的 `placed:true` / `inlineLeft:'755px'` / `inlineTop:'42px'` PASS——坏的是这一条路径，不是定位规则本身（142 / 145 / 146 / 151 那条纪律）。①`usePopSpot(anchor, card, visible?)` 把可选的可见性放进 effect 依赖数组，并在注释里写清为什么：ref 稳定不等于卡片在 DOM 里。②`MenuButton` 把 `open` 传进去；其余四个调用者**零改动**。打开时 effect 重跑、卡片已在 DOM，`place()` 量到并写入内联坐标；关掉时卡片卸载、`place()` 不写，下次打开重新量，不会被上一次的位置钉住。③冒烟两条：`the more menu is placed by the spot rule, not left at its static position` 读回 `.menu-pop` 的 `style.left` / `style.top`，另一条 `the cards that mount with their component were always placed` 是**对照组**，证明随组件挂载的筛选 / 列卡片本来就有内联定位。断言 400 → 402。**验证**：`typecheck` / `build` 通过；r0（对照轮，产品代码未修）新断言 1 红 1 绿，另有 4 条行菜单 `{"open":0}` 是 11.11 噪声；r1 两条新断言均 PASS，`more` 变成 `placed:true` / `inlineLeft:'620px'` / `inlineTop:'42px'`，`below` 从碰巧的 97 变成按规则算出的 131，只剩 1 条 `a keystroke stays cheap` 性能噪声（`64,71,149,74,93,111,75`，11.11 记过的按键耗时类）；r2 两条新断言仍 PASS，同一条性能断言又红（`218,25,25,37,34,32,32`，只有首个采样是尖峰）。**红点连续两轮不移动，按 11.11 做回退验证**：`git stash` 只撤掉两处产品改动、保留新断言，build 出的 renderer hash 回到对照轮的 `index-DrdyOxe3.js`；ctrl 轮性能 `23,26,30,35,27,27,21`（max 35，回到基线），`more` 断言如期 FAIL。恢复修复版再跑 r3，性能 `27,22,23,31,26,28,23`（max 31）与基线 33 一致、两条新断言仍 PASS，只剩 1 条窗口聚焦噪声；r4 **EXIT=0 / 398 PASS / 0 FAIL**。**回退前后基线一致、修复版复测也一致 → r1 / r2 的性能红是机器波动，不是改动引入的稳态开销**（152 那条「相关性不是因果」）。**已落地（v0.1.87）** | 2026-11-05「继续」（接「一直不断优化 如果不能优化就重构」） |
 | 159 | **窗口变窄，引文卡片留在旧坐标上，「打开」够不着**：158 收口时认出的缺口——`usePopSpot` 的五个调用者都在 `useLayoutEffect` 里挂了 resize 重算，只有引文卡片是手搓的一次性测量，`position: fixed` 不随窗口走。**更坏的一半是当时没看透的**：卡片存的是 `anchor: DOMRect` 快照，就算补一个 resize 监听，用旧快照重算也只是把卡片放回标记**原来**在的地方；窗口变窄会重排 PDF，标记自己也移动了。158 刻意把它留到单独一轮，就是为了不在纯搬家里掺进行为修复 | ①新建 `src/lib/cardSpot.ts`（纯，无 React、无 DOM）：`Box` / `Viewport` / `Spot`，`spotFor(anchor, card, view)` 把原先直接读 `window.innerHeight` / `innerWidth` 的部分改成注入 viewport；`createCardSpotter(read, render, onGone)` 的 `measure()` 量一次、`resize()` **重新读两个盒子**并重算、`dispose()` 作废后不再写。anchor 在 resize 时消失要 `onGone()` 关卡片（页面走了，卡片不该还挂着），初次 `measure` 时 anchor 不在只是布局时序、只隐藏不关闭；`onGone` 与 `render` 分开，因为关卡片是 flash controller 的事。②`popspot.ts` 保留二参 `spotFor(anchor, card)` 签名转发到纯规则并注入实时 window，`Spot` 从新模块 re-export，**五个 `usePopSpot` 调用者零改动**；长注释随规则搬进 `cardSpot.ts`。③`useCiteCard` 的 `CiteCard.anchor` 从 `DOMRect` 改成 `HTMLElement`，**存标记本身而不是它的一次测量**；`useLayoutEffect` 里建 controller、`measure()`、注册 `resize`、cleanup 移除监听并 `dispose()`；`read()` 每次取 `anchor.isConnected` 后的实时 `getBoundingClientRect()`、卡片盒子与实时 viewport。控制器随 `cite` 重建，`read` 不会闭包住上一个标记；`onGone` 走 `timer.clear()`。④`PdfViewer` 里 `showCard(items, el.getBoundingClientRect())` 改成 `showCard(items, el)`，一行；`tsconfig.node.json` include 加 `src/lib/cardSpot.ts`。**冒烟八条零 sleep，一条是对照实验**：旧的一次性定位在 800 宽窗口里 `left:900` 加卡片宽 300 确实出界（`narrowWidth:800`），否则后面七条等于没测；其余覆盖首测位置、resize 后同时跟新窗口与移动过的标记、窗口变矮向上翻、卡片未布局只隐藏、resize 时标记被卸载要关卡片、首次 measure 缺标记只隐藏不关闭、dispose 后不再写。**刻意不真的 resize 窗口**：冒烟后半段全是坐标断言，动真窗口会把它们全污染；把 viewport 变成参数正是为了让这类行为能在主进程里确定性地测。断言 392 → 400。**验证**：`typecheck` / `build` 通过；r1 390 PASS / 5 红（行菜单 `{"n":0}`、prefetch 前后两步、高亮撤销两条，detail 显示都是时序：同一份构建里 `row menu in a folder` 仍 9 项、`highlight again for the sidebar` 紧接着 `{"added":1}`）；r2 **EXIT=0 / 396 PASS / 0 FAIL**；r3 391 PASS / 5 红（换成行菜单簇，同一构建 `row menu on a row without a pdf` 仍 `{"n":8,"reveal":true}`）；r4 **EXIT=0 / 396 PASS / 0 FAIL**。8 条新断言三轮全跑，138 的三条引文卡片界面断言每轮也都跑了，**红点移动且同一份构建内有正例 → 11.11 噪声，不做回退验证**。**已落地（v0.1.86）** | 2026-11-05「一直不断优化 如果不能优化就重构」 |
 | 158 | **没有能坐实的用户可见错误，按规则转重构；r1 又撞见 157 没修干净的那半场假故障**：体检把 `setTimeout` / `addEventListener` / 在飞 `.then` 过了一遍——`usePdfAnnotations` 那个 8 秒 timer 有 cleanup，且 153 已让 `justMade` 带 docId 标签、换论文时 effect 必然重跑；App 四处 timer 都有 cleanup。**确实识别到一处缺口**：`usePopSpot` 明写「Measured again when the window changes size」，五个调用者都带 resize 监听，只有引文卡片是手搓的 `useLayoutEffect`、只量一次不带监听，窗口变化时 `position: fixed` 的卡片不会跟着走。但**这一轮刻意不修**：纯搬家和行为修复混在一个 item 里，绿了就分不清是搬家没错还是修复生效，留单独一轮修并加确定性断言。于是按「一直不断优化 如果不能优化就重构」转重构 | ①新建 `src/lib/hooks/useCiteCard.ts`，把引文卡片整块收走：`cite` / `citeSpot` 两个 state、`FlashMessage<CiteCard>` 控制器、`show` / `drop` / `keep` / `close` 四个动作、测量的 `useLayoutEffect`、翻页或换文献时关闭、卸载 `dispose`；导出 `CiteItem` / `CiteCard` 两个类型；hook 只借 `{ page, docId }` 两个标量，**不需要知道参考文献清单、库、页码或热区怎么画**。**刻意留在 `PdfViewer`**：`entriesRef` / `refDocRef` 把 `[3]` 翻成条目（要清单和 `refDoc`）、`citeBuilt` / `citeLayers` / `citeMarks` 按页缓存热区 JSX（跟 `marks` / `refPage` / `revealRef` / `marking` 强耦合）——那是「页」这一层的事，不是「卡片」这一层。仍是 149 的判据：不是这段长不长，是这段回答的是哪个问题。②**纯搬家的验收判据是渲染层零改动**：解构时把 hook 返回的 `cite` / `spot` / `cardRef` / `drop` / `keep` / `close` 别名成 JSX 里原有的 `cite` / `citeSpot` / `citeCard` / `dropCite` / `keepCite` / `closeCite`，于是 `git diff` 里那段卡片 JSX 一个字没动，只有 `showCite` 的末尾从 `citeTimer.current?.show({items, anchor})` 换成 `showCard(items, rect)`；`PdfViewer` 净减 34 行、少 3 个 import（新 hook 87 行自带注释）；effect 仍在原调用点注册，相对顺序不变。③**r1 暴露 157 的残留**：`word spans ready before find 66` 和前提断言都 PASS，点开查找框后却仍是 `find word candidates []`、query `""`、6 条 find 断言 detail 全 `{}`。根因不是 pdf.js 慢，是 157 把「等 span」放在**按 查找 之前**，而按下去会重绘文本层，这段又紧接连续模式测试再重绘一次——**前提证明的不是取词那一刻**。改成对**取词表达式本身**用 `until` 等候选非空（12s 上限），断言对象换成 `findWords`，detail 带 `candidates` / `occurrences`；断言名和总数不变（392），**后续断言一条也不跳过**（146 纪律）。④**不新增断言**：138 已有的三条界面断言（`a citation in the body offers the entry it names`、`a citation stands down while highlighting is on`、`the reference list itself is not ringed in citations`）真实覆盖 `.cite-hot` / `.cite-pop` / `.cite-row`，纯搬家没有新规则可测。**验证**：`typecheck` / `build` 通过；r1 11 条红（5 条行菜单 `{"open":0}` 是 11.11 时序噪声，同一份构建里 `row menu on a row without a pdf` 仍是 `{"n":8,"reveal":true}`；6 条 find 是**已坐实并修掉的冒烟缺陷**，不要像 156 那样把两类红笼统归成噪声）、r2 **EXIT=0 / 388 PASS / 0 FAIL**（取词 4 候选 7 次、query `Textual`）、r3 **EXIT=0 / 388 PASS / 0 FAIL**（query `DetCLIP…`），两轮里三条引文卡片界面断言都真的跑了。**已落地（v0.1.85）** | 2026-11-05「一直不断优化 如果不能优化就重构」 |
 | 157 | **冒烟自己会制造一场看不懂的假故障**：find 的查询词取自当前页 `.tx-layer span.tx`，而「回到第 1 页」之后只固定睡 1500ms 就去读词。机器忙、pdf.js 还没画文本层时读到 `find word candidates []`、query 为 `""`，接着 `find reports hits` 等 6 条断言一起红、detail 全是 `{}`——**日志完全没说根因是取词失败还是查找坏了**。156 的 r1 正好撞上（那轮还因云端全量同步跑了 18m35s）。146 修过「只取第一个词」，没修「一个词都没有」 | 在 1500ms 这个**地板**之后，用 `until` 等 `.tx-layer span.tx` 里长度 ≥4 的词真的出现（上限 12s），并新增一条直白断言 `the page has words to look for before find is asked`，把 span 数写进日志。文本层没画出来时红的是一条说人话的断言，不是六条含糊的；**刻意不跳过后续断言**——「没跑的断言看起来和通过的一模一样」（146 的纪律），宁可一起红也不静默略过。断言 391 → 392。**验证**：`typecheck` / `build` 通过；r1 有 2 条红（文件夹行菜单 + `prefetch serves a step back`，全是 11.11 记过的时序类）、r2 **EXIT=0 / 388 PASS / 0 FAIL**；新断言两轮都真的跑了（`wordSpans: 62` / `60`），红点一轮即消失 → 机器噪声。**已落地（v0.1.84）** | 2026-11-05「一直不断优化 如果不能优化就重构」 |
@@ -1936,6 +1937,19 @@ demo 假设你知道，产品在你需要的时候告诉你。
   没跑的断言看起来和通过的一模一样（146），宁可一起红，也不静默略过。
   同一条道理适用于所有「先准备数据、再断言」的段落：前提要被断言，
   结论不能被跳过。
+
+- **160 「effect 依赖了两个稳定的 ref」等于「effect 只跑一次」**：`usePopSpot`
+  的 `useLayoutEffect([anchor, card])` 看着像在跟着卡片走，其实 ref 对象从
+  挂载到卸载都不变，所以只在挂载时量一次。`FilterMenu` 这类组件本身随卡片
+  一起挂载，第一次就在 DOM 里，一直正常；`MenuButton` 组件常驻、卡片是
+  `{open && ...}`，挂载那刻 `card.current` 是 null，`spot` 永远为 null，
+  卡片靠 `position: fixed` 的静态位置摆着——**`spotFor` 的边缘 clamp 对
+  这四个菜单从未生效过**，而旧断言只问「是不是顶层、在不在窗口里」，
+  静态位置碰巧也能过。**判据不是「有没有调用定位函数」，是「它在被测那一刻
+  有没有真的写进 DOM」**：这轮先只加两条断言、不改产品代码跑一轮对照，
+  `more` 拿到 `inlineLeft:''`、`filter` 拿到 `'755px'`，才动手。
+  另一半是修法要最小：给 hook 加一个可选的 `visible` 进依赖数组，
+  四个本来就好的调用者一个字不用改。
 
 - **159 别把「补一个监听」当成修完**：引文卡片存的是打开那一刻的 `DOMRect`
   快照，就算加上 resize 监听，用旧快照重算也只是把卡片放回标记**原来**在的

@@ -22,10 +22,19 @@ export function spotFor(anchor: DOMRect, card: DOMRect): Spot {
  * out and before the browser paints — so it is never shown at the place it
  * first landed, which is inside the bar.  Measured again when the window
  * changes size, because a fixed card does not move with its button.
+ *
+ * `visible` is for a caller that stays mounted but renders its card only
+ * while open. Both refs are stable, so without it this effect runs once at
+ * mount — when the card is not in the DOM yet — and never again: `place()`
+ * has nothing to measure, `spot` stays null, and the card is left at its
+ * CSS static position with none of `spotFor`'s window-edge clamping. A
+ * caller whose whole component mounts together with its card is already in
+ * the DOM on the first effect and need not pass anything (160).
  */
 export function usePopSpot(
   anchor: RefObject<HTMLElement>,
-  card: RefObject<HTMLElement>
+  card: RefObject<HTMLElement>,
+  visible?: boolean
 ): Spot | null {
   const [spot, setSpot] = useState<Spot | null>(null)
   useLayoutEffect(() => {
@@ -37,6 +46,6 @@ export function usePopSpot(
     place()
     window.addEventListener('resize', place)
     return () => window.removeEventListener('resize', place)
-  }, [anchor, card])
+  }, [anchor, card, visible])
   return spot
 }

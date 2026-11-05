@@ -384,7 +384,8 @@ export async function runSmoke() {
       + 'Math.round(r.top+r.height/2));'
       + 'return {open:1,onTop:!!hit&&(hit===c||c.contains(hit)),'
       + 'hit:hit?(hit.className||hit.tagName):null,below:Math.round(r.bottom-bar.bottom),'
-      + 'inWindow:r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth}};'
+      + 'inWindow:r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth,'
+      + 'placed:!!(c.style.left&&c.style.top),inlineLeft:c.style.left,inlineTop:c.style.top}};'
       + 'const out={pressed:[]};'
       + 'out.pressed.push(press("更多"));await sleep(200);out.more=look(".menu-pop");'
       + 'press("更多");await sleep(200);'
@@ -417,6 +418,23 @@ export async function runSmoke() {
       popInfo.filter?.inWindow === true &&
       popInfo.cols?.inWindow === true,
     popInfo
+  )
+  // A `position: fixed` card with no inline left/top is sitting at its
+  // static position, which is exactly what `spotFor` exists to replace: the
+  // window-edge clamp and the flip above the button never run for it. The
+  // cards whose components are mounted only while open are the control —
+  // their card is in the DOM when the layout effect first runs, so they were
+  // always placed. MenuButton is not one of them: it stays mounted and
+  // renders its card only when open.
+  expect(
+    'the more menu is placed by the spot rule, not left at its static position',
+    popInfo.more?.placed === true,
+    popInfo.more
+  )
+  expect(
+    'the cards that mount with their component were always placed',
+    popInfo.filter?.placed === true && popInfo.cols?.placed === true,
+    { filter: popInfo.filter, cols: popInfo.cols }
   )
   // and what was removed to make room is still reachable
   const itemsOf = async (label: string): Promise<string[]> => {

@@ -38,7 +38,7 @@ export default function MenuButton({ label, title, disabled, primary, items }: P
   const [open, setOpen] = useState(false)
   const btn = useRef<HTMLButtonElement>(null)
   const pop = useRef<HTMLDivElement>(null)
-  const spot = usePopSpot(btn, pop)
+  const spot = usePopSpot(btn, pop, open)
 
   useEffect(() => {
     if (!open) return
