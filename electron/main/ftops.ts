@@ -32,6 +32,10 @@ export function initFt() {
   // MENDELEY_FT_LIMIT caps how many documents one run will read; it exists so
   // the smoke run can exercise indexing without reading every PDF.
   initFullText(process.env.MENDELEY_FT_DIR || dataDir())
+  // `setFullTextPages` clamps through the shared rule itself (161), so a
+  // hand-edited config cannot push the index past its bounds. Do not add a
+  // second clamp here: shared/fullTextPages.ts is the one rule, and the
+  // renderer's restore path now calls it too (163).
   const p = Number(loadConfig().ftPages ?? 0)
   if (p > 0) setFullTextPages(p)
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SavedSearch, SavedView } from '../../../shared/types'
 import { DEFAULT_FT_PAGES, DEFAULT_PDF_TEMPLATE } from '../../../shared/types'
+import { restoredPageBudget } from '../../../shared/fullTextPages'
 import {
   DEFAULT_SORT,
   migrateCols,
@@ -89,7 +90,12 @@ export function useConfig() {
       // somebody remembers to press the button is a library that is stale by
       // whatever was done on the other machine
       setSyncOnStart(c.syncOnStart !== false)
-      if (typeof c.ftPages === 'number' && c.ftPages > 0) setFtPages(c.ftPages)
+      // The guard stays: a malformed value should not even schedule a state
+      // write (152). A positive one goes through the same rule the index
+      // builder uses, so a hand-edited file cannot put a number in this panel
+      // that the index would answer differently (see 161 / 163).
+      if (typeof c.ftPages === 'number' && c.ftPages > 0)
+        setFtPages(restoredPageBudget(c.ftPages))
       if (typeof c.paneLeft === 'number') setLeftW(clampLeft(c.paneLeft))
       if (typeof c.paneRight === 'number') setRightPct(clampRight(c.paneRight))
       setTheme(c.theme === 'light' ? 'light' : 'dark')

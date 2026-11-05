@@ -30,3 +30,23 @@ export function clampFullTextPages(n: unknown): number {
   const whole = Math.floor(Number(n)) || DEFAULT_FT_PAGES
   return Math.max(FULL_TEXT_MIN_PAGES, Math.min(FULL_TEXT_MAX_PAGES, whole))
 }
+
+/**
+ * A page budget read back out of the config file.
+ *
+ * The config is plain JSON and can be hand edited, so what comes back is not
+ * necessarily a value the Settings panel could have written. The renderer
+ * used to accept any positive number while the index builder clamped it,
+ * which left the panel and the index describing one config entry with two
+ * different numbers. A missing or unusable value keeps the default -- that
+ * is what the state starts at anyway.
+ *
+ * The type guard is deliberate. A numeric string in a hand-edited config is
+ * not a number the app wrote, and accepting it would turn a malformed file
+ * into a silently different setting.
+ */
+export function restoredPageBudget(value: unknown): number {
+  return typeof value === 'number' && value > 0
+    ? clampFullTextPages(value)
+    : DEFAULT_FT_PAGES
+}

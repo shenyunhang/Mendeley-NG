@@ -21,7 +21,8 @@ import { DEFAULT_FT_PAGES, PROJECT_URL, type Annotation, type Doc } from '../../
 import {
   clampFullTextPages,
   FULL_TEXT_MAX_PAGES,
-  FULL_TEXT_MIN_PAGES
+  FULL_TEXT_MIN_PAGES,
+  restoredPageBudget
 } from '../../shared/fullTextPages'
 // This one lives with the renderer, but it is a pure function with no DOM in
 // it, and the note it carries is the only data in the app that exists nowhere
@@ -3560,6 +3561,87 @@ export async function runSmoke() {
       'every claimed page is released, including one whose read failed',
       claims === 11 && releases === claims && paired.busy.size === 0,
       { claims, releases, busy: paired.busy.size }
+    )
+  }
+
+  // A config file is plain JSON and can be hand edited. The renderer used to
+  // accept any positive number while the index builder clamped it, so one
+  // config entry could describe two different budgets. The restore path now
+  // goes through the same shared rule (163). One assertion is a control:
+  // without it the other five would be scoring a disagreement that was never
+  // shown to exist.
+  {
+    const oldRestore = (v: unknown): number =>
+      typeof v === 'number' && v > 0 ? v : DEFAULT_FT_PAGES
+    const indexUses = (v: unknown): number => clampFullTextPages(v)
+
+    expect(
+      'the old restore really could disagree with the index builder',
+      oldRestore(999) === 999 &&
+        indexUses(999) === FULL_TEXT_MAX_PAGES &&
+        oldRestore(999) !== indexUses(999),
+      { restored: oldRestore(999), indexed: indexUses(999) }
+    )
+
+    const values: unknown[] = [
+      1, 2, 3, 4.9, 50, 51, 999, -1, -999, 0, NaN, Infinity, -Infinity,
+      0.5, 49.9
+    ]
+    for (let n = -10; n <= 60; n++) values.push(n)
+    const drift = values.filter(
+      (v) =>
+        restoredPageBudget(v) !==
+        indexUses(typeof v === 'number' && v > 0 ? v : DEFAULT_FT_PAGES)
+    )
+    expect(
+      'a restored budget agrees with the index rule for every valid value',
+      drift.length === 0,
+      { checked: values.length, drift }
+    )
+
+    const unusable: unknown[] = [undefined, null, 0, -1, NaN, '', '7', {}, []]
+    expect(
+      'a missing or unusable config value falls back to the shared default',
+      unusable.every((v) => restoredPageBudget(v) === DEFAULT_FT_PAGES),
+      {
+        answers: unusable.map((v) => restoredPageBudget(v))
+      }
+    )
+
+    expect(
+      'a numeric string in a hand-edited config is not a page budget',
+      restoredPageBudget('7') === DEFAULT_FT_PAGES &&
+        restoredPageBudget('50') === DEFAULT_FT_PAGES &&
+        oldRestore('7') === DEFAULT_FT_PAGES,
+      { seven: restoredPageBudget('7'), fifty: restoredPageBudget('50') }
+    )
+
+    expect(
+      'a fractional budget from a config file is floored before it is stored',
+      restoredPageBudget(4.9) === 4 &&
+        restoredPageBudget(2.1) === 2 &&
+        restoredPageBudget(50.9) === FULL_TEXT_MAX_PAGES,
+      {
+        fourNine: restoredPageBudget(4.9),
+        twoOne: restoredPageBudget(2.1),
+        fiftyNine: restoredPageBudget(50.9)
+      }
+    )
+
+    let outside = 0
+    for (let n = -100; n <= 200; n++) {
+      const v = restoredPageBudget(n + 0.5)
+      if (
+        v < FULL_TEXT_MIN_PAGES ||
+        v > FULL_TEXT_MAX_PAGES ||
+        !Number.isInteger(v)
+      ) outside += 1
+    }
+    expect(
+      'no restored budget can leave the index bounds',
+      outside === 0 &&
+        restoredPageBudget(DEFAULT_FT_PAGES) === DEFAULT_FT_PAGES,
+      { outside, min: FULL_TEXT_MIN_PAGES, max: FULL_TEXT_MAX_PAGES }
     )
   }
 
