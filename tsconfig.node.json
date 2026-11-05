@@ -25,6 +25,7 @@
     "src/lib/latestSearch.ts",
     "src/lib/offline.ts",
     "src/lib/pageWalk.ts",
-    "src/lib/refly.ts"
+    "src/lib/refly.ts",
+    "src/lib/timing.ts"
   ]
 }

@@ -29,6 +29,7 @@ import {
   type SortKey
 } from './lib/columns'
 import { DEFAULT_LEFT_W, DEFAULT_RIGHT_PCT } from './lib/panes'
+import { COLUMN_WIDTH_PERSIST_DEBOUNCE_MS, UPDATE_INSTALL_DELAY_MS } from './lib/timing'
 import {
   FILTER_LABEL,
   FILTER_TEST,
@@ -254,7 +255,7 @@ export default function App() {
   // quit and let it run, and it relaunches the app when it finishes
   useEffect(() => {
     if (upd?.phase !== 'downloaded') return
-    const t = setTimeout(() => window.api.installUpdate(), 700)
+    const t = setTimeout(() => window.api.installUpdate(), UPDATE_INSTALL_DELAY_MS)
     return () => clearTimeout(t)
   }, [upd?.phase])
 
@@ -762,7 +763,7 @@ export default function App() {
     }
     const t = setTimeout(() => {
       void window.api.setConfig({ colWidths })
-    }, 400)
+    }, COLUMN_WIDTH_PERSIST_DEBOUNCE_MS)
     return () => clearTimeout(t)
   }, [colWidths])
 

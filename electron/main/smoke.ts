@@ -70,6 +70,21 @@ import {
 // on a paper change does not stop a read of the old PDF from landing a moment
 // later, so the order is controlled by resolving each page read by hand.
 import { createLazyPages, type PageAnswer } from '../../src/lib/lazyPages'
+
+// Eight product-side delays used to be bare literals at eight call sites.
+// Giving them names is a readability change only if no number moved, so this
+// run checks the names against the old literals and reads the call sites to
+// confirm they actually use them (164).
+import {
+  COLUMN_WIDTH_PERSIST_DEBOUNCE_MS,
+  COPIED_FEEDBACK_VISIBLE_MS,
+  FIND_QUERY_DEBOUNCE_MS,
+  FULL_TEXT_QUERY_DEBOUNCE_MS,
+  HIGHLIGHT_UNDO_WINDOW_MS,
+  PANE_WIDTH_PERSIST_DEBOUNCE_MS,
+  READING_POSITION_PERSIST_DEBOUNCE_MS,
+  UPDATE_INSTALL_DELAY_MS
+} from '../../src/lib/timing'
 // Continuous mode walks every page in the background, once for links and
 // once for citation markers. Both loops used to be written out in full down to
 // a literal 8, and "one column rebuild per screenful" had no test of its own.
@@ -3642,6 +3657,163 @@ export async function runSmoke() {
       outside === 0 &&
         restoredPageBudget(DEFAULT_FT_PAGES) === DEFAULT_FT_PAGES,
       { outside, min: FULL_TEXT_MIN_PAGES, max: FULL_TEXT_MAX_PAGES }
+    )
+  }
+
+
+  // Eight delays that used to be bare literals (164). Naming them is only a
+  // readability change if not one number moved. The literals are kept here as
+  // the control, and a deliberately swapped wiring proves the control can
+  // fail -- an assertion that can never go red looks exactly like a pass.
+  {
+    const legacy: Record<string, number> = {
+      UPDATE_INSTALL_DELAY_MS: 700,
+      COPIED_FEEDBACK_VISIBLE_MS: 1400,
+      HIGHLIGHT_UNDO_WINDOW_MS: 8000,
+      FIND_QUERY_DEBOUNCE_MS: 250,
+      FULL_TEXT_QUERY_DEBOUNCE_MS: 250,
+      COLUMN_WIDTH_PERSIST_DEBOUNCE_MS: 400,
+      PANE_WIDTH_PERSIST_DEBOUNCE_MS: 400,
+      READING_POSITION_PERSIST_DEBOUNCE_MS: 600
+    }
+    const named: Record<string, number> = {
+      UPDATE_INSTALL_DELAY_MS,
+      COPIED_FEEDBACK_VISIBLE_MS,
+      HIGHLIGHT_UNDO_WINDOW_MS,
+      FIND_QUERY_DEBOUNCE_MS,
+      FULL_TEXT_QUERY_DEBOUNCE_MS,
+      COLUMN_WIDTH_PERSIST_DEBOUNCE_MS,
+      PANE_WIDTH_PERSIST_DEBOUNCE_MS,
+      READING_POSITION_PERSIST_DEBOUNCE_MS
+    }
+    const drift = (got: Record<string, number>): string[] =>
+      Object.keys(legacy).filter((k) => got[k] !== legacy[k])
+
+    expect(
+      'every named delay still answers its old literal',
+      Object.keys(legacy).length === 8 &&
+        Object.keys(named).length === 8 &&
+        drift(named).length === 0,
+      { checked: Object.keys(legacy).length, drift: drift(named) }
+    )
+
+    const swapped: Record<string, number> = {
+      ...named,
+      FIND_QUERY_DEBOUNCE_MS: READING_POSITION_PERSIST_DEBOUNCE_MS,
+      READING_POSITION_PERSIST_DEBOUNCE_MS: FIND_QUERY_DEBOUNCE_MS
+    }
+    expect(
+      'a swapped wiring really would be caught',
+      drift(swapped).length === 2,
+      { drift: drift(swapped) }
+    )
+
+    expect(
+      'the multiset of delay values did not change',
+      JSON.stringify(Object.values(legacy).sort((a, b) => a - b)) ===
+        JSON.stringify(Object.values(named).sort((a, b) => a - b)),
+      {
+        legacy: Object.values(legacy).sort((a, b) => a - b),
+        named: Object.values(named).sort((a, b) => a - b)
+      }
+    )
+
+    expect(
+      'the two 400ms persistence debounces stay separate decisions',
+      COLUMN_WIDTH_PERSIST_DEBOUNCE_MS === 400 &&
+        PANE_WIDTH_PERSIST_DEBOUNCE_MS === 400 &&
+        Object.keys(named).length === 8,
+      {
+        columns: COLUMN_WIDTH_PERSIST_DEBOUNCE_MS,
+        panes: PANE_WIDTH_PERSIST_DEBOUNCE_MS
+      }
+    )
+
+    expect(
+      'every named delay is a finite positive whole number',
+      Object.values(named).every(
+        (v) => Number.isFinite(v) && Number.isInteger(v) && v > 0
+      ),
+      { values: Object.values(named) }
+    )
+
+    // Constant values alone do not prove the call sites were wired. This run
+    // always executes from the checkout, so the source beside the built main
+    // bundle is readable; a missing checkout must fail loudly, not skip.
+    const sites: { file: string; names: string[]; old: string[] }[] = [
+      {
+        file: 'src/App.tsx',
+        names: ['UPDATE_INSTALL_DELAY_MS', 'COLUMN_WIDTH_PERSIST_DEBOUNCE_MS'],
+        old: ['installUpdate(), 700)', '}, 400)']
+      },
+      {
+        file: 'src/components/SetupGuide.tsx',
+        names: ['COPIED_FEEDBACK_VISIBLE_MS'],
+        old: ['setCopied(false), 1400)']
+      },
+      {
+        file: 'src/components/PdfViewer.tsx',
+        names: ['READING_POSITION_PERSIST_DEBOUNCE_MS'],
+        old: ['}, 600)']
+      },
+      {
+        file: 'src/lib/hooks/useFullText.ts',
+        names: ['FULL_TEXT_QUERY_DEBOUNCE_MS'],
+        old: ['ask(q, 250)']
+      },
+      {
+        file: 'src/lib/hooks/usePaneWidths.ts',
+        names: ['PANE_WIDTH_PERSIST_DEBOUNCE_MS'],
+        old: ['}, 400)']
+      },
+      {
+        file: 'src/lib/hooks/usePdfAnnotations.ts',
+        names: ['HIGHLIGHT_UNDO_WINDOW_MS'],
+        old: ['setJustMade(null), 8000)']
+      },
+      {
+        file: 'src/lib/hooks/usePdfFind.ts',
+        names: ['FIND_QUERY_DEBOUNCE_MS'],
+        old: ['runFind(findQ), 250)']
+      }
+    ]
+    const root = path.join(__dirname, '../..')
+    const reads = sites.map((s) => {
+      const f = path.join(root, s.file)
+      return { file: s.file, text: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null }
+    })
+    expect(
+      'the eight call sites can be read from this checkout',
+      reads.every((r) => r.text !== null),
+      { missing: reads.filter((r) => r.text === null).map((r) => r.file) }
+    )
+
+    const notWired = reads.flatMap((r, i) => {
+      const t = r.text ?? ''
+      const bad: string[] = []
+      if (!/from '[^']*timing'/.test(t))
+        bad.push(sites[i].file + ': no timing import')
+      for (const name of sites[i].names) {
+        const hits = (t.match(new RegExp('\\b' + name + '\\b', 'g')) ?? []).length
+        if (hits < 2) bad.push(sites[i].file + ': ' + name + ' appears ' + hits + ' times')
+      }
+      return bad
+    })
+    expect(
+      'all eight call sites use their named delay',
+      notWired.length === 0,
+      { notWired }
+    )
+
+    const leftovers = reads.flatMap((r, i) =>
+      sites[i].old
+        .filter((o) => (r.text ?? '').includes(o))
+        .map((o) => sites[i].file + ': ' + o)
+    )
+    expect(
+      'no bare delay literal is left at any call site',
+      leftovers.length === 0,
+      { leftovers }
     )
   }
 

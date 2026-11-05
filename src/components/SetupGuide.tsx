@@ -16,6 +16,7 @@
  */
 import { useEffect, useState } from 'react'
 import { OAUTH_REDIRECT } from '../../shared/types'
+import { COPIED_FEEDBACK_VISIBLE_MS } from '../lib/timing'
 
 interface Props {
   /** which thing is missing; one at a time, because three problems at once
@@ -45,7 +46,7 @@ export default function SetupGuide({
 
   useEffect(() => {
     if (!copied) return
-    const t = setTimeout(() => setCopied(false), 1400)
+    const t = setTimeout(() => setCopied(false), COPIED_FEEDBACK_VISIBLE_MS)
     return () => clearTimeout(t)
   }, [copied])
 

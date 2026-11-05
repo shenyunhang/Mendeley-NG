@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { FIND_QUERY_DEBOUNCE_MS } from '../timing'
 import type * as pdfjs from 'pdfjs-dist'
 import type { MutableRefObject } from 'react'
 import type { FindHit, TextRun } from '../pdfgeom'
@@ -197,19 +198,19 @@ export function usePdfFind(o: {
     [pdf, numPages]
   )
 
-  // a query is worth a scan once the typing pauses; 250ms is long enough that
+  // a query is worth a scan once the typing pauses; the named debounce is long enough that
   // a four-character word costs one scan rather than four.  The box being shut
   // does not stop it when the term came from the library search: that scan is
   // what puts the marks on the page, and it opens the box itself if there is
   // something to report.
   useEffect(() => {
     if (!findOpen && !queryDriven.current) return
-    const t = setTimeout(() => runFind(findQ), 250)
+    const t = setTimeout(() => runFind(findQ), FIND_QUERY_DEBOUNCE_MS)
     return () => {
       clearTimeout(t)
       // Clearing the timer only stops a scan that has not started.  One that
       // is already walking the pages has to be invalidated too: otherwise it
-      // keeps publishing the old word's hits during these 250ms and, on its
+      // keeps publishing the old word's hits during that pause and, on its
       // last page, opens the bar for a word no longer in the box.
       scan.current?.cancel()
     }

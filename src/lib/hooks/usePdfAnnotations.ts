@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { HIGHLIGHT_UNDO_WINDOW_MS } from '../timing'
 import type { Annotation, PdfPos } from '../../../shared/types'
 import { fromCloudPositions, posToRect, rectToPos, type Rect, type Size } from '../pdfgeom'
 import {
@@ -106,7 +107,7 @@ export function usePdfAnnotations(o: {
   // marks that then have to be found and deleted one at a time.
   useEffect(() => {
     if (!justMade) return
-    const t = setTimeout(() => setJustMade(null), 8000)
+    const t = setTimeout(() => setJustMade(null), HIGHLIGHT_UNDO_WINDOW_MS)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justMade])

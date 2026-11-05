@@ -30,6 +30,7 @@ import {
   type ZoomMode
 } from '../lib/pdfgeom'
 import { PrefetchCache } from '../lib/pdfcache'
+import { READING_POSITION_PERSIST_DEBOUNCE_MS } from '../lib/timing'
 import { selectionRects, textInRect } from '../lib/pdfsel'
 import { drawTextLayer } from '../lib/pdftext'
 import type { LinkBox } from '../lib/pdflinks'
@@ -310,7 +311,7 @@ export default function PdfViewer({
       if (p <= 1) return
       resumeRef.current[id] = p
       void window.api.setReading(id, p).catch(() => {})
-    }, 600)
+    }, READING_POSITION_PERSIST_DEBOUNCE_MS)
     return () => clearTimeout(t)
   }, [page, doc.id, doc.localPdf, numPages, resumeReady])
 

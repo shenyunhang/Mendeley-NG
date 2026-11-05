@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { FULL_TEXT_QUERY_DEBOUNCE_MS } from '../timing'
 import type { FtHit, FtStatus } from '../../../shared/types'
 import {
   answerFor,
@@ -114,7 +115,7 @@ export function useFullText(active: boolean) {
       search.current?.cancel()
       return
     }
-    search.current?.ask(q, 250)
+    search.current?.ask(q, FULL_TEXT_QUERY_DEBOUNCE_MS)
   }, [active, ftQuery, ftEpoch])
 
   const current = ftQuery.trim()

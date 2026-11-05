@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { PANE_WIDTH_PERSIST_DEBOUNCE_MS } from '../timing'
 import {
   LEFT_MAX,
   LEFT_MIN,
@@ -79,7 +80,7 @@ export function usePaneWidths({
     }
     const t = setTimeout(() => {
       void window.api.setConfig({ paneLeft: leftW, paneRight: rightPct })
-    }, 400)
+    }, PANE_WIDTH_PERSIST_DEBOUNCE_MS)
     return () => clearTimeout(t)
   }, [leftW, rightPct])
 
