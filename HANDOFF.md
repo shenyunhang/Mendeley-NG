@@ -8,10 +8,11 @@
 
 ## 0. 一页速览
 
-**还没做的：无。** 第 9.1 的待办已经清空，第 9 节剩下的是竞品对照快照
-（9.2）、"差距可以接受，先不做"（9.3）和"明确不做"（9.4）。
+**还没做的：无已坐实的缺陷。** 第 9.1 的待办已经清空，第 9 节剩下的是竞品对照快照
+（9.2）、"差距可以接受，先不做"（9.3）、"明确不做"（9.4），以及一次代码审查留下的
+按序推进清单（9.7，都不是已坐实的 bug）。
 
-编号 1–160 全部已落地，按版本记在第 10 节。
+编号 1–161 全部已落地，按版本记在第 10 节。
 
 **改完代码必做的两件事**：
 
@@ -22,12 +23,12 @@
    忘了这一步的后果不是报错，是**安静地全绿**：新加的断言根本没被编译进去，
    屏幕上跑的还是上一版，而你手里多了一份"测试通过"的错觉。判别办法是看日志里
    有没有你新写的断言名——没有就是没跑。
-3. `npm run smoke`——402 个 `expect` 调用点，跑的是真实库。冒烟会真的读 PDF、真的建索引，
-   所以"功能还在但测试找不到它"这类假失败也能被抓到。**口径**：402 是源码里的调用点，
+3. `npm run smoke`——411 个 `expect` 调用点，跑的是真实库。冒烟会真的读 PDF、真的建索引，
+   所以"功能还在但测试找不到它"这类假失败也能被抓到。**口径**：411 是源码里的调用点，
    一轮日志的 PASS 数会少几条（有 4 条是分支断言，只在满足数据条件时才跑，见 145 / 146）。
    之前这里写的 342 是错的——用同一把尺子量 git 历史：147 版 337、148 版 344、
    149 / 150 版 344、151 版 349、152 版 358、153 版 366、154 版 375、
-   155 版 383、156 版 391、157 版 392、158 版仍 392、159 版 400、160 版 402，148 那一行记的「336 → 342」也少算了两条。
+   155 版 383、156 版 391、157 版 392、158 版仍 392、159 版 400、160 版 402、161 版 411，148 那一行记的「336 → 342」也少算了两条。
    **计数用 `grep -cE "^[[:space:]]*expect\(" electron/main/smoke.ts`，不要凭印象写**。
 
 **往 `build` 里加东西时，同一个动作要问一遍 `dist` 要不要**：
@@ -48,7 +49,7 @@
 | 7 | 环境与打包的坑 |
 | 8 | 功能对照：1.19.8 有什么，NG 现在有什么 |
 | 9 | **还没做的**：待办四条 · 竞品仍缺 · 可接受的差距 · 明确不做 |
-| 10 | 已落地：基础能力 1–18 · 19–94 · 95–148 |
+| 10 | 已落地：基础能力 1–18 · 19–94 · 95–161 |
 | 11 | 主题要点：索引 · 阅读器 · 列表与列 · 键盘焦点浮层 · 图标 · 窗口更新打包 · 确认 · 引导 · 文件夹 · 性能 · 通用 |
 
 第 11 节按**主题**重排，是踩过的坑；第 10 节按**编号**排，是做过的事。
@@ -112,7 +113,7 @@ Chromium 天然按系统 scale factor 缩放 CSS 像素，**不需要任何 DPI 
 | 星标 / 已读 / 标签 | 可用；写回云端 |
 | 列定制与保存视图 | 可用；存配置 |
 | 撤销栈（删除 / 合并 / 批量改文件夹） | 可用；Ctrl+Z |
-| 全文检索（PDF 正文） | 可用；每篇前 N 页（默认 3，设置里可改），命中带页码与上下文，**搜不到时会说清读了多少、以及这不等于库里没有**，见第 143 / 144 / 146 条 |
+| 全文检索（PDF 正文） | 可用；每篇前 N 页（默认 3，设置里可改），命中带页码与上下文，**搜不到时会说清读了多少、以及这不等于库里没有**，见第 143 / 144 / 146 条；页数预算的边界与默认值只有一份规则，设置面板与索引构建共用，见 161 |
 | 读正文时查引用（悬停弹窗） | 可用；只按 DOI / arXiv id 认，匹配不上不弹，见第 138 条 |
 | PDF 里的链接指向库内论文 | 在本应用打开那一篇，不交给浏览器；角标「库内」，见第 140 条 |
 | 笔记 / 高亮 / PDF 一次带走 | 可用；见第 134 条 |
@@ -211,7 +212,8 @@ src/                        renderer
     usePdfFind          在这一篇里找一个词：命中带词标签、忙碌由答案派生，见 154
     usePdfAnnotations   这篇的标注：本地、云端、选中的那条，都带 docId 标签（见 153）
     usePdfLinks / usePdfRefs  链接与引文标记按页懒取，换论文时作废在飞读取（见 155）
-shared/types.ts             main / preload / renderer 三端共享类型
+shared/types.ts             main / preload / renderer 三端共享类型与默认值
+shared/fullTextPages.ts     全文页数预算的唯一规则与边界，跨 IPC 两侧共用（见 161）
 scripts/                    start.mjs 启动器、demo.mjs 假库与截图、get-token.mjs、check-api.mjs、hooks/
 docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
 ```
@@ -669,6 +671,27 @@ Word 插件、分组协作、通用文献管理器的功能军备竞赛。
 - **相关文献推荐、站内文献检索（Literature Search）**：1.19.8 已移除，且依赖已下线的社交图谱。
 - **个人主页、关注者等社交功能**：同上，随 Mendeley 产品线一起下线了。
 
+### 9.7 代码审查排期（2026-11-05，架构评审遗留项）
+
+一次项目级 Code Review 的诊断结果，按「能不能在不改外部行为的前提下做完」排序。
+每轮只落地一项、配确定性断言与真实库冒烟。**① 已由 161 落地**，下面剩下的是排期，
+不是已经坐实的 bug；带行号是为了让下一轮不用重新体检一遍。
+
+| 序 | 发现（带行号） | 判断与排期理由 |
+| --- | --- | --- |
+| ① 已做（161） | `src/App.tsx:1072` 与 `electron/main/fulltext.ts:16` 各写一份页数预算夹取；默认值 `3` 共三份（`shared/types.ts:207`、`fulltext.ts:11` 的 `let pages = 3`、`fulltext.ts:16` 的 `\|\| 3`），而主进程从不 import 那个共享常量 | 唯一一份能逐值证明「零行为变化」的规则。收进 `shared/fullTextPages.ts`，两侧显式 import，冒烟拿两份旧规则当对照全表比对，见 10.3 的 161 |
+| ② | `src/lib/hooks/useConfig.ts:92` 恢复配置只判 `> 0` 不夹取；`electron/main/ftops.ts:36` 同样只判 `> 0` | 手工改过或损坏的配置会把越界值带进 UI 状态。夹取会**改变这类输入的行为**，不属于零行为变化，要单独立项并先想清哪些值该被修 |
+| ③ | `src/App.tsx:256` 700ms、`src/components/SetupGuide.tsx:48` 1400ms、`src/lib/hooks/usePdfAnnotations.ts:109` 8000ms、`src/lib/hooks/usePdfFind.ts:207` 250ms、`src/lib/hooks/usePaneWidths.ts:80` 400ms | 五处延时魔数，但**五处都已有 cleanup**，没有 timer 竞态（151 修掉的那种）。收进具名常量模块纯属可读性，收益最低，排在能坐实的缺口之后 |
+| ④ | 共 12 处 `catch(() => {})`：`App.tsx:244,245,1168,1169,1371`、`PdfViewer.tsx:142,312`、`useLibrary.ts:38`、`usePdfAnnotations.ts:201`、`fulltext.ts:450,479`、`smoke.ts:4045` | 静默失败确实不满足健壮性要求，但改成具名忽略 / 上报会改变控制台可观察输出，且要先拍板「哪些失败该被看见、哪些是预期内的清理」。**先定策略再动代码** |
+| ⑤ 否决 | 按行数硬拆 `src/App.tsx`（95 KB） | 149 / 150 已论证：横切状态是刻意留在组装层的，长度不是判据，「这段回答的是哪个问题」才是 |
+
+四个评估维度的结论：**Design & Architecture** 的真问题是跨 IPC 的规则重复（①），
+不是文件大小；**Readability** 主要是魔数与空 catch；**Robustness** 落在空 catch 与
+配置恢复缺夹取；**Performance** 体检没有发现稳态开销——`PdfViewer.tsx` /
+`pdfsel.ts` / `pdftext.ts` / `DocTable.tsx` 共 18 处 `getBoundingClientRect()`
+都在用户手势或布局 effect 里按次测量，没有可证实的重复计算，159 已把唯一一处
+「重排后不重测」修掉。160 的回退验证也确认没有改动引入的稳态按键开销。
+
 ## 10. 已落地
 
 按编号排。每段前面的那句"当时为什么做这一批"留着，比删掉有用。
@@ -930,7 +953,7 @@ Word 插件、分组协作、通用文献管理器的功能军备竞赛。
 | 93 | **两套把手会打架** | 宽度把手在列头右缘，它的 mousedown 冒泡到列头就同时启动了"换位置" | 把手里 `e.stopPropagation()` |
 | 94 | **落点位置说不清** | 高亮某一列回答的是"哪一列"，而读者问的是"插在哪两列之间" | 在**间隙**上画一条 2px 竖线，按指针在列中线的哪一侧决定插到哪 |
 
-### 10.3 95–160（2026-10-31 起）
+### 10.3 95–161（2026-10-31 起）
 
 先盘了一遍现状，把"还没做"的列出来。编号接着 9.2l 的 94 往下走。
 **已做过的不再重复**（错误条可关闭、Esc 关浮层、主题、幽灵文献、文件夹按名排、
@@ -975,6 +998,7 @@ SetupGuide、批量进度、拖列宽、拖列换顺序、添加时间默认列�
 | 105 | **批量下载 PDF 没有**：只能一篇一篇点阅读器里那个按钮 | 批量栏加「下载 PDF（N）」，N 是选中里"云端有、本地没有"的篇数（为 0 就禁用并说明）；**三条并发**（S3 预签名 URL 并发高了直接被拒，两百条一起发只会失败更多）；有进度、可停止、失败只赔那一篇；路径**成批写回**而不是一篇一次——一次写回就要重跑一遍筛选和排序——**已落地（v0.1.49）** | 9.2c-41 / 9.2d-41「批量下载 PDF 没有」 |
 | 108 | **启动不会自动同步**：磁盘上的库只是云端的一份缓存，而"只在你记得点「同步云端」时才刷新"的缓存，落后的正好是另一台机器上干的那些活 | 有 token 时启动后自己拉一次**增量**（全量五六千篇久到会被察觉，而启动这个位置不需要它；删除只有全量能发现，那是按钮的活）；**静默**——失败 `.catch` 掉不出声（每次启动都因为恰好离线而弹一条红，比一份晚几小时的列表更糟）；`startedSync` ref 保证一次启动只拉一次；设置 → 同步 → 「打开软件时自动同步一次」可关（`syncOnStart`，默认开）——**已落地（v0.1.52）** | 9.2c-38 / 9.2d-38「启动不会自动同步」 |
 | 127 | **PDF 里的链接点不动**：参考文献、图表的交叉引用、正文里的 DOI / arXiv 链接，画在纸上却只是纸——内部章节跳不了，外部地址也开不了。1.19.8 里它们是能点的 | 读 pdf.js 的 link annotation（`getAnnotations({intent:'display'})` 里的 `subtype:'Link'`），画一层透明的 `<a>`：内部目标（可能是字符串名字，要 `getDestination` + `getPageIndex`）解析成页码走 `reveal`，外部地址过一遍**协议白名单**（`http:` / `https:` / `mailto:`，其余丢弃——PDF 是别人写的文件，它的链接是数据不是代码）。**默认不画框**——一篇论文几十个链接，满屏蓝框比没有链接更糟——只在悬停时给一圈描边和手型光标，外部链接加个 ↗；**开着拖选高亮时整层让位**（`pointer-events: none`），否则画高亮的每一次拖动都可能变成一次跳转。两处性能是量出来才做的：一篇十二页的论文有近千个锚点，**按页 memo 掉**（元素引用不变 React 整棵跳过重建），否则搜索框每敲一键都要重造它们——实测按键 194ms → 42ms；连续模式**攒够一屏再写一次 state**，一页一次的话五十页就是五十次全量重渲染。冒烟加三条：**哪篇有链接是问出来的不是写死的**（主进程已有 pdf.js，扫出首页确实带链接的那篇再按标题搜过去），内部链接点了 `1 → 4`，外部链接走打桩的 `shell:openExternal` 收到且只收到一条 `https://orcid.org/…`（不能真开浏览器）——**已落地（v0.1.56）** | 2026-11-02「pdf里面的超链接无法点击 内部章节跳转和外部网页跳转都不能用」 |
+| 161 | **「合法页数预算」在 IPC 两侧各写了一份，默认值一共三份**：`App.tsx:1072` 与 `electron/main/fulltext.ts:16` 都是 `Math.max(1, Math.min(50, ...))`；`3` 同时出现在 `shared/types.ts:207`（`DEFAULT_FT_PAGES`）、`fulltext.ts:11`（`let pages = 3`）和 `fulltext.ts:16`（`\|\| 3`），而主进程从不 import 那个共享常量。改一次默认值要动三处，漏一处就是「设置面板写进去的数」和「配置损坏时回退的数」变成了同一个配置项的两种答案。**不是已坐实的用户可见 bug，是一次 Code Review 找出的可发散结构**（§9.7 ①，四个维度的完整诊断也记在那里） | ①新建 `shared/fullTextPages.ts`（纯，无 React / DOM / Electron）：`FULL_TEXT_MIN_PAGES = 1` / `FULL_TEXT_MAX_PAGES = 50` / `clampFullTextPages(n: unknown)`；默认值继续从 `shared/types.ts` **import**，不复制字面量；`Math.floor` 仍在夹取之前，保证 `50.9` 先变 50 再进 clamp。②`App.tsx` 的 `changeFtPages` 一行换掉内联表达式，并删掉因此不再使用的 `DEFAULT_FT_PAGES` import。③`fulltext.ts` 的 `let pages` 改读共享默认值、`setFullTextPages` 改调共享规则。**两个 tsconfig 都已有 `shared/**/*.ts`，不必改 include**；build 后确认 `out/main/index.js` 与 renderer bundle 都带进了规则，`dist` 不需要额外 copy（§11.6 那条自问）。④冒烟九条零 sleep：先把两份旧规则写成对照函数，证明它们各带自己的默认值时输入 `0` 分别答 **5 / 3**（发散是真实的，否则后面八条等于没测）；再用 `null` / `undefined` / `NaN` / 正负 `Infinity` / 数字字符串 / `-60..110` 共 **190 个输入**逐值比对，任何一处移动就红——**这才是「零行为变化」的证明，不是挑几个典型值对一对**；其余七条覆盖不可用值回退默认、负数守下界、超上界守上界、两个边界自身不动、小数先 floor、配置里的数字字符串被接受、默认自身合法且 2001 个采样无一越界或非整数。断言 402 → 411。**验证**：`typecheck` / `build` 通过；改完注释后重建，主进程与 renderer 产物 hash 与改前逐字节一致，所以后两轮跑的就是最终代码。r1 404 PASS / 3 红（按键耗时 `29,22,36,34,40,107,72`、行菜单 `{"open":0}`、prefetch 瞬时 `joined-warm`，后者同一构建里 `prefetch serves a step forward` 紧接 PASS）；r2 406 PASS / 1 红（只剩行菜单）；r3 **EXIT=0 / 407 PASS / 0 FAIL**。九条新断言三轮全跑且全绿，等价断言每轮都是 `checked: 190, different: []`；`the page budget reaches the config {"ftPages":5}` 每轮 PASS，真实设置写入路径没被搬家弄坏。**红点每轮变少、且都是 11.11 记过的时序类，不做回退验证**。**已落地（v0.1.88）** | 2026-11-05「资深软件架构师与重构专家 Code Review」 |
 | 160 | **「更多」菜单从来没被定位过**：`usePopSpot` 的五个调用者里四个是「组件随卡片一起挂载」（`FilterMenu` / `SortMenu` / `ColumnPicker`），只有 `MenuButton` 是组件常驻、卡片写成 `{open && ...}`。而 `useLayoutEffect` 的依赖是 `[anchor, card]` 两个 `useRef` 对象——**从挂载到卸载都不变，所以 effect 只跑一次**，挂载那刻 `pop.current` 是 `null`，`place()` 直接返回，`spot` 永远是 `null`，`style={spot ?? undefined}` 不给 `left` / `top`。卡片于是靠 `position: fixed` 的静态位置摆放，`spotFor` 的窗口边缘 clamp、向上翻、resize 重算对工具栏上这四个 MenuButton **一次都没生效过**。旧冒烟没抓到，是因为 `cards that open below the bar` 只问「是不是 `elementFromPoint` 命中的顶层」和「矩形在不在窗口里」，静态位置碰巧都满足 | **先跑对照轮再动手**：只加两条断言、**产品代码一个字不改**，build 出的 renderer 产物 hash 与 v0.1.86 完全相同；r0 拿到 `more` 的 `placed:false` 且 `inlineLeft` / `inlineTop` 都是空字符串，FAIL，同时 `filter` 的 `placed:true` / `inlineLeft:'755px'` / `inlineTop:'42px'` PASS——坏的是这一条路径，不是定位规则本身（142 / 145 / 146 / 151 那条纪律）。①`usePopSpot(anchor, card, visible?)` 把可选的可见性放进 effect 依赖数组，并在注释里写清为什么：ref 稳定不等于卡片在 DOM 里。②`MenuButton` 把 `open` 传进去；其余四个调用者**零改动**。打开时 effect 重跑、卡片已在 DOM，`place()` 量到并写入内联坐标；关掉时卡片卸载、`place()` 不写，下次打开重新量，不会被上一次的位置钉住。③冒烟两条：`the more menu is placed by the spot rule, not left at its static position` 读回 `.menu-pop` 的 `style.left` / `style.top`，另一条 `the cards that mount with their component were always placed` 是**对照组**，证明随组件挂载的筛选 / 列卡片本来就有内联定位。断言 400 → 402。**验证**：`typecheck` / `build` 通过；r0（对照轮，产品代码未修）新断言 1 红 1 绿，另有 4 条行菜单 `{"open":0}` 是 11.11 噪声；r1 两条新断言均 PASS，`more` 变成 `placed:true` / `inlineLeft:'620px'` / `inlineTop:'42px'`，`below` 从碰巧的 97 变成按规则算出的 131，只剩 1 条 `a keystroke stays cheap` 性能噪声（`64,71,149,74,93,111,75`，11.11 记过的按键耗时类）；r2 两条新断言仍 PASS，同一条性能断言又红（`218,25,25,37,34,32,32`，只有首个采样是尖峰）。**红点连续两轮不移动，按 11.11 做回退验证**：`git stash` 只撤掉两处产品改动、保留新断言，build 出的 renderer hash 回到对照轮的 `index-DrdyOxe3.js`；ctrl 轮性能 `23,26,30,35,27,27,21`（max 35，回到基线），`more` 断言如期 FAIL。恢复修复版再跑 r3，性能 `27,22,23,31,26,28,23`（max 31）与基线 33 一致、两条新断言仍 PASS，只剩 1 条窗口聚焦噪声；r4 **EXIT=0 / 398 PASS / 0 FAIL**。**回退前后基线一致、修复版复测也一致 → r1 / r2 的性能红是机器波动，不是改动引入的稳态开销**（152 那条「相关性不是因果」）。**已落地（v0.1.87）** | 2026-11-05「继续」（接「一直不断优化 如果不能优化就重构」） |
 | 159 | **窗口变窄，引文卡片留在旧坐标上，「打开」够不着**：158 收口时认出的缺口——`usePopSpot` 的五个调用者都在 `useLayoutEffect` 里挂了 resize 重算，只有引文卡片是手搓的一次性测量，`position: fixed` 不随窗口走。**更坏的一半是当时没看透的**：卡片存的是 `anchor: DOMRect` 快照，就算补一个 resize 监听，用旧快照重算也只是把卡片放回标记**原来**在的地方；窗口变窄会重排 PDF，标记自己也移动了。158 刻意把它留到单独一轮，就是为了不在纯搬家里掺进行为修复 | ①新建 `src/lib/cardSpot.ts`（纯，无 React、无 DOM）：`Box` / `Viewport` / `Spot`，`spotFor(anchor, card, view)` 把原先直接读 `window.innerHeight` / `innerWidth` 的部分改成注入 viewport；`createCardSpotter(read, render, onGone)` 的 `measure()` 量一次、`resize()` **重新读两个盒子**并重算、`dispose()` 作废后不再写。anchor 在 resize 时消失要 `onGone()` 关卡片（页面走了，卡片不该还挂着），初次 `measure` 时 anchor 不在只是布局时序、只隐藏不关闭；`onGone` 与 `render` 分开，因为关卡片是 flash controller 的事。②`popspot.ts` 保留二参 `spotFor(anchor, card)` 签名转发到纯规则并注入实时 window，`Spot` 从新模块 re-export，**五个 `usePopSpot` 调用者零改动**；长注释随规则搬进 `cardSpot.ts`。③`useCiteCard` 的 `CiteCard.anchor` 从 `DOMRect` 改成 `HTMLElement`，**存标记本身而不是它的一次测量**；`useLayoutEffect` 里建 controller、`measure()`、注册 `resize`、cleanup 移除监听并 `dispose()`；`read()` 每次取 `anchor.isConnected` 后的实时 `getBoundingClientRect()`、卡片盒子与实时 viewport。控制器随 `cite` 重建，`read` 不会闭包住上一个标记；`onGone` 走 `timer.clear()`。④`PdfViewer` 里 `showCard(items, el.getBoundingClientRect())` 改成 `showCard(items, el)`，一行；`tsconfig.node.json` include 加 `src/lib/cardSpot.ts`。**冒烟八条零 sleep，一条是对照实验**：旧的一次性定位在 800 宽窗口里 `left:900` 加卡片宽 300 确实出界（`narrowWidth:800`），否则后面七条等于没测；其余覆盖首测位置、resize 后同时跟新窗口与移动过的标记、窗口变矮向上翻、卡片未布局只隐藏、resize 时标记被卸载要关卡片、首次 measure 缺标记只隐藏不关闭、dispose 后不再写。**刻意不真的 resize 窗口**：冒烟后半段全是坐标断言，动真窗口会把它们全污染；把 viewport 变成参数正是为了让这类行为能在主进程里确定性地测。断言 392 → 400。**验证**：`typecheck` / `build` 通过；r1 390 PASS / 5 红（行菜单 `{"n":0}`、prefetch 前后两步、高亮撤销两条，detail 显示都是时序：同一份构建里 `row menu in a folder` 仍 9 项、`highlight again for the sidebar` 紧接着 `{"added":1}`）；r2 **EXIT=0 / 396 PASS / 0 FAIL**；r3 391 PASS / 5 红（换成行菜单簇，同一构建 `row menu on a row without a pdf` 仍 `{"n":8,"reveal":true}`）；r4 **EXIT=0 / 396 PASS / 0 FAIL**。8 条新断言三轮全跑，138 的三条引文卡片界面断言每轮也都跑了，**红点移动且同一份构建内有正例 → 11.11 噪声，不做回退验证**。**已落地（v0.1.86）** | 2026-11-05「一直不断优化 如果不能优化就重构」 |
 | 158 | **没有能坐实的用户可见错误，按规则转重构；r1 又撞见 157 没修干净的那半场假故障**：体检把 `setTimeout` / `addEventListener` / 在飞 `.then` 过了一遍——`usePdfAnnotations` 那个 8 秒 timer 有 cleanup，且 153 已让 `justMade` 带 docId 标签、换论文时 effect 必然重跑；App 四处 timer 都有 cleanup。**确实识别到一处缺口**：`usePopSpot` 明写「Measured again when the window changes size」，五个调用者都带 resize 监听，只有引文卡片是手搓的 `useLayoutEffect`、只量一次不带监听，窗口变化时 `position: fixed` 的卡片不会跟着走。但**这一轮刻意不修**：纯搬家和行为修复混在一个 item 里，绿了就分不清是搬家没错还是修复生效，留单独一轮修并加确定性断言。于是按「一直不断优化 如果不能优化就重构」转重构 | ①新建 `src/lib/hooks/useCiteCard.ts`，把引文卡片整块收走：`cite` / `citeSpot` 两个 state、`FlashMessage<CiteCard>` 控制器、`show` / `drop` / `keep` / `close` 四个动作、测量的 `useLayoutEffect`、翻页或换文献时关闭、卸载 `dispose`；导出 `CiteItem` / `CiteCard` 两个类型；hook 只借 `{ page, docId }` 两个标量，**不需要知道参考文献清单、库、页码或热区怎么画**。**刻意留在 `PdfViewer`**：`entriesRef` / `refDocRef` 把 `[3]` 翻成条目（要清单和 `refDoc`）、`citeBuilt` / `citeLayers` / `citeMarks` 按页缓存热区 JSX（跟 `marks` / `refPage` / `revealRef` / `marking` 强耦合）——那是「页」这一层的事，不是「卡片」这一层。仍是 149 的判据：不是这段长不长，是这段回答的是哪个问题。②**纯搬家的验收判据是渲染层零改动**：解构时把 hook 返回的 `cite` / `spot` / `cardRef` / `drop` / `keep` / `close` 别名成 JSX 里原有的 `cite` / `citeSpot` / `citeCard` / `dropCite` / `keepCite` / `closeCite`，于是 `git diff` 里那段卡片 JSX 一个字没动，只有 `showCite` 的末尾从 `citeTimer.current?.show({items, anchor})` 换成 `showCard(items, rect)`；`PdfViewer` 净减 34 行、少 3 个 import（新 hook 87 行自带注释）；effect 仍在原调用点注册，相对顺序不变。③**r1 暴露 157 的残留**：`word spans ready before find 66` 和前提断言都 PASS，点开查找框后却仍是 `find word candidates []`、query `""`、6 条 find 断言 detail 全 `{}`。根因不是 pdf.js 慢，是 157 把「等 span」放在**按 查找 之前**，而按下去会重绘文本层，这段又紧接连续模式测试再重绘一次——**前提证明的不是取词那一刻**。改成对**取词表达式本身**用 `until` 等候选非空（12s 上限），断言对象换成 `findWords`，detail 带 `candidates` / `occurrences`；断言名和总数不变（392），**后续断言一条也不跳过**（146 纪律）。④**不新增断言**：138 已有的三条界面断言（`a citation in the body offers the entry it names`、`a citation stands down while highlighting is on`、`the reference list itself is not ringed in citations`）真实覆盖 `.cite-hot` / `.cite-pop` / `.cite-row`，纯搬家没有新规则可测。**验证**：`typecheck` / `build` 通过；r1 11 条红（5 条行菜单 `{"open":0}` 是 11.11 时序噪声，同一份构建里 `row menu on a row without a pdf` 仍是 `{"n":8,"reveal":true}`；6 条 find 是**已坐实并修掉的冒烟缺陷**，不要像 156 那样把两类红笼统归成噪声）、r2 **EXIT=0 / 388 PASS / 0 FAIL**（取词 4 候选 7 次、query `Textual`）、r3 **EXIT=0 / 388 PASS / 0 FAIL**（query `DetCLIP…`），两轮里三条引文卡片界面断言都真的跑了。**已落地（v0.1.85）** | 2026-11-05「一直不断优化 如果不能优化就重构」 |
@@ -1937,6 +1961,20 @@ demo 假设你知道，产品在你需要的时候告诉你。
   没跑的断言看起来和通过的一模一样（146），宁可一起红，也不静默略过。
   同一条道理适用于所有「先准备数据、再断言」的段落：前提要被断言，
   结论不能被跳过。
+
+- **161 跨 IPC 的规则要证明「等价」，不能只证明「看起来一样」**：页数预算原本在
+  `App.tsx` 的写入路径和 `electron/main/fulltext.ts` 的索引路径各写了一遍
+  `Math.max(1, Math.min(50, ...))`，默认值 `3` 一共三份（`shared/types.ts` 的
+  `DEFAULT_FT_PAGES`、主进程的 `let pages = 3`、主进程夹取里的 `|| 3`），而主进程
+  从不 import 那个共享常量。**改一次默认值要动三处，漏一处就是「面板写进去的数」
+  和「配置坏了回退的数」不是同一个数**。抽成纯函数时，唯一能撑起「零行为变化」
+  的断言不是挑几个典型值对一对，而是把两份旧规则留在冒烟里当对照，在 `null` /
+  `undefined` / `NaN` / 正负 Infinity / 数字字符串 / `-60..110` 整张表上逐值比对，
+  任何一个值移动就红；另一半是先证明旧安排**确实能发散**（两份规则各带自己的
+  默认值时，输入 `0` 分别答 5 和 3），否则后面八条只是在给一个不存在的问题打分。
+  还看清一件事：**共享常量不等于共享规则**——`DEFAULT_FT_PAGES` 一直在 `types.ts`
+  里，主进程照样写自己的 `3`；让两侧一致的是把「怎么夹取」也收进同一个模块并显式
+  import，而不是把数字搬个家。
 
 - **160 「effect 依赖了两个稳定的 ref」等于「effect 只跑一次」**：`usePopSpot`
   的 `useLayoutEffect([anchor, card])` 看着像在跟着卡片走，其实 ref 对象从

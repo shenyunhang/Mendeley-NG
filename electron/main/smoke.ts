@@ -13,7 +13,16 @@ import {
   saveAnnotations,
   saveConfig
 } from './store'
-import { PROJECT_URL, type Annotation, type Doc } from '../../shared/types'
+import { DEFAULT_FT_PAGES, PROJECT_URL, type Annotation, type Doc } from '../../shared/types'
+// The page budget is written in the renderer and read in the main process.
+// Both halves used to carry their own copy of the same clamp and their own
+// idea of the default. The rule is shared now, and this run checks that the
+// extraction answers exactly what both old copies answered.
+import {
+  clampFullTextPages,
+  FULL_TEXT_MAX_PAGES,
+  FULL_TEXT_MIN_PAGES
+} from '../../shared/fullTextPages'
 // This one lives with the renderer, but it is a pure function with no DOM in
 // it, and the note it carries is the only data in the app that exists nowhere
 // else — a claim about being able to take your library with you is worth one
@@ -3182,6 +3191,116 @@ export async function runSmoke() {
       'a disposed placement never writes again after the card is gone',
       box.writes === beforeDispose.writes && box.closed === beforeDispose.closed,
       { beforeDispose, writes: box.writes, closed: box.closed }
+    )
+  }
+
+  // The full-text page budget had one clamp in the renderer and another in
+  // the index builder, each with its own literal default.  Pulling the rule
+  // into shared/ is only safe if it answers exactly what both copies used to
+  // answer -- over a wide table of values, not two happy cases.  No sleeping
+  // here: every value is decided on the spot.
+  {
+    const oldRendererRule = (n: number, fallback: number) =>
+      Math.max(1, Math.min(50, Math.floor(n) || fallback))
+    const oldMainRule = (n: number) =>
+      Math.max(1, Math.min(50, Math.floor(Number(n)) || 3))
+
+    // Control.  Two copies that keep their own default really can disagree,
+    // so the extraction removes a live divergence rather than just tidying
+    // up two identical expressions.
+    expect(
+      'the two old copies of the page budget rule really can disagree',
+      oldRendererRule(0, 5) === 5 &&
+        oldMainRule(0) === 3 &&
+        oldRendererRule(0, 5) !== oldMainRule(0),
+      { renderer: oldRendererRule(0, 5), main: oldMainRule(0) }
+    )
+
+    // The equivalence claim.  This is the whole reason the change can be
+    // called behaviour preserving: not one value may move.
+    const cases: unknown[] = [
+      null, undefined, NaN, Infinity, -Infinity, '', '0', '7', '50.9',
+      0, 1, 2.9, 3, 50, 50.9, 51, 999, -1, -999
+    ]
+    for (let n = -60; n <= 110; n++) cases.push(n)
+    const different = cases.filter(
+      (n) =>
+        clampFullTextPages(n) !== oldRendererRule(n as number, DEFAULT_FT_PAGES) ||
+        clampFullTextPages(n) !== oldMainRule(n as number)
+    )
+    expect(
+      'the shared page-budget rule answers exactly what both old copies did',
+      different.length === 0,
+      { checked: cases.length, different }
+    )
+
+    const unusable: unknown[] = [0, null, undefined, NaN, '', '0']
+    expect(
+      'a value that is not a usable page count falls back to the shared default',
+      unusable.every((n) => clampFullTextPages(n) === DEFAULT_FT_PAGES) &&
+        DEFAULT_FT_PAGES === 3,
+      { unusable, answers: unusable.map((n) => clampFullTextPages(n)) }
+    )
+
+    const below: unknown[] = [-1, -999, -Infinity]
+    expect(
+      'a negative budget is held at the lower bound',
+      below.every((n) => clampFullTextPages(n) === FULL_TEXT_MIN_PAGES),
+      { below, answers: below.map((n) => clampFullTextPages(n)) }
+    )
+
+    const above: unknown[] = [51, 999, Infinity]
+    expect(
+      'a budget past the upper bound is held at the upper bound',
+      above.every((n) => clampFullTextPages(n) === FULL_TEXT_MAX_PAGES),
+      { above, answers: above.map((n) => clampFullTextPages(n)) }
+    )
+
+    expect(
+      'the two bounds themselves survive unchanged',
+      FULL_TEXT_MIN_PAGES === 1 &&
+        FULL_TEXT_MAX_PAGES === 50 &&
+        clampFullTextPages(FULL_TEXT_MIN_PAGES) === FULL_TEXT_MIN_PAGES &&
+        clampFullTextPages(FULL_TEXT_MAX_PAGES) === FULL_TEXT_MAX_PAGES,
+      { min: FULL_TEXT_MIN_PAGES, max: FULL_TEXT_MAX_PAGES }
+    )
+
+    expect(
+      'a fractional budget is floored before it is clamped',
+      clampFullTextPages(4.9) === 4 &&
+        clampFullTextPages(2.1) === 2 &&
+        clampFullTextPages(50.9) === FULL_TEXT_MAX_PAGES,
+      {
+        fourNine: clampFullTextPages(4.9),
+        twoOne: clampFullTextPages(2.1),
+        fiftyNine: clampFullTextPages(50.9)
+      }
+    )
+
+    expect(
+      'a numeric string out of a config file is accepted as a budget',
+      clampFullTextPages('7') === 7 && clampFullTextPages('12') === 12,
+      { seven: clampFullTextPages('7'), twelve: clampFullTextPages('12') }
+    )
+
+    let outside = 0
+    let sample = 0
+    for (let n = -1000; n <= 1000; n++) {
+      const v = clampFullTextPages(n + 0.5)
+      sample += 1
+      if (
+        v < FULL_TEXT_MIN_PAGES ||
+        v > FULL_TEXT_MAX_PAGES ||
+        !Number.isInteger(v)
+      ) outside += 1
+    }
+    expect(
+      'the shared default is itself valid and no input escapes the bounds',
+      clampFullTextPages(DEFAULT_FT_PAGES) === DEFAULT_FT_PAGES &&
+        DEFAULT_FT_PAGES >= FULL_TEXT_MIN_PAGES &&
+        DEFAULT_FT_PAGES <= FULL_TEXT_MAX_PAGES &&
+        outside === 0,
+      { sample, outside, min: FULL_TEXT_MIN_PAGES, max: FULL_TEXT_MAX_PAGES }
     )
   }
 

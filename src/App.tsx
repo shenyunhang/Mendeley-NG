@@ -6,7 +6,8 @@ import type {
   SavedView,
   UpdateState
 } from '../shared/types'
-import { DEFAULT_FT_PAGES, DEFAULT_PDF_TEMPLATE } from '../shared/types'
+import { DEFAULT_PDF_TEMPLATE } from '../shared/types'
+import { clampFullTextPages } from '../shared/fullTextPages'
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
 import TrashedDocPanel from './components/TrashedDocPanel'
@@ -1069,7 +1070,7 @@ export default function App() {
    *  the point, and a setting that only takes effect after a restart reads as
    *  a setting that did nothing. */
   const changeFtPages = async (n: number) => {
-    const next = Math.max(1, Math.min(50, Math.floor(n) || DEFAULT_FT_PAGES))
+    const next = clampFullTextPages(n)
     setFtPages(next)
     await window.api.setConfig({ ftPages: next })
     setFtStat(await window.api.ftStatus())

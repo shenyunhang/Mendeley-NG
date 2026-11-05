@@ -5,7 +5,8 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app } from 'electron'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
-import type { Doc, FtHit, FtStatus } from '../../shared/types'
+import { DEFAULT_FT_PAGES, type Doc, type FtHit, type FtStatus } from '../../shared/types'
+import { clampFullTextPages } from '../../shared/fullTextPages'
 
 /**
  * pdf.js loads its worker with a runtime `import()` relative to the module that
@@ -71,13 +72,16 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerSrc()
  * each paper is searchable.  It is a setting now, and changing it drops the
  * index, because one built with a different budget does not describe the
  * same thing as the one about to be searched.
+ *
+ * The starting value and the clamp both come from `shared/`, so this half
+ * cannot quietly answer a config value differently from the Settings panel.
  */
-let pages = 3
+let pages = DEFAULT_FT_PAGES
 
 export const fullTextPages = () => pages
 
 export function setFullTextPages(n: number): boolean {
-  const next = Math.max(1, Math.min(50, Math.floor(Number(n)) || 3))
+  const next = clampFullTextPages(n)
   if (next === pages) return false
   pages = next
   meta = null
