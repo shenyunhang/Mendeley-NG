@@ -1,3 +1,4 @@
+import { clampToRange } from '../../../shared/clamp'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SavedSearch, SavedView } from '../../../shared/types'
 import { DEFAULT_FT_PAGES, DEFAULT_PDF_TEMPLATE } from '../../../shared/types'
@@ -16,6 +17,9 @@ import {
   clampLeft,
   clampRight
 } from '../panes'
+/** The font sizes the toolbar can step between. */
+const MIN_FONT_SIZE = 11
+const MAX_FONT_SIZE = 24
 
 /**
  * Everything that is written to disk and read back at startup.
@@ -119,7 +123,7 @@ export function useConfig() {
   }, [theme])
 
   const bumpFont = useCallback((d: number) => {
-    const next = Math.min(24, Math.max(11, fontRef.current + d))
+    const next = clampToRange(fontRef.current + d, MIN_FONT_SIZE, MAX_FONT_SIZE)
     fontRef.current = next
     setFontSize(next)
     window.api.setConfig({ fontSize: next })

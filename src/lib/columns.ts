@@ -1,3 +1,4 @@
+import { clampToRange } from '../../shared/clamp'
 import type { Doc } from '../../shared/types'
 
 /** The columns the document table can show, in the order they are offered. */
@@ -255,7 +256,7 @@ const MAX_PX = 1000
 /** Bring a dragged width into range.  Stored values go through this too, so a
  *  width from an older build cannot produce a column that cannot be seen. */
 export function clampColWidth(def: ColumnDef, w: number): number {
-  return Math.round(Math.max(def.min ?? MIN_PX, Math.min(MAX_PX, w)))
+  return Math.round(clampToRange(w, def.min ?? MIN_PX, MAX_PX))
 }
 
 /**

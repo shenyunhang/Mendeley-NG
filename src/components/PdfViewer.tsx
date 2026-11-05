@@ -1,3 +1,4 @@
+import { clampToRange } from '../../shared/clamp'
 import { reportFailure, FAILURE } from '../../shared/failures'
 import {
   useCallback,
@@ -285,7 +286,7 @@ export default function PdfViewer({
     const fresh = !!jumpTo && jumped.current !== jumpTo.nonce
     if (fresh) jumped.current = jumpTo!.nonce
     const want = fresh ? jumpTo!.page : resumeRef.current[doc.id] ?? 1
-    const at = Math.min(Math.max(1, want), numPages)
+    const at = clampToRange(want, 1, numPages)
     setPage(at)
     if (continuous && at > 1) requestAnimationFrame(() => scrollToPage(at))
     // A document that opens somewhere other than page one has to say why,
@@ -595,7 +596,7 @@ export default function PdfViewer({
    * reader is.
    */
   const goPage = (n: number) => {
-    const want = Math.min(Math.max(1, n), numPages || 1)
+    const want = clampToRange(n, 1, numPages || 1)
     setPage(want)
     if (continuous) scrollToPage(want)
   }

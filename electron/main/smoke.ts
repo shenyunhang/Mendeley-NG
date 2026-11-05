@@ -1,4 +1,5 @@
 import { FAILURE, ignoreFailure, reportFailure, setFailureSink, failureCounts, resetFailureCounts } from '../../shared/failures'
+import { clampToRange } from '../../shared/clamp'
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -3971,6 +3972,197 @@ export async function runSmoke() {
         /ignoreFailure\(FAILURE\.testPdfCleanup/.test(thisFile) &&
         (thisFile.match(/catch\(\(\) => \{\}\)/g) ?? []).length === 0,
       { reasons: reasons.length }
+    )
+  }
+
+
+  // Six bare clamps (166). The old expressions are copied verbatim below so
+  // the shared rule can be compared value by value, including non-finite
+  // input. Two of them put Math.max on the outside, which agrees with
+  // Math.min(max, Math.max(min, v)) only while min <= max: that inequality
+  // is checked, not assumed.
+  {
+    const oldStep = (from: number, delta: number, len: number): number =>
+      Math.min(len - 1, Math.max(0, from + delta))
+    const oldAt = (want: number, numPages: number): number =>
+      Math.min(Math.max(1, want), numPages)
+    const oldGo = (n: number, numPages: number): number =>
+      Math.min(Math.max(1, n), numPages || 1)
+    const oldCol = (w: number, min: number): number =>
+      Math.round(Math.max(min, Math.min(1000, w)))
+    const oldFont = (cur: number, d: number): number =>
+      Math.min(24, Math.max(11, cur + d))
+    const oldLanes = (cpus: number): number =>
+      Math.max(1, Math.min(4, cpus - 1))
+    const oldClampNum = (v: number, lo: number, hi: number): number =>
+      Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : lo
+
+    const special: number[] = [NaN, Infinity, -Infinity, -0.5, 0, 0.5, 1.9, 999.9]
+    const values: number[] = []
+    for (let v = -60; v <= 110; v += 1) values.push(v)
+    values.push(...special)
+
+    const stepDrift: string[] = []
+    let stepChecked = 0
+    for (let len = 1; len <= 24; len += 1) {
+      for (let from = -3; from <= len + 2; from += 1) {
+        for (let delta = -3; delta <= 3; delta += 1) {
+          const old = oldStep(from, delta, len)
+          const now = clampToRange(from + delta, 0, len - 1)
+          stepChecked += 1
+          if (!Object.is(old, now)) stepDrift.push(`${len}/${from}/${delta}`)
+        }
+      }
+    }
+    expect(
+      'the shared clamp answers the old row-step clamp for every sampled input',
+      stepChecked === 3108 && stepDrift.length === 0,
+      { stepChecked, stepDrift: stepDrift.slice(0, 5) }
+    )
+
+    const pageDrift: string[] = []
+    let pageChecked = 0
+    for (const v of values) {
+      for (let pages = 0; pages <= 24; pages += 1) {
+        const oldOpen = oldAt(v, pages)
+        const nowOpen = clampToRange(v, 1, pages)
+        const oldGoTo = oldGo(v, pages)
+        const nowGoTo = clampToRange(v, 1, pages || 1)
+        pageChecked += 2
+        if (!Object.is(oldOpen, nowOpen)) pageDrift.push(`open/${v}/${pages}`)
+        if (!Object.is(oldGoTo, nowGoTo)) pageDrift.push(`go/${v}/${pages}`)
+      }
+    }
+    expect(
+      'the shared clamp answers both old page clamps for every sampled input',
+      pageChecked > 4000 && pageDrift.length === 0,
+      { pageChecked, pageDrift: pageDrift.slice(0, 5) }
+    )
+
+    const colDrift: string[] = []
+    let colChecked = 0
+    for (const v of values) {
+      for (const floor of [24, 26, 48]) {
+        const old = oldCol(v, floor)
+        const now = Math.round(clampToRange(v, floor, 1000))
+        colChecked += 1
+        if (!Object.is(old, now)) colDrift.push(`${v}/${floor}`)
+      }
+    }
+    expect(
+      'the shared clamp answers the old column-width clamp for every sampled input',
+      colChecked === values.length * 3 && colDrift.length === 0,
+      { colChecked, colDrift: colDrift.slice(0, 5) }
+    )
+
+    const fontDrift: string[] = []
+    let fontChecked = 0
+    for (const cur of values) {
+      for (let d = -20; d <= 20; d += 1) {
+        const old = oldFont(cur, d)
+        const now = clampToRange(cur + d, 11, 24)
+        fontChecked += 1
+        if (!Object.is(old, now)) fontDrift.push(`${cur}/${d}`)
+      }
+    }
+    expect(
+      'the shared clamp answers the old font-size clamp for every sampled input',
+      fontChecked > 7000 && fontDrift.length === 0,
+      { fontChecked, fontDrift: fontDrift.slice(0, 5) }
+    )
+
+    const laneDrift: string[] = []
+    let laneChecked = 0
+    for (let cpus = 0; cpus <= 64; cpus += 1) {
+      const old = oldLanes(cpus)
+      const now = clampToRange(cpus - 1, 1, 4)
+      laneChecked += 1
+      if (!Object.is(old, now)) laneDrift.push(String(cpus))
+    }
+    for (const cpus of [NaN, Infinity, -Infinity]) {
+      const old = oldLanes(cpus)
+      const now = clampToRange(cpus - 1, 1, 4)
+      laneChecked += 1
+      if (!Object.is(old, now)) laneDrift.push(String(cpus))
+    }
+    expect(
+      'the shared clamp answers the old lane count for every cpu count',
+      laneChecked === 68 && laneDrift.length === 0,
+      { laneChecked, laneDrift }
+    )
+
+    // The existing named clamp could not have been reused: it answers non-
+    // finite input with the lower bound, which these six sites never did.
+    expect(
+      'clampNum really cannot stand in for these six expressions',
+      oldClampNum(NaN, 1, 4) === 1 &&
+        Number.isNaN(clampToRange(NaN, 1, 4)) &&
+        oldClampNum(Infinity, 1, 4) === 1 &&
+        clampToRange(Infinity, 1, 4) === 4,
+      {
+        oldNaN: oldClampNum(NaN, 1, 4),
+        newNaN: String(clampToRange(NaN, 1, 4)),
+        oldInf: oldClampNum(Infinity, 1, 4),
+        newInf: clampToRange(Infinity, 1, 4)
+      }
+    )
+
+    // Two old expressions put Math.max on the outside. They agree with the
+    // shared rule only while min <= max; prove the split is real, then prove
+    // every real column floor is on the safe side of it.
+    const root = path.join(__dirname, '../..')
+    const colSrc = fs.readFileSync(path.join(root, 'src/lib/columns.ts'), 'utf8')
+    const floors = [...colSrc.matchAll(/min:\s*(\d+)/g)].map((m) => Number(m[1]))
+    const minPx = Number((colSrc.match(/MIN_PX\s*=\s*(\d+)/) ?? [])[1])
+    const maxPx = Number((colSrc.match(/MAX_PX\s*=\s*(\d+)/) ?? [])[1])
+    expect(
+      'the max-outside form really diverges when the floor exceeds the ceiling',
+      oldCol(20, 1200) === 1200 && clampToRange(20, 1200, 1000) === 1000,
+      { old: oldCol(20, 1200), shared: clampToRange(20, 1200, 1000) }
+    )
+    expect(
+      'every real column floor stays below the shared ceiling',
+      floors.length >= 2 &&
+        [...floors, minPx].every((v) => Number.isInteger(v) && v > 0 && v <= maxPx),
+      { floors, minPx, maxPx }
+    )
+
+    const clampFiles = [
+      'src/App.tsx',
+      'src/components/PdfViewer.tsx',
+      'src/lib/columns.ts',
+      'src/lib/hooks/useConfig.ts',
+      'electron/main/fulltext.ts'
+    ]
+    const joined = clampFiles
+      .map((f) => {
+        const full = path.join(root, f)
+        return fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : ''
+      })
+      .join('\n')
+    const uses = (joined.match(/clampToRange\(/g) ?? []).length
+    const leftoverBare = [
+      /Math\.min\(filtered\.length - 1, Math\.max\(0, from \+ delta\)\)/,
+      /Math\.min\(Math\.max\(1, want\), numPages\)/,
+      /Math\.min\(Math\.max\(1, n\), numPages \|\| 1\)/,
+      /Math\.round\(Math\.max\(def\.min \?\? MIN_PX, Math\.min\(MAX_PX, w\)\)\)/,
+      /Math\.min\(24, Math\.max\(11, fontRef\.current \+ d\)\)/,
+      /Math\.max\(1, Math\.min\(4, \(os\.cpus\(\)\?\.length \?\? 4\) - 1\)\)/
+    ].filter((r) => r.test(joined)).length
+    expect(
+      'all six call sites use the shared clamp with their old bounds',
+      uses === 6 && leftoverBare === 0 && joined.length > 0,
+      { uses, leftoverBare }
+    )
+
+    // 161 left two verbatim copies of the old page-budget rule here as its
+    // control. Rewiring them into the shared clamp would destroy the evidence.
+    const smokeSrc = fs.readFileSync(path.join(root, 'electron/main/smoke.ts'), 'utf8')
+    const controls = (smokeSrc.match(/Math\.max\(1, Math\.min\(50, Math\.floor/g) ?? []).length
+    expect(
+      'the 161 control copies stay bare so the old rule remains comparable',
+      controls === 2,
+      { controls }
     )
   }
 

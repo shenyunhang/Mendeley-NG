@@ -1,3 +1,4 @@
+import { clampToRange } from '../shared/clamp'
 import { ignoreFailure, reportFailure, FAILURE } from '../shared/failures'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -864,7 +865,7 @@ export default function App() {
     if (!filtered.length) return
     const cur = filtered.findIndex((d) => d.id === selId)
     const from = cur < 0 ? (delta > 0 ? -1 : 0) : cur
-    const next = Math.min(filtered.length - 1, Math.max(0, from + delta))
+    const next = clampToRange(from + delta, 0, filtered.length - 1)
     if (next === cur) return
     selectOnly(next)
   }

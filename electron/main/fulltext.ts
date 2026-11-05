@@ -1,3 +1,4 @@
+import { clampToRange } from '../../shared/clamp'
 import { ignoreFailure, FAILURE } from '../../shared/failures'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -8,6 +9,9 @@ import { app } from 'electron'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { DEFAULT_FT_PAGES, type Doc, type FtHit, type FtStatus } from '../../shared/types'
 import { clampFullTextPages } from '../../shared/fullTextPages'
+/** One lane is the floor; four is the ceiling even on a many-core box. */
+const MIN_INDEX_LANES = 1
+const MAX_INDEX_LANES = 4
 
 /**
  * pdf.js loads its worker with a runtime `import()` relative to the module that
@@ -208,7 +212,7 @@ export function ftPending(): number {
  * whole exercise is a text index, and a build that maximises throughput at
  * the cost of the app becoming unresponsive has solved the wrong problem.
  */
-const lanes = () => Math.max(1, Math.min(4, (os.cpus()?.length ?? 4) - 1))
+const lanes = () => clampToRange((os.cpus()?.length ?? 4) - 1, MIN_INDEX_LANES, MAX_INDEX_LANES)
 
 export function initFullText(baseDir: string) {
   dir = baseDir
