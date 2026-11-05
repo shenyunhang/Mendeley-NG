@@ -1,3 +1,4 @@
+import { ignoreFailure, reportFailure, FAILURE } from '../shared/failures'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   Annotation,
@@ -243,8 +244,8 @@ export default function App() {
   }>({ step: () => {}, edge: () => {}, open: () => {}, del: () => {} })
 
   useEffect(() => {
-    window.api.loadNotes().then((n) => setNoteMap(n ?? {})).catch(() => {})
-    window.api.loadAnnotations().then((a) => setAnns(a ?? [])).catch(() => {})
+    window.api.loadNotes().then((n) => setNoteMap(n ?? {})).catch((e) => ignoreFailure(FAILURE.notesOptional, e))
+    window.api.loadAnnotations().then((a) => setAnns(a ?? [])).catch((e) => ignoreFailure(FAILURE.annotationCacheOptional, e))
     const offUpd = window.api.onUpdateState(setUpd)
     return () => {
       offUpd()
@@ -1167,8 +1168,8 @@ export default function App() {
     if (n) {
       pushUndo(`把 ${n} 条${verb}文件夹`, async () => {
         for (const id of moved) {
-          if (op === 'add') await window.api.removeFromFolder(folderId, id).catch(() => {})
-          else await window.api.addToFolder(folderId, id).catch(() => {})
+          if (op === 'add') await window.api.removeFromFolder(folderId, id).catch((e) => reportFailure(FAILURE.undoFolderRemove, e))
+          else await window.api.addToFolder(folderId, id).catch((e) => reportFailure(FAILURE.undoFolderAdd, e))
         }
         setLib((l) =>
           l
@@ -1370,7 +1371,7 @@ export default function App() {
     // the cloud copy is deleted after the local one is safely written, and a
     // failure there leaves a stray cloud highlight rather than a lost local one
     if (gone?.remoteId) {
-      await window.api.deleteRemoteAnnotation(gone.remoteId).catch(() => {})
+      await window.api.deleteRemoteAnnotation(gone.remoteId).catch((e) => reportFailure(FAILURE.cloudHighlightRemoval, e))
     }
   }
 

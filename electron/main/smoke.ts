@@ -1,3 +1,4 @@
+import { FAILURE, ignoreFailure, reportFailure, setFailureSink, failureCounts, resetFailureCounts } from '../../shared/failures'
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -3817,6 +3818,162 @@ export async function runSmoke() {
     )
   }
 
+
+  // Twelve empty catches used to hide twelve different decisions (165). An
+  // empty catch says nothing: it cannot be told apart from a mistake, nobody
+  // can say why the failure was acceptable, and there is no way to ask later
+  // whether it ever happened. The split is a decision, not a mechanical
+  // rewrite -- cleanup and optional startup reads are expected to fail, while
+  // a side effect of something the reader did deserves a visible line.
+  {
+    const reasons = Object.values(FAILURE)
+    expect(
+      'the failure reasons are a fixed named set with no invented ones',
+      reasons.length === 11 &&
+        new Set(reasons).size === reasons.length &&
+        reasons.every((r) => typeof r === 'string' && r.length > 0),
+      { count: reasons.length, reasons }
+    )
+    expect(
+      'no failure reason can be mistaken for a renderer error',
+      reasons.every((r) => !/error/i.test(r)),
+      { matching: reasons.filter((r) => /error/i.test(r)) }
+    )
+
+    const seen: { reason: string; kind: string }[] = []
+    resetFailureCounts()
+    setFailureSink((reason, kind) => seen.push({ reason, kind }))
+    ignoreFailure(FAILURE.appVersionCosmetic, new Error('cosmetic'))
+    const afterIgnore = failureCounts()
+    expect(
+      'an ignored failure is counted but never reported',
+      afterIgnore[FAILURE.appVersionCosmetic]?.ignored === 1 &&
+        afterIgnore[FAILURE.appVersionCosmetic]?.reported === 0 &&
+        seen.length === 0,
+      { afterIgnore, seen }
+    )
+
+    reportFailure(FAILURE.readingPosition, new Error('disk is full'))
+    const afterReport = failureCounts()
+    expect(
+      'a reported failure reaches the sink and is counted',
+      seen.length === 1 &&
+        seen[0].reason === FAILURE.readingPosition &&
+        seen[0].kind === 'reported' &&
+        afterReport[FAILURE.readingPosition]?.reported === 1,
+      { seen, afterReport }
+    )
+
+    // The default line is the one deliberately observable change. It must not
+    // contain the word the smoke run collects as a renderer error.
+    const originalWarn = console.warn
+    const warned: string[] = []
+    setFailureSink(null)
+    console.warn = (...args: Parameters<typeof console.warn>) => {
+      warned.push(args.map(String).join(' '))
+    }
+    let defaultOk = false
+    try {
+      reportFailure(FAILURE.continuousPreference)
+      defaultOk =
+        warned.length === 1 &&
+        warned[0] === '[mendeley-ng] ' + FAILURE.continuousPreference &&
+        !/error/i.test(warned[0])
+    } finally {
+      console.warn = originalWarn
+      setFailureSink(null)
+    }
+    expect(
+      'the default line names the failure without shouting error',
+      defaultOk,
+      { warned }
+    )
+
+    const snapshot = failureCounts()
+    ignoreFailure(FAILURE.workerCleanup)
+    expect(
+      'failureCounts is a snapshot, not a live view',
+      snapshot[FAILURE.workerCleanup] === undefined &&
+        (failureCounts()[FAILURE.workerCleanup]?.ignored ?? 0) === 1,
+      { snapshot }
+    )
+    resetFailureCounts()
+    expect(
+      'resetFailureCounts clears both tallies',
+      Object.keys(failureCounts()).length === 0,
+      { after: failureCounts() }
+    )
+
+    // Value checks cannot prove the call sites were wired (164). Read back
+    // the five product files and count the named doors actually used; the
+    // twelfth site lives in this file and is checked separately.
+    const failureFiles = [
+      'src/App.tsx',
+      'src/components/PdfViewer.tsx',
+      'src/lib/hooks/useLibrary.ts',
+      'src/lib/hooks/usePdfAnnotations.ts',
+      'electron/main/fulltext.ts'
+    ]
+    const root = path.join(__dirname, '../..')
+    const texts: Record<string, string | null> = {}
+    for (const f of failureFiles) {
+      const full = path.join(root, f)
+      texts[f] = fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : null
+    }
+    expect(
+      'the five product files can be read from this checkout',
+      failureFiles.every((f) => texts[f] !== null),
+      { missing: failureFiles.filter((f) => texts[f] === null) }
+    )
+
+    const body = failureFiles.map((f) => texts[f] ?? '').join('\n')
+    const swallowed = body.match(/catch\(\(\) => \{\}\)/g) ?? []
+    const ignores = [...body.matchAll(/ignoreFailure\(FAILURE\.([A-Za-z]+)/g)].map((m) => m[1])
+    const reports = [...body.matchAll(/reportFailure\(FAILURE\.([A-Za-z]+)/g)].map((m) => m[1])
+    expect(
+      'all eleven product catches go through a named door',
+      swallowed.length === 0 && ignores.length === 5 && reports.length === 6,
+      { swallowed: swallowed.length, ignores, reports }
+    )
+
+    const IGNORE_KEYS = [
+      'notesOptional',
+      'annotationCacheOptional',
+      'appVersionCosmetic',
+      'workerCleanupTimedOut',
+      'workerCleanup',
+      'testPdfCleanup'
+    ]
+    const REPORT_KEYS = [
+      'undoFolderRemove',
+      'undoFolderAdd',
+      'cloudHighlightRemoval',
+      'continuousPreference',
+      'readingPosition'
+    ]
+    expect(
+      'the ignore/report split follows the agreed strategy',
+      ignores.every((k) => IGNORE_KEYS.includes(k)) &&
+        reports.every((k) => REPORT_KEYS.includes(k)),
+      { ignores, reports }
+    )
+
+    const thisFile = fs.readFileSync(path.join(root, 'electron/main/smoke.ts'), 'utf8')
+    const allText = body + '\n' + thisFile
+    expect(
+      'every named reason is used and the twelfth cleanup is wired',
+      reasons.every((r) => {
+        const key = Object.keys(FAILURE).find(
+          (k) => FAILURE[k as keyof typeof FAILURE] === r
+        )
+        return !!key && allText.includes('FAILURE.' + key)
+      }) &&
+        /ignoreFailure\(FAILURE\.testPdfCleanup/.test(thisFile) &&
+        (thisFile.match(/catch\(\(\) => \{\}\)/g) ?? []).length === 0,
+      { reasons: reasons.length }
+    )
+  }
+
   // The way out as one action.  Four exports the reader has to know about and
   // run one after another is not an answer to "can I leave", so the folder
   // gets a note on top naming what is in it — including the two kinds nothing
@@ -4674,7 +4831,7 @@ export async function runSmoke() {
       }
       return on ? { refPage, on, entries: [...entries.values()] } : null
     } finally {
-      await pdf.destroy().catch(() => {})
+      await pdf.destroy().catch((e) => ignoreFailure(FAILURE.testPdfCleanup, e))
     }
   }
 

@@ -1,3 +1,4 @@
+import { reportFailure, FAILURE } from '../../shared/failures'
 import {
   useCallback,
   useEffect,
@@ -140,7 +141,7 @@ export default function PdfViewer({
   const toggleContinuous = () => {
     setContinuous((v) => {
       const next = !v
-      void window.api.setConfig({ pdfContinuous: next }).catch(() => {})
+      void window.api.setConfig({ pdfContinuous: next }).catch((e) => reportFailure(FAILURE.continuousPreference, e))
       return next
     })
   }
@@ -310,7 +311,7 @@ export default function PdfViewer({
       const p = pageRef.current
       if (p <= 1) return
       resumeRef.current[id] = p
-      void window.api.setReading(id, p).catch(() => {})
+      void window.api.setReading(id, p).catch((e) => reportFailure(FAILURE.readingPosition, e))
     }, READING_POSITION_PERSIST_DEBOUNCE_MS)
     return () => clearTimeout(t)
   }, [page, doc.id, doc.localPdf, numPages, resumeReady])

@@ -1,3 +1,4 @@
+import { ignoreFailure, FAILURE } from '../../../shared/failures'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Folder, Library, SyncStatus } from '../../../shared/types'
 import { describeSyncFailure } from '../offline'
@@ -35,7 +36,7 @@ export function useLibrary(syncOnStart: boolean, onError: (message: string | nul
         setFolders(r.folders ?? [])
       }
     })
-    window.api.appVersion().then(setVersion).catch(() => {})
+    window.api.appVersion().then(setVersion).catch((e) => ignoreFailure(FAILURE.appVersionCosmetic, e))
     window.api.hasToken().then(setHasToken).catch(() => setHasToken(false))
     return window.api.onSyncStatus(setStatus)
   }, [])

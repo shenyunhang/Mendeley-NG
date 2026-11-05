@@ -1,3 +1,4 @@
+import { reportFailure, FAILURE } from '../../../shared/failures'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { HIGHLIGHT_UNDO_WINDOW_MS } from '../timing'
 import type { Annotation, PdfPos } from '../../../shared/types'
@@ -199,7 +200,7 @@ export function usePdfAnnotations(o: {
     // after the local copy is safely written, so a failure here leaves a stray
     // cloud highlight rather than a lost local one
     if (gone?.remoteId) {
-      await window.api.deleteRemoteAnnotation(gone.remoteId).catch(() => {})
+      await window.api.deleteRemoteAnnotation(gone.remoteId).catch((e) => reportFailure(FAILURE.cloudHighlightRemoval, e))
     }
   }
 

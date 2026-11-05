@@ -1,3 +1,4 @@
+import { ignoreFailure, FAILURE } from '../../shared/failures'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
@@ -451,7 +452,7 @@ async function extract(file: string, n: number): Promise<Got> {
           // destroying the document is what actually stops the worker thread.
           // Only resolving the race would abandon the promise and leave the
           // parse burning a core for as long as it liked.
-          void box.doc?.destroy().catch(() => {})
+          void box.doc?.destroy().catch((e) => ignoreFailure(FAILURE.workerCleanupTimedOut, e))
           if (failures++ < 3) console.warn('[fulltext] timed out', file)
           resolve(null)
         }, DOC_TIMEOUT_MS)
@@ -480,7 +481,7 @@ async function extract(file: string, n: number): Promise<Got> {
     return { text: '', bounds: [], why: 'PDF 打不开', err }
   } finally {
     if (timer) clearTimeout(timer)
-    await box.doc?.destroy().catch(() => {})
+    await box.doc?.destroy().catch((e) => ignoreFailure(FAILURE.workerCleanup, e))
   }
 }
 
