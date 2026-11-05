@@ -11,7 +11,7 @@
 **还没做的：无。** 第 9.1 的待办已经清空，第 9 节剩下的是竞品对照快照
 （9.2）、"差距可以接受，先不做"（9.3）和"明确不做"（9.4）。
 
-编号 1–157 全部已落地，按版本记在第 10 节。
+编号 1–158 全部已落地，按版本记在第 10 节。
 
 **改完代码必做的两件事**：
 
@@ -27,7 +27,7 @@
    一轮日志的 PASS 数会少几条（有 4 条是分支断言，只在满足数据条件时才跑，见 145 / 146）。
    之前这里写的 342 是错的——用同一把尺子量 git 历史：147 版 337、148 版 344、
    149 / 150 版 344、151 版 349、152 版 358、153 版 366、154 版 375、
-   155 版 383、156 版 391、157 版 392，148 那一行记的「336 → 342」也少算了两条。
+   155 版 383、156 版 391、157 版 392、158 版仍 392，148 那一行记的「336 → 342」也少算了两条。
    **计数用 `grep -cE "^[[:space:]]*expect\(" electron/main/smoke.ts`，不要凭印象写**。
 
 **往 `build` 里加东西时，同一个动作要问一遍 `dist` 要不要**：
@@ -185,6 +185,7 @@ src/                        renderer
     usePaneWidths   三栏的拖拽与落盘：整块自包含，只向 useConfig 借 setter
     useExport.ts    把库写成文件（书目/笔记/标注/带走整个库）：对库只读，见 150
     useFlashMessage 短消息：一个待触发的清除，卸载时收干净，见 151
+    useCiteCard    引文卡片：显示、定位、悬停延时、翻页关闭，见 158
   lib/flash.ts      与 React 无关的一个待触发清除，泛化到任意 payload，见 151 / 156
   lib/latestSearch.ts 只答当前那一个词的防抖调度器，时钟与请求可注入，见 152
   lib/documentScope.ts 按文献 id 给状态贴标签、给读盘加代次，不依赖 React，见 153
@@ -928,7 +929,7 @@ Word 插件、分组协作、通用文献管理器的功能军备竞赛。
 | 93 | **两套把手会打架** | 宽度把手在列头右缘，它的 mousedown 冒泡到列头就同时启动了"换位置" | 把手里 `e.stopPropagation()` |
 | 94 | **落点位置说不清** | 高亮某一列回答的是"哪一列"，而读者问的是"插在哪两列之间" | 在**间隙**上画一条 2px 竖线，按指针在列中线的哪一侧决定插到哪 |
 
-### 10.3 95–157（2026-10-31 起）
+### 10.3 95–158（2026-10-31 起）
 
 先盘了一遍现状，把"还没做"的列出来。编号接着 9.2l 的 94 往下走。
 **已做过的不再重复**（错误条可关闭、Esc 关浮层、主题、幽灵文献、文件夹按名排、
@@ -973,6 +974,7 @@ SetupGuide、批量进度、拖列宽、拖列换顺序、添加时间默认列�
 | 105 | **批量下载 PDF 没有**：只能一篇一篇点阅读器里那个按钮 | 批量栏加「下载 PDF（N）」，N 是选中里"云端有、本地没有"的篇数（为 0 就禁用并说明）；**三条并发**（S3 预签名 URL 并发高了直接被拒，两百条一起发只会失败更多）；有进度、可停止、失败只赔那一篇；路径**成批写回**而不是一篇一次——一次写回就要重跑一遍筛选和排序——**已落地（v0.1.49）** | 9.2c-41 / 9.2d-41「批量下载 PDF 没有」 |
 | 108 | **启动不会自动同步**：磁盘上的库只是云端的一份缓存，而"只在你记得点「同步云端」时才刷新"的缓存，落后的正好是另一台机器上干的那些活 | 有 token 时启动后自己拉一次**增量**（全量五六千篇久到会被察觉，而启动这个位置不需要它；删除只有全量能发现，那是按钮的活）；**静默**——失败 `.catch` 掉不出声（每次启动都因为恰好离线而弹一条红，比一份晚几小时的列表更糟）；`startedSync` ref 保证一次启动只拉一次；设置 → 同步 → 「打开软件时自动同步一次」可关（`syncOnStart`，默认开）——**已落地（v0.1.52）** | 9.2c-38 / 9.2d-38「启动不会自动同步」 |
 | 127 | **PDF 里的链接点不动**：参考文献、图表的交叉引用、正文里的 DOI / arXiv 链接，画在纸上却只是纸——内部章节跳不了，外部地址也开不了。1.19.8 里它们是能点的 | 读 pdf.js 的 link annotation（`getAnnotations({intent:'display'})` 里的 `subtype:'Link'`），画一层透明的 `<a>`：内部目标（可能是字符串名字，要 `getDestination` + `getPageIndex`）解析成页码走 `reveal`，外部地址过一遍**协议白名单**（`http:` / `https:` / `mailto:`，其余丢弃——PDF 是别人写的文件，它的链接是数据不是代码）。**默认不画框**——一篇论文几十个链接，满屏蓝框比没有链接更糟——只在悬停时给一圈描边和手型光标，外部链接加个 ↗；**开着拖选高亮时整层让位**（`pointer-events: none`），否则画高亮的每一次拖动都可能变成一次跳转。两处性能是量出来才做的：一篇十二页的论文有近千个锚点，**按页 memo 掉**（元素引用不变 React 整棵跳过重建），否则搜索框每敲一键都要重造它们——实测按键 194ms → 42ms；连续模式**攒够一屏再写一次 state**，一页一次的话五十页就是五十次全量重渲染。冒烟加三条：**哪篇有链接是问出来的不是写死的**（主进程已有 pdf.js，扫出首页确实带链接的那篇再按标题搜过去），内部链接点了 `1 → 4`，外部链接走打桩的 `shell:openExternal` 收到且只收到一条 `https://orcid.org/…`（不能真开浏览器）——**已落地（v0.1.56）** | 2026-11-02「pdf里面的超链接无法点击 内部章节跳转和外部网页跳转都不能用」 |
+| 158 | **没有能坐实的用户可见错误，按规则转重构；r1 又撞见 157 没修干净的那半场假故障**：体检把 `setTimeout` / `addEventListener` / 在飞 `.then` 过了一遍——`usePdfAnnotations` 那个 8 秒 timer 有 cleanup，且 153 已让 `justMade` 带 docId 标签、换论文时 effect 必然重跑；App 四处 timer 都有 cleanup。**确实识别到一处缺口**：`usePopSpot` 明写「Measured again when the window changes size」，五个调用者都带 resize 监听，只有引文卡片是手搓的 `useLayoutEffect`、只量一次不带监听，窗口变化时 `position: fixed` 的卡片不会跟着走。但**这一轮刻意不修**：纯搬家和行为修复混在一个 item 里，绿了就分不清是搬家没错还是修复生效，留单独一轮修并加确定性断言。于是按「一直不断优化 如果不能优化就重构」转重构 | ①新建 `src/lib/hooks/useCiteCard.ts`，把引文卡片整块收走：`cite` / `citeSpot` 两个 state、`FlashMessage<CiteCard>` 控制器、`show` / `drop` / `keep` / `close` 四个动作、测量的 `useLayoutEffect`、翻页或换文献时关闭、卸载 `dispose`；导出 `CiteItem` / `CiteCard` 两个类型；hook 只借 `{ page, docId }` 两个标量，**不需要知道参考文献清单、库、页码或热区怎么画**。**刻意留在 `PdfViewer`**：`entriesRef` / `refDocRef` 把 `[3]` 翻成条目（要清单和 `refDoc`）、`citeBuilt` / `citeLayers` / `citeMarks` 按页缓存热区 JSX（跟 `marks` / `refPage` / `revealRef` / `marking` 强耦合）——那是「页」这一层的事，不是「卡片」这一层。仍是 149 的判据：不是这段长不长，是这段回答的是哪个问题。②**纯搬家的验收判据是渲染层零改动**：解构时把 hook 返回的 `cite` / `spot` / `cardRef` / `drop` / `keep` / `close` 别名成 JSX 里原有的 `cite` / `citeSpot` / `citeCard` / `dropCite` / `keepCite` / `closeCite`，于是 `git diff` 里那段卡片 JSX 一个字没动，只有 `showCite` 的末尾从 `citeTimer.current?.show({items, anchor})` 换成 `showCard(items, rect)`；`PdfViewer` 净减 34 行、少 3 个 import（新 hook 87 行自带注释）；effect 仍在原调用点注册，相对顺序不变。③**r1 暴露 157 的残留**：`word spans ready before find 66` 和前提断言都 PASS，点开查找框后却仍是 `find word candidates []`、query `""`、6 条 find 断言 detail 全 `{}`。根因不是 pdf.js 慢，是 157 把「等 span」放在**按 查找 之前**，而按下去会重绘文本层，这段又紧接连续模式测试再重绘一次——**前提证明的不是取词那一刻**。改成对**取词表达式本身**用 `until` 等候选非空（12s 上限），断言对象换成 `findWords`，detail 带 `candidates` / `occurrences`；断言名和总数不变（392），**后续断言一条也不跳过**（146 纪律）。④**不新增断言**：138 已有的三条界面断言（`a citation in the body offers the entry it names`、`a citation stands down while highlighting is on`、`the reference list itself is not ringed in citations`）真实覆盖 `.cite-hot` / `.cite-pop` / `.cite-row`，纯搬家没有新规则可测。**验证**：`typecheck` / `build` 通过；r1 11 条红（5 条行菜单 `{"open":0}` 是 11.11 时序噪声，同一份构建里 `row menu on a row without a pdf` 仍是 `{"n":8,"reveal":true}`；6 条 find 是**已坐实并修掉的冒烟缺陷**，不要像 156 那样把两类红笼统归成噪声）、r2 **EXIT=0 / 388 PASS / 0 FAIL**（取词 4 候选 7 次、query `Textual`）、r3 **EXIT=0 / 388 PASS / 0 FAIL**（query `DetCLIP…`），两轮里三条引文卡片界面断言都真的跑了。**已落地（v0.1.85）** | 2026-11-05「一直不断优化 如果不能优化就重构」 |
 | 157 | **冒烟自己会制造一场看不懂的假故障**：find 的查询词取自当前页 `.tx-layer span.tx`，而「回到第 1 页」之后只固定睡 1500ms 就去读词。机器忙、pdf.js 还没画文本层时读到 `find word candidates []`、query 为 `""`，接着 `find reports hits` 等 6 条断言一起红、detail 全是 `{}`——**日志完全没说根因是取词失败还是查找坏了**。156 的 r1 正好撞上（那轮还因云端全量同步跑了 18m35s）。146 修过「只取第一个词」，没修「一个词都没有」 | 在 1500ms 这个**地板**之后，用 `until` 等 `.tx-layer span.tx` 里长度 ≥4 的词真的出现（上限 12s），并新增一条直白断言 `the page has words to look for before find is asked`，把 span 数写进日志。文本层没画出来时红的是一条说人话的断言，不是六条含糊的；**刻意不跳过后续断言**——「没跑的断言看起来和通过的一模一样」（146 的纪律），宁可一起红也不静默略过。断言 391 → 392。**验证**：`typecheck` / `build` 通过；r1 有 2 条红（文件夹行菜单 + `prefetch serves a step back`，全是 11.11 记过的时序类）、r2 **EXIT=0 / 388 PASS / 0 FAIL**；新断言两轮都真的跑了（`wordSpans: 62` / `60`），红点一轮即消失 → 机器噪声。**已落地（v0.1.84）** | 2026-11-05「一直不断优化 如果不能优化就重构」 |
 | 156 | **重构，并更正上一轮一句说错的诊断**：155 收口时写「`PdfViewer.hideCite` 没有卸载清理」——**这句是错的**，`useEffect(() => () => keepCite(), [])` 一直都在。真实情况只是：引文卡片的 260ms 隐藏 timer 是阅读器里最后一处自己管 `setTimeout / clearTimeout` 的地方，而滚动、翻页、点「打开」三处 `setCite(null)` 都绕过它，卡片已经关掉、timer 还会再写一次 null；151 写好的「一个待触发清除」只认字符串，用不上。**此时已经没有能坐实的用户可见错误**（React 18 下那次多余写入无效果），所以按用户规则**转重构**，而不是硬造一个 bug 来修 | ①`src/lib/flash.ts` 泛化成 `createFlashMessage<T = string>`，新增 `keep()`（只取消、不渲染）与 `hold(ms)`（保留现值、只安排一次清除）——悬停卡片的「显示」和「安排退出」是分开发生的，状态栏不是；默认 `string` 让 151 的调用点一个字都不用改。②`useFlashMessage` 显式写 `<string>`，避免从 `Dispatch<SetStateAction<string\|null>>` 反推出带 updater 的怪类型。③`PdfViewer` 把 `hideCite` ref 换成 `FlashMessage<CiteCard>` 控制器：`dropCite → hold(260)`、`keepCite → keep()`、三处 `setCite(null) → clear()`、`showCite` 走 `show()`、卸载 `dispose()`；**行为零变化**，唯一差别是 `clear()` 会顺手取消那个待触发的 null 写入。**冒烟 8 条零 sleep**：假时钟手动推进，1 条是**对照实验**（旧 timer 在卡片已关后确实又写一次 null），其余覆盖对象 payload、`hold` 不留两个待触发清除、`keep` 取消退出、离开后仍会自己关、`clear` 不再有第二次写入、卸载不渲染、泛型 `flash` 仍会自清。断言 383 → 391。**验证**：`typecheck` / `build` 通过；r1 6 条 find 红（`find word candidates []`，取词为空，同一根因）、r2 5 条行菜单红、r3 1 条文件夹行菜单红、r4 **EXIT=0 / 387 PASS / 0 FAIL**；8 条新断言四轮全跑，r1 的 find 簇在 r2 全部恢复、**r3 那条菜单在 r1 同一个二进制下是 PASS（9 项）**，所以它是右键时序噪声而不是回归——**红点移动且同一份构建内有正例 → 11.11 噪声，不做回退验证**。r1 / r2 各耗时 18m35s / 16m24s，都卡在开头 `sync(true)` 的云端全量同步，不是被测代码；首轮还被 `ANOTHER INSTANCE` 拦下，按用户早先的选择关掉 4 个残留 Mendeley NG 进程后重跑。**已落地（v0.1.83）** | 2026-11-05「一直不断优化 如果不能优化就重构」 |
 | 155 | **换一篇论文，上一篇 PDF 的链接和引文标记会写进新论文**：`usePdfLinks` / `usePdfRefs` 的连续模式遍历有 `dead` 标志、`findRefList` 也有，但单页模式的 `ensure()` 是 `busy.add(n); await linksOf / marksOnPage; setLinks / setMarks(...); finally busy.delete(n)`，**没有任何代次**。`docKey` 变化时 effect 只 `setLinks({})` / `setMarks({})` 加 `busy.clear()`，清 state 停不了已经发出的 promise，于是旧 PDF 第 n 页的链接一回来就写进新论文的第 n 页——点它会跳错页，或者打开上一篇里的外部地址。**顺带查出同源的一处**：`known.current = links` 是渲染时赋值的，而 `docKey` effect 和 `ensure` effect 在**同一次 commit** 里先后跑，后者看到的还是上一篇的页码表，新论文那些页会被当成"已经取过"直接跳过 | ①新建 `src/lib/lazyPages.ts`：`createLazyPages` 用一整个文献代次管住单页懒读，`read` 捕获 `generation`，只有 `mine === generation` 才交付；`invalidate()` 只递增代次并清空自己的页认领表、**不写 state**；失败用 `fallback` 空数组作答；`isBusy` 防同一页重复读。②两个 hook 的 `ensure` 把 `docKey` 一起交给 `read`，`docKey` effect 里 `invalidate()`，并且**立刻** `known.current = {}`、不再等 `setLinks({})` 的下一次渲染；连续模式仍用自己的 `dead` 与 busy 表，两条路径互不重叠，只在遍历时多问一句 `isBusy`。③`tsconfig.node.json` include 加 `src/lib/lazyPages.ts`。**冒烟 8 条零 sleep**：受控 Promise 手动 resolve / reject，1 条是**对照实验**（旧 `ensure` 在清空 state 后确实把旧论文那一页写回来），其余覆盖同页只认领一次、不重复读、当前论文的读取带自己的 doc、换论文不写 state 并释放页认领、在飞读取不能写、新论文能读旧论文留下的那一页、读盘失败落空数组而非上篇内容。断言 375 → 383。**验证**：`typecheck` / `build` 通过；r1 EXIT=0 / 379 PASS / 0 FAIL，r2 有 4 条行菜单 `{"open":0}`、r3 又 EXIT=0 / 379 PASS / 0 FAIL，8 条新断言三轮全跑；红点出现一轮即消失，按 11.11 判为机器噪声、不做回退验证。**已落地（v0.1.82）** | 2026-11-05「一直不断优化 如果不能优化就重构」 |
@@ -1932,6 +1934,18 @@ demo 假设你知道，产品在你需要的时候告诉你。
   没跑的断言看起来和通过的一模一样（146），宁可一起红，也不静默略过。
   同一条道理适用于所有「先准备数据、再断言」的段落：前提要被断言，
   结论不能被跳过。
+
+- **158 前提要贴在被测对象身边，别隔着一次会改 DOM 的动作**：157 用 `until` 等
+  `.tx-layer span.tx` 出现，等待却放在按「查找」**之前**；按下查找框会重绘文本层，
+  这一段又紧接连续模式测试再重绘一次，于是 158 r1 出现「前提 66 个 span PASS、
+  取词却是 `[]`、query `""`、6 条断言 detail 全 `{}`」的怪事。**绿灯的前提如果不在
+  读取那一刻成立，等于没断言**；改成对取词表达式本身 `until`，断言对象就是真正
+  喂给 find 的那个数组。另一半是抽 hook 的判据：把返回值别名成 JSX 里原有的名字，
+  diff 里渲染层一行不动，才敢说这是纯搬家——**纯搬家的验收是渲染层零改动，不是
+  行数变少**。还有一条：识别出 `usePopSpot` 的 resize 缺口却刻意没顺手修，
+  **重构轮里掺进一个行为修复，绿了就分不清是搬家没错还是修复生效**，留单独一轮做。
+  同一轮里也要把两类红分开记：行菜单是 11.11 噪声，find 是已坐实并修掉的缺陷，
+  别像 156 那样把上一轮的话照抄成「全是噪声」。
 
 - **156 转重构之前，先复核自己上一轮写下的诊断**：155 收口时凭印象写了
   「`hideCite` 没有卸载清理」，156 动手前才发现 `PdfViewer.tsx` 一直有

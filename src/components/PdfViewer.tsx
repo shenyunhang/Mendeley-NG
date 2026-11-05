@@ -30,7 +30,6 @@ import {
   type ZoomMode
 } from '../lib/pdfgeom'
 import { PrefetchCache } from '../lib/pdfcache'
-import { createFlashMessage, type FlashMessage } from '../lib/flash'
 import { selectionRects, textInRect } from '../lib/pdfsel'
 import { drawTextLayer } from '../lib/pdftext'
 import type { LinkBox } from '../lib/pdflinks'
@@ -39,8 +38,8 @@ import { usePdfFind } from '../lib/hooks/usePdfFind'
 import { usePdfLinks } from '../lib/hooks/usePdfLinks'
 import { usePdfRefs } from '../lib/hooks/usePdfRefs'
 import { usePdfAnnotations } from '../lib/hooks/usePdfAnnotations'
+import { useCiteCard } from '../lib/hooks/useCiteCard'
 import type { CiteMark } from '../lib/pdfrefs'
-import { spotFor, type Spot } from '../lib/popspot'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -966,33 +965,19 @@ export default function PdfViewer({
   const refDocRef = useRef(refDoc)
   refDocRef.current = refDoc
 
-  /** One entry under the pointer: its number, its text, and the library's
-   *  copy of it if there is one. */
-  type CiteCard = {
-    items: { n: number; text: string; doc: { id: string; title?: string } | null }[]
-    anchor: DOMRect
-  }
-  const [cite, setCite] = useState<CiteCard | null>(null)
-  const citeCard = useRef<HTMLDivElement>(null)
-  const [citeSpot, setCiteSpot] = useState<Spot | null>(null)
-  /**
-   * The pointer leaving the marker hides the card, but not at once: the card
-   * has to be reachable, because "打开" is on it.  Without the wait, moving
-   * towards the button closes the thing the button is on.
-   *
-   * This is the one-pending-clear controller the status lines use (151),
-   * generalised to a card instead of a string. It replaces the last
-   * hand-rolled timer in the reader: `clear` also cancels the pending hide,
-   * so a card dismissed by scrolling or by turning the page no longer gets a
-   * second, useless `setCite(null)` 260ms later.
-   */
-  const citeTimer = useRef<FlashMessage<CiteCard> | null>(null)
-  if (citeTimer.current === null) {
-    citeTimer.current = createFlashMessage<CiteCard>(setCite)
-  }
-  const dropCite = () => citeTimer.current?.hold(260)
-  const keepCite = () => citeTimer.current?.keep()
-  const closeCite = () => citeTimer.current?.clear()
+  /** The card's showing, placing and closing is one cluster and lives in
+   *  `useCiteCard`.  What is left here is turning a marker into an entry —
+   *  which needs this page's reference list and the library's own copy —
+   *  and building the hotspots those entries hang off. */
+  const {
+    cite,
+    spot: citeSpot,
+    cardRef: citeCard,
+    show: showCard,
+    drop: dropCite,
+    keep: keepCite,
+    close: closeCite
+  } = useCiteCard({ page, docId: doc.id })
 
   const showCite = (m: CiteMark, el: HTMLElement) => {
     const ents = entriesRef.current
@@ -1006,27 +991,8 @@ export default function PdfViewer({
         return { ...x, doc: d ? { id: d.id, title: d.title } : null }
       })
     if (!items.length) return
-    citeTimer.current?.show({ items, anchor: el.getBoundingClientRect() })
+    showCard(items, el.getBoundingClientRect())
   }
-
-  // the card is measured after it is in the document and before it is painted,
-  // so it is never shown at the corner it first lands in
-  useLayoutEffect(() => {
-    if (!cite || !citeCard.current) {
-      setCiteSpot(null)
-      return
-    }
-    setCiteSpot(spotFor(cite.anchor, citeCard.current.getBoundingClientRect()))
-  }, [cite])
-
-  // a card belongs to the marker it was opened for, and that marker is on a
-  // page that has since been left
-  useEffect(() => {
-    closeCite()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, doc.id])
-
-  useEffect(() => () => citeTimer.current?.dispose(), [])
 
   // Built once per page, for the same reason the links are: a column holding
   // every marker in a fifty-page paper is not to be rebuilt on a keystroke.

@@ -4691,21 +4691,6 @@ export async function runSmoke() {
       + `set.call(i,"1");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
   )
   await new Promise((r) => setTimeout(r, 1500))
-  // That sleep is only a floor, not a guarantee. On a busy machine pdf.js had
-  // not drawn a single usable span when the word was picked: `find word
-  // candidates []`, query "", and six assertions went red saying nothing at
-  // all about find (156 r1). Wait for the words themselves, and if they never
-  // arrive say so once, plainly, instead of six times and obliquely.
-  const WORD_SPANS =
-    'String([...document.querySelectorAll(".tx-layer span.tx")]'
-    + '.filter(s=>(s.textContent||"").trim().length>=4).length)'
-  const wordSpans = Number(
-    (await until(WORD_SPANS, (v) => Number(v) > 0, 12000)) ?? 0
-  )
-  log('word spans ready before find', wordSpans)
-  expect('the page has words to look for before find is asked', wordSpans > 0, {
-    wordSpans
-  })
   log('click 查找', await clickBar('查找'))
   await new Promise((r) => setTimeout(r, 300))
   // The word is the one the page repeats most often, not the first one on it.
@@ -4719,16 +4704,42 @@ export async function runSmoke() {
   // taking the most frequent makes the gate depend on the page rather than
   // on luck, and the runners-up are kept so a future skip can say what was
   // available to look for.
-  const findWords = JSON.parse(
-    await w.webContents.executeJavaScript(
-      '(()=>{const sp=[...document.querySelectorAll(".tx-layer span.tx")]'
-      + '.map(s=>(s.textContent||"").trim()).filter(t=>t.length>=4);'
-      + 'const n=new Map();for(const t of sp)n.set(t,(n.get(t)||0)+1);'
-      + 'return JSON.stringify([...n.entries()].sort((a,b)=>b[1]-a[1]).slice(0,4)'
-      + '.map(([t,c])=>({t:t,c:c})))})()'
-    )
-  ) as { t: string; c: number }[]
+  //
+  // Wait on this very expression, not on a separate span count taken
+  // earlier. 157 waited for `.tx-layer span.tx` *before* pressing 查找, but
+  // opening the find bar redraws the text layer — and this run comes
+  // straight out of the continuous-mode test, which redraws it again. On
+  // 158 r1 the earlier check passed with 66 spans while this one returned
+  // `[]`, query "", and six assertions went red saying nothing about find.
+  // A premise has to be asserted at the moment the thing it guards is read,
+  // not one DOM-changing action earlier.
+  const FIND_WORDS =
+    '(()=>{const sp=[...document.querySelectorAll(".tx-layer span.tx")]'
+    + '.map(s=>(s.textContent||"").trim()).filter(t=>t.length>=4);'
+    + 'const n=new Map();for(const t of sp)n.set(t,(n.get(t)||0)+1);'
+    + 'return JSON.stringify([...n.entries()].sort((a,b)=>b[1]-a[1]).slice(0,4)'
+    + '.map(([t,c])=>({t:t,c:c})))})()'
+  const findWordsRaw = await until(
+    FIND_WORDS,
+    (v) => {
+      try {
+        const k = JSON.parse(String(v ?? '[]'))
+        return Array.isArray(k) && k.length > 0
+      } catch {
+        return false
+      }
+    },
+    12000
+  )
+  const findWords = JSON.parse(String(findWordsRaw ?? '[]')) as {
+    t: string
+    c: number
+  }[]
   log('find word candidates', findWords)
+  expect('the page has words to look for before find is asked', findWords.length > 0, {
+    candidates: findWords.length,
+    occurrences: findWords.reduce((n, x) => n + x.c, 0)
+  })
   let query = ''
   let findInfo = '{}'
   for (const cand of findWords) {
