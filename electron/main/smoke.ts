@@ -69,6 +69,15 @@ import {
 // on a paper change does not stop a read of the old PDF from landing a moment
 // later, so the order is controlled by resolving each page read by hand.
 import { createLazyPages, type PageAnswer } from '../../src/lib/lazyPages'
+// Continuous mode walks every page in the background, once for links and
+// once for citation markers. Both loops used to be written out in full down to
+// a literal 8, and "one column rebuild per screenful" had no test of its own.
+// The rule is pure now: promises resolve by hand, no PDF, no sleeping.
+import {
+  createPageWalk,
+  PAGE_BATCH_SIZE,
+  type PageWalkHost
+} from '../../src/lib/pageWalk'
 // A fixed citation card measured once stays at its old coordinates when the
 // window changes. The placement rule takes its viewport as an argument so a
 // resize can be checked by handing it a smaller one, rather than resizing a
@@ -3301,6 +3310,256 @@ export async function runSmoke() {
         DEFAULT_FT_PAGES <= FULL_TEXT_MAX_PAGES &&
         outside === 0,
       { sample, outside, min: FULL_TEXT_MIN_PAGES, max: FULL_TEXT_MAX_PAGES }
+    )
+  }
+
+  // Links and citation markers each walked every page of a continuous PDF
+  // with their own copy of the same loop, including a literal batch size of
+  // 8. Pulling it into a pure controller is only safe if the event sequence
+  // is identical -- and only worth doing if the batching rule can be shown
+  // to matter. One assertion is a control; the rest are decided by handing
+  // the walk promises that resolve on the spot.
+  {
+    type Host = PageWalkHost<string>
+    type Scenario = {
+      name: string
+      last: number
+      claimed?: number[]
+      failAt?: number
+      deadAt?: number
+    }
+    const makeHost = (o: {
+      claimed?: number[]
+      failAt?: number
+      deadAt?: number
+    }) => {
+      const events: string[] = []
+      const claimed = new Set(o.claimed ?? [])
+      const busy = new Set<number>()
+      const writes: Array<Record<number, string[]>> = []
+      let dead = false
+      const host: Host = {
+        isDead: () => dead,
+        isClaimed: (n) => claimed.has(n) || busy.has(n),
+        claim: (n) => {
+          busy.add(n)
+          events.push('claim:' + n)
+        },
+        release: (n) => {
+          busy.delete(n)
+          events.push('release:' + n)
+        },
+        publish: (batch) => {
+          events.push('write:' + Object.keys(batch).join(','))
+          writes.push(batch)
+        }
+      }
+      const read = (n: number): Promise<string[]> => {
+        events.push('read:' + n)
+        if (n === o.deadAt) dead = true
+        if (n === o.failAt) return Promise.reject(new Error('page will not read'))
+        return Promise.resolve(['p' + n])
+      }
+      return { events, host, read, writes, busy }
+    }
+
+    // Control: without batching, twenty pages really are twenty column
+    // rebuilds. If this could not be shown, the assertion below would be
+    // one that can never fail.
+    const noBatching = async (
+      last: number,
+      h: Host,
+      read: (n: number) => Promise<string[]>
+    ) => {
+      for (let n = 1; n <= last; n++) {
+        if (h.isDead()) return
+        if (h.isClaimed(n)) continue
+        h.claim(n)
+        let got: string[]
+        try {
+          got = await read(n)
+        } catch {
+          got = []
+        }
+        h.release(n)
+        if (h.isDead()) return
+        h.publish({ [n]: got })
+      }
+    }
+    const ctrl = makeHost({})
+    await noBatching(20, ctrl.host, ctrl.read)
+    expect(
+      'a loop with no batching really does rebuild the column once per page',
+      ctrl.writes.length === 20,
+      { writes: ctrl.writes.length }
+    )
+
+    const box = makeHost({})
+    await createPageWalk<string>(box.host).walk(20, box.read)
+    expect(
+      'the shared walk publishes one screenful rather than one page',
+      box.writes.length === 3,
+      {
+        writes: box.writes.length,
+        batches: box.writes.map((b) => Object.keys(b).length)
+      }
+    )
+    expect(
+      'a short final batch is still flushed on the last page',
+      Object.keys(box.writes[0]).length === PAGE_BATCH_SIZE &&
+        Object.keys(box.writes[1]).length === PAGE_BATCH_SIZE &&
+        Object.keys(box.writes[2]).join(',') === '17,18,19,20',
+      { batches: box.writes.map((b) => Object.keys(b).join(',')) }
+    )
+    expect(
+      'the batch size is one named constant rather than a literal in both loops',
+      PAGE_BATCH_SIZE === 8 && box.writes.length === Math.ceil(20 / PAGE_BATCH_SIZE),
+      { size: PAGE_BATCH_SIZE, writes: box.writes.length }
+    )
+
+    // The two loops exactly as they stood in the hooks, copied line for line.
+    // One ends at `numPages`, the other at `refPage - 1`; both must agree
+    // with the shared walk over the same pages, event for event.
+    const oldLinksLoop = async (
+      numPages: number,
+      h: Host,
+      read: (n: number) => Promise<string[]>
+    ) => {
+      let batch: Record<number, string[]> = {}
+      for (let n = 1; n <= numPages; n++) {
+        if (h.isDead()) return
+        if (h.isClaimed(n)) continue
+        h.claim(n)
+        let got: string[]
+        try {
+          got = await read(n)
+        } catch {
+          got = []
+        }
+        h.release(n)
+        if (h.isDead()) return
+        batch[n] = got
+        if (Object.keys(batch).length >= 8 || n === numPages) {
+          const flush = batch
+          batch = {}
+          h.publish(flush)
+        }
+      }
+    }
+    const oldRefsLoop = async (
+      refPage: number,
+      h: Host,
+      read: (n: number) => Promise<string[]>
+    ) => {
+      let batch: Record<number, string[]> = {}
+      for (let n = 1; n < refPage; n++) {
+        if (h.isDead()) return
+        if (h.isClaimed(n)) continue
+        h.claim(n)
+        let got: string[]
+        try {
+          got = await read(n)
+        } catch {
+          got = []
+        }
+        h.release(n)
+        if (h.isDead()) return
+        batch[n] = got
+        if (Object.keys(batch).length >= 8 || n === refPage - 1) {
+          const flush = batch
+          batch = {}
+          h.publish(flush)
+        }
+      }
+    }
+    const scenarios: Scenario[] = [
+      { name: 'no pages', last: 0 },
+      { name: 'one page', last: 1 },
+      { name: 'under one batch', last: 7 },
+      { name: 'exactly one batch', last: 8 },
+      { name: 'one page past a batch', last: 9 },
+      { name: 'two batches', last: 12 },
+      { name: 'three batches', last: 23 },
+      { name: 'claimed pages', last: 12, claimed: [3, 7] },
+      { name: 'claimed last page', last: 12, claimed: [3, 12] },
+      { name: 'a failing page', last: 12, failAt: 5 },
+      { name: 'killed mid-walk', last: 12, deadAt: 5 }
+    ]
+    const mismatches: string[] = []
+    for (const s of scenarios) {
+      const a = makeHost(s)
+      const b = makeHost(s)
+      const c = makeHost(s)
+      await oldLinksLoop(s.last, a.host, a.read)
+      await oldRefsLoop(s.last + 1, b.host, b.read)
+      await createPageWalk<string>(c.host).walk(s.last, c.read)
+      const key = (x: { events: string[] }) => x.events.join('|')
+      if (key(a) !== key(b) || key(a) !== key(c)) mismatches.push(s.name)
+    }
+    expect(
+      'both old loop shapes and the shared walk produce the same events',
+      mismatches.length === 0,
+      { scenarios: scenarios.length, mismatches }
+    )
+
+    const skipped = makeHost({ claimed: [3, 7] })
+    await createPageWalk<string>(skipped.host).walk(12, skipped.read)
+    expect(
+      'pages already claimed are skipped without breaking the batch rhythm',
+      !skipped.events.includes('read:3') &&
+        !skipped.events.includes('read:7') &&
+        skipped.writes.length === 2 &&
+        Object.keys(skipped.writes[0]).length === PAGE_BATCH_SIZE &&
+        Object.keys(skipped.writes[1]).join(',') === '11,12',
+      {
+        reads: skipped.events.filter((e) => e.startsWith('read:')),
+        batches: skipped.writes.map((b) => Object.keys(b).join(','))
+      }
+    )
+
+    const failing = makeHost({ failAt: 5 })
+    await createPageWalk<string>(failing.host).walk(12, failing.read)
+    expect(
+      'a page that fails to read is published as empty and the walk continues',
+      failing.writes.length === 2 &&
+        JSON.stringify(failing.writes[0]['5']) === '[]' &&
+        failing.events.includes('read:12'),
+      {
+        pageFive: failing.writes[0]['5'],
+        batches: failing.writes.map((b) => Object.keys(b).length)
+      }
+    )
+
+    const killed = makeHost({ deadAt: 5 })
+    await createPageWalk<string>(killed.host).walk(12, killed.read)
+    expect(
+      'a walk killed mid-page stops before publishing anything else',
+      killed.writes.length === 0 &&
+        !killed.events.includes('read:6') &&
+        killed.busy.size === 0,
+      {
+        writes: killed.writes.length,
+        reads: killed.events.filter((e) => e.startsWith('read:')),
+        busy: killed.busy.size
+      }
+    )
+
+    const empty = makeHost({})
+    await createPageWalk<string>(empty.host).walk(0, empty.read)
+    expect(
+      'a reference list on page one starts a walk over no pages',
+      empty.events.length === 0 && empty.writes.length === 0,
+      { events: empty.events.length, writes: empty.writes.length }
+    )
+
+    const paired = makeHost({ claimed: [3], failAt: 5 })
+    await createPageWalk<string>(paired.host).walk(12, paired.read)
+    const claims = paired.events.filter((e) => e.startsWith('claim:')).length
+    const releases = paired.events.filter((e) => e.startsWith('release:')).length
+    expect(
+      'every claimed page is released, including one whose read failed',
+      claims === 11 && releases === claims && paired.busy.size === 0,
+      { claims, releases, busy: paired.busy.size }
     )
   }
 

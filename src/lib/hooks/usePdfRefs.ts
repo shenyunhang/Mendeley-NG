@@ -3,6 +3,7 @@ import type * as pdfjs from 'pdfjs-dist'
 import type { CiteMark, RefList } from '../pdfrefs'
 import { findRefList, marksOnPage } from '../pdfrefs'
 import { createLazyPages, type LazyPages } from '../lazyPages'
+import { createPageWalk } from '../pageWalk'
 
 /**
  * The references of the open paper, and the citations in its body.
@@ -87,39 +88,23 @@ export function usePdfRefs(o: {
     void ensure(page - 1)
   }, [pdf, continuous, page, ensure])
 
+  // Same batching rule as the links, in pageWalk.ts.  The list starts on
+  // `refPage`, so only the pages before it can carry a citation marker; a
+  // list found on page one gives a walk over no pages at all.
   useEffect(() => {
     if (!pdf || !continuous || !refPage) return
     let dead = false
-    void (async () => {
-      // one write per screenful, for the same reason the links do it: every
-      // write rebuilds the column, and the column is holding every marker it
-      // has been given
-      let batch: Record<number, CiteMark[]> = {}
-      for (let n = 1; n < refPage; n++) {
-        if (dead) return
-        if (
-          known.current[n] !== undefined ||
-          busy.current.has(n) ||
-          lazy.current?.isBusy(n)
-        )
-          continue
-        busy.current.add(n)
-        let got: CiteMark[]
-        try {
-          got = await marksOnPage(pdf, n)
-        } catch {
-          got = []
-        }
-        busy.current.delete(n)
-        if (dead) return
-        batch[n] = got
-        if (Object.keys(batch).length >= 8 || n === refPage - 1) {
-          const flush = batch
-          batch = {}
-          setMarks((prev) => ({ ...prev, ...flush }))
-        }
-      }
-    })()
+    const walk = createPageWalk<CiteMark>({
+      isDead: () => dead,
+      isClaimed: (n) =>
+        known.current[n] !== undefined ||
+        busy.current.has(n) ||
+        !!lazy.current?.isBusy(n),
+      claim: (n) => busy.current.add(n),
+      release: (n) => busy.current.delete(n),
+      publish: (batch) => setMarks((prev) => ({ ...prev, ...batch }))
+    })
+    void walk.walk(refPage - 1, (n) => marksOnPage(pdf, n))
     return () => {
       dead = true
     }

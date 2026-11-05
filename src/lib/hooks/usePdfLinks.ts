@@ -3,6 +3,7 @@ import type * as pdfjs from 'pdfjs-dist'
 import type { LinkBox } from '../pdflinks'
 import { linksOf } from '../pdflinks'
 import { createLazyPages, type LazyPages } from '../lazyPages'
+import { createPageWalk } from '../pageWalk'
 
 /**
  * The links of the open paper, kept per page.
@@ -71,42 +72,24 @@ export function usePdfLinks(o: {
     void ensure(page - 1)
   }, [pdf, continuous, page, ensure])
 
+  // The batching rule lives in pageWalk.ts: one write per screenful, because
+  // every write rebuilds a column holding the links of every page so far.
+  // This hook supplies only what belongs to it -- which pages are already
+  // claimed, when the effect has been cleaned up, and where the result goes.
   useEffect(() => {
     if (!pdf || !continuous || !numPages) return
     let dead = false
-    ;(async () => {
-      // One write per screenful rather than one per page.  Every write
-      // re-renders the column, and the column is holding the links of every
-      // page it has been given, so a write a page turns a fifty-page paper
-      // into fifty rebuilds of a few thousand anchors.  Walking in order
-      // means the batch that lands first is the one being read.
-      let batch: Record<number, LinkBox[]> = {}
-      for (let n = 1; n <= numPages; n++) {
-        if (dead) return
-        if (
-          known.current[n] !== undefined ||
-          busy.current.has(n) ||
-          lazy.current?.isBusy(n)
-        )
-          continue
-        busy.current.add(n)
-        let got: LinkBox[]
-        try {
-          got = await linksOf(pdf, n)
-        } catch {
-          // a page that will not give up its annotations simply has none
-          got = []
-        }
-        busy.current.delete(n)
-        if (dead) return
-        batch[n] = got
-        if (Object.keys(batch).length >= 8 || n === numPages) {
-          const flush = batch
-          batch = {}
-          setLinks((prev) => ({ ...prev, ...flush }))
-        }
-      }
-    })()
+    const walk = createPageWalk<LinkBox>({
+      isDead: () => dead,
+      isClaimed: (n) =>
+        known.current[n] !== undefined ||
+        busy.current.has(n) ||
+        !!lazy.current?.isBusy(n),
+      claim: (n) => busy.current.add(n),
+      release: (n) => busy.current.delete(n),
+      publish: (batch) => setLinks((prev) => ({ ...prev, ...batch }))
+    })
+    void walk.walk(numPages, (n) => linksOf(pdf, n))
     return () => {
       dead = true
     }
