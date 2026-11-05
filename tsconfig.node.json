@@ -20,6 +20,7 @@
     "src/lib/export.ts",
     "src/lib/findScan.ts",
     "src/lib/flash.ts",
+    "src/lib/lazyPages.ts",
     "src/lib/latestSearch.ts",
     "src/lib/offline.ts",
     "src/lib/refly.ts"

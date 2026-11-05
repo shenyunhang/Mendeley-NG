@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type * as pdfjs from 'pdfjs-dist'
 import type { CiteMark, RefList } from '../pdfrefs'
 import { findRefList, marksOnPage } from '../pdfrefs'
+import { createLazyPages, type LazyPages } from '../lazyPages'
 
 /**
  * The references of the open paper, and the citations in its body.
@@ -30,10 +31,26 @@ export function usePdfRefs(o: {
   const [marks, setMarks] = useState<Record<number, CiteMark[]>>({})
   const known = useRef(marks)
   known.current = marks
+  /** The background walk in continuous mode owns its own page claims. */
   const busy = useRef(new Set<number>())
 
-  // another paper makes the list wrong and every marker with it
+  /** The lazy single-page reads. Clearing `marks` on a document change cannot
+   *  stop a `marksOnPage` for the old PDF from landing later; only a
+   *  generation guard can (see 155). */
+  const lazy = useRef<LazyPages<string, CiteMark[]> | null>(null)
+  if (lazy.current === null) {
+    lazy.current = createLazyPages<string, CiteMark[]>(
+      (a) => setMarks((prev) => ({ ...prev, [a.page]: a.value })),
+      []
+    )
+  }
+
+  // another paper makes the list wrong and every marker with it. Clear
+  // `known` here too: the effects below run in the same commit, and would
+  // otherwise still see the previous paper's page numbers and skip them.
   useEffect(() => {
+    lazy.current?.invalidate()
+    known.current = {}
     setList(null)
     setMarks({})
     busy.current.clear()
@@ -55,21 +72,12 @@ export function usePdfRefs(o: {
   const refPage = list?.page ?? 0
 
   const ensure = useCallback(
-    async (n: number) => {
+    (n: number) => {
       if (!pdf || !refPage || n < 1 || n >= refPage) return
       if (known.current[n] !== undefined || busy.current.has(n)) return
-      busy.current.add(n)
-      try {
-        const got = await marksOnPage(pdf, n)
-        setMarks((prev) => ({ ...prev, [n]: got }))
-      } catch {
-        // a page that will not give up its text simply has no markers
-        setMarks((prev) => ({ ...prev, [n]: [] }))
-      } finally {
-        busy.current.delete(n)
-      }
+      lazy.current?.read(o.docKey ?? '', n, (p) => marksOnPage(pdf, p))
     },
-    [pdf, refPage]
+    [pdf, refPage, o.docKey]
   )
 
   useEffect(() => {
@@ -89,7 +97,12 @@ export function usePdfRefs(o: {
       let batch: Record<number, CiteMark[]> = {}
       for (let n = 1; n < refPage; n++) {
         if (dead) return
-        if (known.current[n] !== undefined || busy.current.has(n)) continue
+        if (
+          known.current[n] !== undefined ||
+          busy.current.has(n) ||
+          lazy.current?.isBusy(n)
+        )
+          continue
         busy.current.add(n)
         let got: CiteMark[]
         try {

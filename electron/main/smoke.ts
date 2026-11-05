@@ -56,6 +56,10 @@ import {
   createFindScan,
   type ScanAnswer
 } from '../../src/lib/findScan'
+// Links and citation markers are pulled a page at a time. Clearing the state
+// on a paper change does not stop a read of the old PDF from landing a moment
+// later, so the order is controlled by resolving each page read by hand.
+import { createLazyPages, type PageAnswer } from '../../src/lib/lazyPages'
 // The reference list is read out of the paper in the renderer, but the rules
 // that decide whether it was read correctly are pure, and a popover that
 // names the wrong paper is the kind of mistake that has to be caught on every
@@ -2785,6 +2789,123 @@ export async function runSmoke() {
         opened.length === 1 &&
         (answerHits(box.answer, 'delta') ?? []).length === 0,
       { renders: box.renders, beforeCancel, opened, answer: box.answer }
+    )
+  }
+
+  // 155: the reader keeps one component across papers. The background walk
+  // over every page had a `dead` flag, but the lazy single-page `ensure` did
+  // not: clearing links/marks on a paper change left its promise running, and
+  // the old PDF's links landed in the new paper's state a moment later.
+  {
+    const flush = () => new Promise<void>((r) => setImmediate(() => r()))
+    type Pending = {
+      page: number
+      resolve: (v: string[]) => void
+      reject: (why: unknown) => void
+    }
+    const makeLoad = () => {
+      const pending: Pending[] = []
+      const load = (page: number) =>
+        new Promise<string[]>((resolve, reject) => pending.push({ page, resolve, reject }))
+      return { load, pending }
+    }
+
+    // Control: the pre-155 lazy read with the same order of answers. It has no
+    // generation, so the old paper's page really does land after the state was
+    // cleared for the new one (142 / 145 / 146 / 151 / 152 / 153 / 154).
+    {
+      const old: { links: Record<number, string[]>; writes: number } = {
+        links: {},
+        writes: 0
+      }
+      let resolve!: (v: string[]) => void
+      const pageRead = new Promise<string[]>((r) => {
+        resolve = r
+      })
+      const oldEnsure = (page: number) =>
+        pageRead.then((got) => {
+          old.links[page] = got
+          old.writes += 1
+        })
+      const oldWalk = oldEnsure(3)
+      // the paper changed: state was cleared, the read was left alone
+      old.links = {}
+      old.writes = 0
+      resolve(['link-from-paper-a'])
+      await oldWalk
+      expect(
+        'the old lazy page read really does put the previous paper in the new one',
+        old.writes === 1 && (old.links[3] ?? []).length === 1,
+        { writes: old.writes, links: old.links }
+      )
+    }
+
+    const box: { writes: PageAnswer<string, string[]>[] } = { writes: [] }
+    const scope = createLazyPages<string, string[]>((a) => box.writes.push(a), [])
+    const { load, pending } = makeLoad()
+
+    scope.read('paper-a', 2, load)
+    expect(
+      'a page is claimed once while its read is in flight',
+      pending.length === 1 && scope.isBusy(2) === true && !scope.isBusy(3),
+      { pending: pending.length, busy2: scope.isBusy(2) }
+    )
+    scope.read('paper-a', 2, load)
+    expect(
+      'asking for the same page twice does not read it twice',
+      pending.length === 1,
+      { pending: pending.length }
+    )
+
+    pending[0].resolve(['a-link'])
+    await flush()
+    expect(
+      'a read for the current paper is delivered with its own document',
+      box.writes.length === 1 &&
+        box.writes[0].doc === 'paper-a' &&
+        box.writes[0].page === 2 &&
+        (box.writes[0].value ?? [])[0] === 'a-link' &&
+        scope.isBusy(2) === false,
+      { writes: box.writes }
+    )
+
+    scope.read('paper-a', 4, load)
+    const beforeInvalidate = box.writes.length
+    scope.invalidate()
+    expect(
+      'changing the paper writes no state and frees every page claim',
+      box.writes.length === beforeInvalidate && !scope.isBusy(4) && !scope.isBusy(2),
+      { writes: box.writes.length, beforeInvalidate, busy4: scope.isBusy(4) }
+    )
+
+    pending[1].resolve(['stale-link'])
+    await flush()
+    expect(
+      'a page read in flight when the paper changes cannot write',
+      box.writes.length === beforeInvalidate,
+      { writes: box.writes.length, beforeInvalidate }
+    )
+
+    scope.read('paper-b', 4, load)
+    pending[2].resolve(['b-link'])
+    await flush()
+    expect(
+      'the new paper can read the page the old one left claimed',
+      box.writes.length === beforeInvalidate + 1 &&
+        box.writes[box.writes.length - 1].doc === 'paper-b' &&
+        (box.writes[box.writes.length - 1].value ?? [])[0] === 'b-link',
+      { writes: box.writes }
+    )
+
+    scope.read('paper-b', 5, load)
+    pending[3].reject(new Error('page has no annotations'))
+    await flush()
+    expect(
+      'a failed page read answers with no links, not the last paper links',
+      box.writes.length === beforeInvalidate + 2 &&
+        box.writes[box.writes.length - 1].doc === 'paper-b' &&
+        (box.writes[box.writes.length - 1].value ?? ['not-empty']).length === 0,
+      { writes: box.writes }
     )
   }
 
