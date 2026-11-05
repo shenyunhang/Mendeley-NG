@@ -1,6 +1,5 @@
 /**
- * One short-lived message at a time, and only one pending request to clear
- * it.
+ * One short-lived thing at a time, and only one pending request to clear it.
  *
  * The bug this exists for: a message used to be shown with
  * `setMsg(text); setTimeout(() => setMsg(null), ms)` repeated at a dozen
@@ -12,8 +11,15 @@
  * the component and called setState after unmount.
  *
  * Keeping the timer in one place fixes all three: showing anything cancels
- * the pending clear first, so a clear can only ever remove the message that
+ * the pending clear first, so a clear can only ever remove the thing that
  * asked for it.
+ *
+ * The payload is generic because the same shape is not only a status line.
+ * A hover card is one too: it has to stay long enough for the pointer to
+ * reach the button on it, and be cancelled on unmount. `keep` and `hold`
+ * are for that case, where showing and scheduling a clear happen at
+ * different moments. `string` is the default so the status-line callers do
+ * not have to name a type.
  *
  * The clock is injectable so this can be checked without sleeping. A test
  * hands in a clock whose timers it advances by hand; the renderer uses the
@@ -29,14 +35,21 @@ export const realClock: FlashClock = {
   clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>)
 }
 
-export interface FlashMessage {
-  /** Show a message that clears itself after `ms`. */
-  flash: (text: string, ms: number) => void
-  /** Show a message and leave it there — a progress line, or a step in a
-   *  sequence whose end will call `flash`. Cancels any pending clear, so a
-   *  stale timeout cannot cut a long-running progress message short. */
-  show: (text: string) => void
-  /** Take the message down now. */
+export interface FlashMessage<T = string> {
+  /** Show a value that clears itself after `ms`. */
+  flash: (value: T, ms: number) => void
+  /** Show a value and leave it there — a progress line, a step in a sequence,
+   *  or a hover card whose exit is scheduled separately. Cancels any pending
+   *  clear, so a stale timeout cannot cut it short. */
+  show: (value: T) => void
+  /** Cancel a pending clear without rendering. For "the pointer is back" and
+   *  for unmount; the value on screen is already the right one. */
+  keep: () => void
+  /** Keep what is on screen but arrange for it to clear after `ms`. Showing
+   *  and scheduling are separate for a hover card: the card is already up
+   *  when the pointer leaves it. */
+  hold: (ms: number) => void
+  /** Take the value down now, and cancel its pending clear. */
   clear: () => void
   /** Cancel the pending clear without rendering: for unmount. */
   dispose: () => void
@@ -44,10 +57,10 @@ export interface FlashMessage {
   hasPending: () => boolean
 }
 
-export function createFlashMessage(
-  render: (text: string | null) => void,
+export function createFlashMessage<T = string>(
+  render: (value: T | null) => void,
   clock: FlashClock = realClock
-): FlashMessage {
+): FlashMessage<T> {
   let pending: unknown = null
   const cancel = () => {
     if (pending !== null) {
@@ -55,18 +68,26 @@ export function createFlashMessage(
       pending = null
     }
   }
+  const schedule = (ms: number) => {
+    pending = clock.set(() => {
+      pending = null
+      render(null)
+    }, ms)
+  }
   return {
-    flash(text, ms) {
+    flash(value, ms) {
       cancel()
-      render(text)
-      pending = clock.set(() => {
-        pending = null
-        render(null)
-      }, ms)
+      render(value)
+      schedule(ms)
     },
-    show(text) {
+    show(value) {
       cancel()
-      render(text)
+      render(value)
+    },
+    keep: cancel,
+    hold(ms) {
+      cancel()
+      schedule(ms)
     },
     clear() {
       cancel()

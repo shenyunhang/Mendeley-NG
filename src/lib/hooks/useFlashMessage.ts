@@ -16,8 +16,8 @@ import { createFlashMessage, type FlashMessage } from '../flash'
  */
 export function useFlashMessage() {
   const [message, setMessage] = useState<string | null>(null)
-  const ctrl = useRef<FlashMessage | null>(null)
-  if (ctrl.current === null) ctrl.current = createFlashMessage(setMessage)
+  const ctrl = useRef<FlashMessage<string> | null>(null)
+  if (ctrl.current === null) ctrl.current = createFlashMessage<string>(setMessage)
 
   const flash = ctrl.current
   useEffect(() => () => flash.dispose(), [flash])

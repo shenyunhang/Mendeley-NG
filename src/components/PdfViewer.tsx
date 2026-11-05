@@ -30,6 +30,7 @@ import {
   type ZoomMode
 } from '../lib/pdfgeom'
 import { PrefetchCache } from '../lib/pdfcache'
+import { createFlashMessage, type FlashMessage } from '../lib/flash'
 import { selectionRects, textInRect } from '../lib/pdfsel'
 import { drawTextLayer } from '../lib/pdftext'
 import type { LinkBox } from '../lib/pdflinks'
@@ -967,26 +968,31 @@ export default function PdfViewer({
 
   /** One entry under the pointer: its number, its text, and the library's
    *  copy of it if there is one. */
-  const [cite, setCite] = useState<{
+  type CiteCard = {
     items: { n: number; text: string; doc: { id: string; title?: string } | null }[]
     anchor: DOMRect
-  } | null>(null)
+  }
+  const [cite, setCite] = useState<CiteCard | null>(null)
   const citeCard = useRef<HTMLDivElement>(null)
   const [citeSpot, setCiteSpot] = useState<Spot | null>(null)
   /**
    * The pointer leaving the marker hides the card, but not at once: the card
    * has to be reachable, because "打开" is on it.  Without the wait, moving
    * towards the button closes the thing the button is on.
+   *
+   * This is the one-pending-clear controller the status lines use (151),
+   * generalised to a card instead of a string. It replaces the last
+   * hand-rolled timer in the reader: `clear` also cancels the pending hide,
+   * so a card dismissed by scrolling or by turning the page no longer gets a
+   * second, useless `setCite(null)` 260ms later.
    */
-  const hideCite = useRef<number | null>(null)
-  const dropCite = () => {
-    if (hideCite.current !== null) window.clearTimeout(hideCite.current)
-    hideCite.current = window.setTimeout(() => setCite(null), 260)
+  const citeTimer = useRef<FlashMessage<CiteCard> | null>(null)
+  if (citeTimer.current === null) {
+    citeTimer.current = createFlashMessage<CiteCard>(setCite)
   }
-  const keepCite = () => {
-    if (hideCite.current !== null) window.clearTimeout(hideCite.current)
-    hideCite.current = null
-  }
+  const dropCite = () => citeTimer.current?.hold(260)
+  const keepCite = () => citeTimer.current?.keep()
+  const closeCite = () => citeTimer.current?.clear()
 
   const showCite = (m: CiteMark, el: HTMLElement) => {
     const ents = entriesRef.current
@@ -1000,7 +1006,7 @@ export default function PdfViewer({
         return { ...x, doc: d ? { id: d.id, title: d.title } : null }
       })
     if (!items.length) return
-    setCite({ items, anchor: el.getBoundingClientRect() })
+    citeTimer.current?.show({ items, anchor: el.getBoundingClientRect() })
   }
 
   // the card is measured after it is in the document and before it is painted,
@@ -1016,10 +1022,11 @@ export default function PdfViewer({
   // a card belongs to the marker it was opened for, and that marker is on a
   // page that has since been left
   useEffect(() => {
-    setCite(null)
+    closeCite()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, doc.id])
 
-  useEffect(() => () => keepCite(), [])
+  useEffect(() => () => citeTimer.current?.dispose(), [])
 
   // Built once per page, for the same reason the links are: a column holding
   // every marker in a fifty-page paper is not to be rebuilt on a keystroke.
@@ -1315,7 +1322,7 @@ export default function PdfViewer({
 
       {/* a card is pinned to a spot on the page, so the page moving out from
           under it has to take it with it */}
-      <div className="pdf-body" onWheel={() => setCite(null)}>
+      <div className="pdf-body" onWheel={closeCite}>
         {side !== 'none' && (
           <div className="pdf-outline">
             {side === 'outline'
@@ -1501,7 +1508,7 @@ export default function PdfViewer({
                   title={it.doc.title ?? ''}
                   onClick={() => {
                     const id = it.doc?.id
-                    setCite(null)
+                    closeCite()
                     if (id) onOpenDoc?.(id)
                   }}
                 >
