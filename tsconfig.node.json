@@ -27,6 +27,7 @@
     "src/lib/offline.ts",
     "src/lib/pageBudgetCommit.ts",
     "src/lib/pageWalk.ts",
+    "src/lib/pdfcache.ts",
     "src/lib/rectLines.ts",
     "src/lib/refly.ts",
     "src/lib/timing.ts"

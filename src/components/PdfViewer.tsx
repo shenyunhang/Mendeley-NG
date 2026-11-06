@@ -445,8 +445,17 @@ export default function PdfViewer({
 
   /** Bitmaps of the pages next to this one.  The cache itself — what to keep,
    *  what to drop, what is already in flight — is none of this component's
-   *  business; see `PrefetchCache`. */
-  const prefetch = useRef(new PrefetchCache())
+   *  business; see `PrefetchCache`.  The only thing it asks of the window is
+   *  this callback: the diagnostics on `<html>` are a DOM concern, and the
+   *  cache's ordering rules are checked without a DOM in the smoke run. */
+  const prefetch = useRef(
+    new PrefetchCache<HTMLCanvasElement>(6, (s) => {
+      const d = document.documentElement.dataset
+      d.pfSize = String(s.size)
+      d.pfKeys = s.keys.join(',')
+      d.pfWarm = s.warm.join(',')
+    })
+  )
 
   // A different document makes every cached bitmap wrong.  A different scale
   // does not: the key carries the scale, so stale entries simply miss and get

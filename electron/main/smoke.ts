@@ -38,6 +38,12 @@ import { commitPageBudget } from '../../src/lib/pageBudgetCommit'
 // is shared now, but each caller keeps its own "same line" test, so this run
 // checks both old loops verbatim and proves the two tests really differ (172).
 import { mergeRectsIntoLines } from '../../src/lib/rectLines'
+// Neighbouring-page bitmaps are keyed by page, scale and pixel ratio, with no
+// document id in the key. Clearing the two maps on a paper change used to
+// leave an in-flight render free to land the previous paper's bitmap on the
+// new paper's canvas. The cache is DOM-free and generic now, so that ordering
+// can be checked here by resolving render promises by hand (173).
+import { PrefetchCache, StaleFlight } from '../../src/lib/pdfcache'
 // This one lives with the renderer, but it is a pure function with no DOM in
 // it, and the note it carries is the only data in the app that exists nowhere
 // else — a claim about being able to take your library with you is worth one
@@ -3762,6 +3768,231 @@ export async function runSmoke() {
         !sharedSrc.includes('0.006') &&
         !sharedSrc.includes('< 3'),
       { present: sharedSrc !== null }
+    )
+  }
+
+  // A neighbouring-page bitmap is keyed by page, scale and pixel ratio only.
+  // Clearing the two maps on a paper change left an in-flight render free to
+  // land the *previous* paper's bitmap under a key the new paper would hit,
+  // and a page turn that had already joined the flight drew it. Resolving
+  // each render by hand checks the whole ordering without a PDF or a window;
+  // the pre-fix cache is kept here so the control proves the bug was real (173).
+  {
+    type Bmp = { width: number; height: number; tag: string }
+    const bmp = (tag: string): Bmp => ({ width: 800, height: 1100, tag })
+    const deferred = () => {
+      let resolve!: (b: Bmp) => void
+      let reject!: (e: unknown) => void
+      const promise = new Promise<Bmp>((res, rej) => {
+        resolve = res
+        reject = rej
+      })
+      return { promise, resolve, reject }
+    }
+    const outcome = async (p: Promise<unknown>): Promise<string> => {
+      try {
+        await p
+        return 'resolved'
+      } catch (e) {
+        return (e as Error)?.name ?? 'rejected'
+      }
+    }
+    const KEY = '6:1.250:2'
+    const staleName = new StaleFlight(KEY).name
+
+    // The pre-fix cache, transcribed verbatim apart from the DOM stamp and
+    // the LRU, neither of which participates in an in-flight write.
+    class LegacyCache<T> {
+      private done = new Map<string, T>()
+      private busy = new Map<string, Promise<T>>()
+      peek(k: string) { return this.done.get(k) }
+      flight(k: string) { return this.busy.get(k) }
+      warm(key: string, draw: () => Promise<T>): Promise<void> {
+        if (this.done.has(key)) return Promise.resolve()
+        const running = this.busy.get(key)
+        if (running) return running.then(() => undefined).catch(() => undefined)
+        const p = draw().then((c) => {
+          this.busy.delete(key)
+          this.done.set(key, c)
+          return c
+        })
+        this.busy.set(key, p)
+        p.catch(() => {
+          this.busy.delete(key)
+        })
+        return p.then(() => undefined)
+      }
+      clear() {
+        this.done.clear()
+        this.busy.clear()
+      }
+    }
+
+    const old = new LegacyCache<Bmp>()
+    const oldDraw = deferred()
+    const oldWarm = old.warm(KEY, () => oldDraw.promise)
+    old.clear()
+    oldDraw.resolve(bmp('paper-A'))
+    await oldWarm
+    expect(
+      'the old cache really lands the previous paper bitmap after a paper change',
+      old.peek(KEY)?.tag === 'paper-A',
+      { tag: old.peek(KEY)?.tag ?? null }
+    )
+
+    const oldJoin = new LegacyCache<Bmp>()
+    const joinDraw = deferred()
+    const joinedWarm = oldJoin.warm(KEY, () => joinDraw.promise)
+    const oldFlight = oldJoin.flight(KEY)
+    oldJoin.clear()
+    joinDraw.resolve(bmp('paper-A'))
+    await joinedWarm
+    const oldJoined = oldFlight ? await oldFlight : undefined
+    expect(
+      'the old cache also hands that bitmap to a page turn that joined the flight',
+      oldJoined?.tag === 'paper-A',
+      { tag: oldJoined?.tag ?? null }
+    )
+
+    const fresh = new PrefetchCache<Bmp>()
+    const staleDraw = deferred()
+    const staleWarm = fresh.warm(KEY, () => staleDraw.promise)
+    const staleFlight = fresh.flight(KEY)
+    fresh.clear()
+    staleDraw.resolve(bmp('paper-A'))
+    const warmOutcome = await outcome(staleWarm)
+    const flightOutcome = await outcome(staleFlight ?? Promise.resolve())
+    expect(
+      'a render outlived by a paper change fails instead of landing a bitmap',
+      warmOutcome === staleName &&
+        flightOutcome === staleName &&
+        fresh.peek(KEY) === undefined,
+      { warmOutcome, flightOutcome, cached: fresh.peek(KEY)?.tag ?? null }
+    )
+
+    const normal = new PrefetchCache<Bmp>()
+    const normalDraw = deferred()
+    const normalWarm = normal.warm(KEY, () => normalDraw.promise)
+    normalDraw.resolve(bmp('paper-B'))
+    await normalWarm
+    expect(
+      'a render that finishes before the paper changes still warms the cache',
+      normal.peek(KEY)?.tag === 'paper-B' && normal.flight(KEY) === undefined,
+      { tag: normal.peek(KEY)?.tag ?? null, flight: normal.flight(KEY) !== undefined }
+    )
+
+    const guard = new PrefetchCache<Bmp>()
+    const oldFail = deferred()
+    const failWarm = guard.warm(KEY, () => oldFail.promise)
+    guard.clear()
+    const newDraw = deferred()
+    const newWarm = guard.warm(KEY, () => newDraw.promise)
+    const hadFlight = guard.flight(KEY) !== undefined
+    oldFail.reject(new Error('render cancelled'))
+    const failOutcome = await outcome(failWarm)
+    const flightSurvived = guard.flight(KEY) !== undefined
+    newDraw.resolve(bmp('paper-B'))
+    await newWarm
+    expect(
+      'a stale failure does not delete the flight of the paper now on screen',
+      hadFlight &&
+        flightSurvived &&
+        failOutcome === 'Error' &&
+        guard.peek(KEY)?.tag === 'paper-B',
+      {
+        hadFlight,
+        flightSurvived,
+        failOutcome,
+        tag: guard.peek(KEY)?.tag ?? null
+      }
+    )
+
+    const order = new PrefetchCache<Bmp>()
+    const lateOld = deferred()
+    const lateWarm = order.warm(KEY, () => lateOld.promise)
+    order.clear()
+    const earlyNew = deferred()
+    const earlyWarm = order.warm(KEY, () => earlyNew.promise)
+    earlyNew.resolve(bmp('paper-B'))
+    await earlyWarm
+    lateOld.resolve(bmp('paper-A'))
+    const lateOutcome = await outcome(lateWarm)
+    expect(
+      'the newer paper bitmap wins even when the old render finishes last',
+      lateOutcome === staleName && order.peek(KEY)?.tag === 'paper-B',
+      { lateOutcome, tag: order.peek(KEY)?.tag ?? null }
+    )
+
+    const stamps: string[] = []
+    const lru = new PrefetchCache<Bmp>(2, (s) => stamps.push(s.keys.join(',')))
+    for (const [k, tag] of [
+      ['1', 'a'],
+      ['2', 'b'],
+      ['3', 'c']
+    ] as const) {
+      const d = deferred()
+      const w = lru.warm(k, () => d.promise)
+      d.resolve(bmp(tag))
+      await w
+    }
+    lru.touch('2')
+    const d4 = deferred()
+    const w4 = lru.warm('4', () => d4.promise)
+    d4.resolve(bmp('d'))
+    await w4
+    lru.drop('3')
+    expect(
+      'the LRU, touch and drop still answer as they did before the generation was added',
+      lru.peek('1') === undefined &&
+        lru.peek('2')?.tag === 'b' &&
+        lru.peek('3') === undefined &&
+        lru.peek('4')?.tag === 'd' &&
+        stamps.at(-1) === '2,4',
+      { lastStamp: stamps.at(-1) ?? null, stamps: stamps.length }
+    )
+
+    expect(
+      'these ordering rules were checked in a process with no document at all',
+      typeof (globalThis as unknown as Record<string, unknown>).document === 'undefined',
+      {
+        hasDocument: typeof (globalThis as unknown as Record<string, unknown>).document
+      }
+    )
+
+    // Values alone do not prove the wiring. The detector is first handed the
+    // old clear() verbatim, so a detector that cannot see a difference cannot
+    // pass by reporting "all clear" (168).
+    const cacheRoot = path.join(__dirname, '../..')
+    const cacheSrc = fs.readFileSync(path.join(cacheRoot, 'src/lib/pdfcache.ts'), 'utf8')
+    const viewerSrc = fs.readFileSync(
+      path.join(cacheRoot, 'src/components/PdfViewer.tsx'),
+      'utf8'
+    )
+    const legacyClear =
+      'clear() {\n    this.done.clear()\n    this.busy.clear()\n  }'
+    const guarded = (t: string) => t.includes('this.generation += 1')
+    expect(
+      'the guard detector really distinguishes the old clear from the new one',
+      !guarded(legacyClear) &&
+        legacyClear.includes('this.busy.clear()') &&
+        guarded(cacheSrc),
+      { oldGuarded: guarded(legacyClear), newGuarded: guarded(cacheSrc) }
+    )
+    const genChecks = (cacheSrc.match(/gen !== this\.generation/g) ?? []).length
+    expect(
+      'both the landing write and the failure cleanup check the generation',
+      genChecks === 2 && /from '[^']*pdfcache'/.test(viewerSrc),
+      { genChecks }
+    )
+    const constructors = (viewerSrc.match(/new PrefetchCache<HTMLCanvasElement>\(/g) ?? [])
+      .length
+    const stampCalls = (viewerSrc.match(/\.stamp\(\)/g) ?? []).length
+    expect(
+      'the window still receives its cache diagnostics from the injected callback',
+      constructors === 1 &&
+        viewerSrc.includes('d.pfKeys = s.keys.join') &&
+        stampCalls === 2,
+      { constructors, stampCalls }
     )
   }
 
