@@ -3503,8 +3503,12 @@ export async function runSmoke() {
       { name: 'a failing page', last: 12, failAt: 5 },
       { name: 'killed mid-walk', last: 12, deadAt: 5 }
     ]
+    // 167 changed exactly one scenario: a claimed last page. Keep the other
+    // ten as the event-for-event control; that one is checked separately
+    // below against both copied loops. The copies themselves stay verbatim.
+    const equivalence = scenarios.filter((s) => s.name !== 'claimed last page')
     const mismatches: string[] = []
-    for (const s of scenarios) {
+    for (const s of equivalence) {
       const a = makeHost(s)
       const b = makeHost(s)
       const c = makeHost(s)
@@ -3517,7 +3521,93 @@ export async function runSmoke() {
     expect(
       'both old loop shapes and the shared walk produce the same events',
       mismatches.length === 0,
-      { scenarios: scenarios.length, mismatches }
+      { scenarios: equivalence.length, mismatches }
+    )
+
+    // 167: the walk used to lose the last short batch when the final page was
+    // already claimed. The copied loops are still here verbatim as the control
+    // -- proving the loss really happened is what keeps this fix from being a
+    // no-op that happens to pass.
+    const claimedLast: Scenario = {
+      name: 'claimed last page',
+      last: 12,
+      claimed: [3, 12]
+    }
+    const oldClaimed = makeHost(claimedLast)
+    await oldLinksLoop(claimedLast.last, oldClaimed.host, oldClaimed.read)
+    const newClaimed = makeHost(claimedLast)
+    await createPageWalk<string>(newClaimed.host).walk(
+      claimedLast.last,
+      newClaimed.read
+    )
+    expect(
+      'the old loop really dropped the batch when the last page was claimed',
+      oldClaimed.writes.length === 1 &&
+        Object.keys(oldClaimed.writes[0]).length === PAGE_BATCH_SIZE &&
+        oldClaimed.writes[0][10] === undefined &&
+        oldClaimed.writes[0][11] === undefined,
+      {
+        writes: oldClaimed.writes.length,
+        batches: oldClaimed.writes.map((b) => Object.keys(b).join(','))
+      }
+    )
+    expect(
+      'the fixed walk publishes the leftover batch when the last page is claimed',
+      newClaimed.writes.length === 2 &&
+        Object.keys(newClaimed.writes[1]).join(',') === '10,11' &&
+        newClaimed.writes[1][10]?.[0] === 'p10' &&
+        newClaimed.writes[1][11]?.[0] === 'p11',
+      {
+        writes: newClaimed.writes.length,
+        batches: newClaimed.writes.map((b) => Object.keys(b).join(','))
+      }
+    )
+    expect(
+      'the fix adds only the trailing publish and changes nothing earlier',
+      newClaimed.events.length === oldClaimed.events.length + 1 &&
+        newClaimed.events.slice(0, oldClaimed.events.length).join('|') ===
+          oldClaimed.events.join('|') &&
+        newClaimed.events[newClaimed.events.length - 1] === 'write:10,11',
+      {
+        oldEvents: oldClaimed.events.length,
+        newEvents: newClaimed.events.length,
+        last: newClaimed.events[newClaimed.events.length - 1]
+      }
+    )
+
+    // The trailing publish is new: prove it cannot resurrect a walk that was
+    // killed while it still held a short, unflushed batch. Five reads with no
+    // write means the batch really was pending, so this assertion is not one
+    // that passes simply because there was nothing to publish.
+    const deadWalk = makeHost({ deadAt: 5 })
+    await createPageWalk<string>(deadWalk.host).walk(12, deadWalk.read)
+    expect(
+      'a dead walk drops its pending batch instead of publishing on the way out',
+      deadWalk.events.filter((e) => e.startsWith('read:')).length === 5 &&
+        deadWalk.writes.length === 0,
+      {
+        reads: deadWalk.events.filter((e) => e.startsWith('read:')),
+        writes: deadWalk.writes.length
+      }
+    )
+
+    const full = makeHost({})
+    await createPageWalk<string>(full.host).walk(16, full.read)
+    expect(
+      'a full final batch is not published twice',
+      full.writes.length === 2 &&
+        full.writes.every((b) => Object.keys(b).length === PAGE_BATCH_SIZE),
+      { batches: full.writes.map((b) => Object.keys(b).length) }
+    )
+
+    const none = makeHost({})
+    await createPageWalk<string>(none.host).walk(0, none.read)
+    const allClaimed = makeHost({ claimed: [1, 2, 3] })
+    await createPageWalk<string>(allClaimed.host).walk(3, allClaimed.read)
+    expect(
+      'a walk with nothing left over publishes nothing',
+      none.writes.length === 0 && allClaimed.writes.length === 0,
+      { noPages: none.writes.length, allClaimed: allClaimed.writes.length }
     )
 
     const skipped = makeHost({ claimed: [3, 7] })

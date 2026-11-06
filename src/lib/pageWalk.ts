@@ -61,6 +61,12 @@ export function createPageWalk<T>(host: PageWalkHost<T>): PageWalk<T> {
           host.publish(flush)
         }
       }
+      // A claimed last page used to end the loop with a short batch still in
+      // hand: `continue` skipped the `n === last` flush, so the pages just
+      // read never reached the column (167). Publish whatever is left once
+      // the walk finishes. A dead walk returns from inside the loop and so
+      // still publishes nothing on its way out.
+      if (Object.keys(batch).length > 0) host.publish(batch)
     }
   }
 }
