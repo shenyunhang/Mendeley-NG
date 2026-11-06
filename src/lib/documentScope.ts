@@ -75,3 +75,40 @@ export function createDocumentLoad<T>(
     }
   }
 }
+
+/**
+ * The document a panel is showing, readable synchronously by an async action
+ * that started under an earlier one.
+ *
+ * The two rules above are about *a read*: one value carries its docId, one
+ * read carries a generation. A details panel also starts work that is not a
+ * read of one value — a lookup begun by a click, a note saved by a blur, a
+ * patch applied by choosing a candidate row — and every one of those awaits
+ * something that can outlive the paper on screen. They all need the same
+ * question answered: is the document that started this still the one shown?
+ *
+ * `switchTo` is meant to be called during render rather than from an effect:
+ * a ref updated only in an effect still holds the previous document to every
+ * other effect in that same commit, and a promise resolving in that window
+ * would walk straight through a stale guard (155).
+ */
+export interface DocumentScope {
+  switchTo(docId: string): void
+  isCurrent(docId: string): boolean
+  current(): string
+}
+
+export function createDocumentScope(initialDocId: string): DocumentScope {
+  let docId = initialDocId
+  return {
+    switchTo(id: string) {
+      docId = id
+    },
+    isCurrent(id: string) {
+      return id === docId
+    },
+    current() {
+      return docId
+    }
+  }
+}

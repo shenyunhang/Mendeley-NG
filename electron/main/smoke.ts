@@ -15,7 +15,13 @@ import {
   saveAnnotations,
   saveConfig
 } from './store'
-import { DEFAULT_FT_PAGES, PROJECT_URL, type Annotation, type Doc } from '../../shared/types'
+import {
+  DEFAULT_FT_PAGES,
+  PROJECT_URL,
+  type Annotation,
+  type Doc,
+  type MetaCandidate
+} from '../../shared/types'
 // The page budget is written in the renderer and read in the main process.
 // Both halves used to carry their own copy of the same clamp and their own
 // idea of the default. The rule is shared now, and this run checks that the
@@ -73,6 +79,7 @@ import {
 // reads by hand, not by hoping the disk answers in the order it was asked.
 import {
   createDocumentLoad,
+  createDocumentScope,
   valueForDocument,
   type ForDocument
 } from '../../src/lib/documentScope'
@@ -3996,6 +4003,132 @@ export async function runSmoke() {
     )
   }
 
+  // A details panel is kept mounted across papers. A lookup started by a
+  // click, a note saved by a blur and a patch applied by choosing a candidate
+  // row all await something that can outlive the paper on screen; the old
+  // lookup then rendered A's candidates over B and patched them with B's id.
+  // Every answer has to carry the id of the paper that asked, and every write
+  // has to re-ask whether that paper is still shown (174).
+  {
+    const scope = createDocumentScope('paper-a')
+    expect(
+      'the panel scope starts on the document it was mounted for',
+      scope.current() === 'paper-a' && scope.isCurrent('paper-a') && !scope.isCurrent('paper-b'),
+      { current: scope.current() }
+    )
+
+    const writes: string[] = []
+    // The pre-fix shape: the closure holds the id of the paper that started
+    // the read, and writes unconditionally when the answer comes back.
+    const oldRead = (owner: string, answer: string) => writes.push(owner + ':' + answer)
+    const guardedRead = (
+      owner: string,
+      answer: string,
+      s: ReturnType<typeof createDocumentScope>
+    ) => {
+      if (!s.isCurrent(owner)) return
+      writes.push(owner + ':' + answer)
+    }
+
+    oldRead('paper-a', 'lookup-A')
+    expect(
+      'the old lookup really writes its answer after the paper has changed',
+      writes.length === 1 && writes[0] === 'paper-a:lookup-A' && scope.isCurrent('paper-a'),
+      { writes: writes.slice() }
+    )
+    writes.length = 0
+    const switched = createDocumentScope('paper-a')
+    switched.switchTo('paper-b')
+    guardedRead('paper-a', 'lookup-A', switched)
+    expect(
+      'a lookup that outlived its paper writes nothing at all',
+      writes.length === 0,
+      { writes: writes.slice(), current: switched.current() }
+    )
+    guardedRead('paper-b', 'lookup-B', switched)
+    expect(
+      'a lookup that finishes before the paper changes still writes',
+      writes.length === 1 && writes[0] === 'paper-b:lookup-B',
+      { writes: writes.slice() }
+    )
+
+    // The switch has to be synchronous. A ref updated only in an effect is
+    // still the previous paper to every other effect in that same commit, so
+    // a promise resolving in that window would walk through a stale guard.
+    const inRender = createDocumentScope('paper-a')
+    const inEffect = createDocumentScope('paper-a')
+    inRender.switchTo('paper-b')
+    expect(
+      'an effect-only switch would still let the previous paper through',
+      !inRender.isCurrent('paper-a') &&
+        inEffect.isCurrent('paper-a') &&
+        inRender.isCurrent('paper-b') &&
+        !inEffect.isCurrent('paper-b'),
+      { inRender: inRender.current(), inEffect: inEffect.current() }
+    )
+
+    const staleCands: ForDocument<string[]> = { docId: 'paper-a', value: ['candidate-A'] }
+    expect(
+      'a candidate list from the previous paper cannot be drawn on this one',
+      valueForDocument(staleCands, 'paper-b') === undefined &&
+        JSON.stringify(valueForDocument(staleCands, 'paper-a')) === '["candidate-A"]',
+      { onB: valueForDocument(staleCands, 'paper-b') ?? null }
+    )
+    const emptyCands: ForDocument<string[]> = { docId: 'paper-b', value: [] }
+    expect(
+      'an empty answer is still an answer and is not mistaken for no answer',
+      JSON.stringify(valueForDocument(emptyCands, 'paper-b')) === '[]',
+      { onB: valueForDocument(emptyCands, 'paper-b') ?? null }
+    )
+
+    // Values alone do not prove the wiring. The detector is handed one line
+    // of pre-fix code and one guarded line before it is trusted to count
+    // call sites in the product file (168 / 169).
+    const panelRoot = path.join(__dirname, '../..')
+    const panelSrc = fs.readFileSync(
+      path.join(panelRoot, 'src/components/DetailsPanel.tsx'),
+      'utf8'
+    )
+    const guardCount = (t: string) => (t.match(/scope\.current\.isCurrent\(/g) ?? []).length
+    const oldNoteLine =
+      'if (n && typeof n[doc.id] === "string" && !noteDirty.current) setNote(n[doc.id])'
+    const oneGuard = 'if (!scope.current.isCurrent(id)) return'
+    expect(
+      'the guard detector can really tell an unguarded read from a guarded one',
+      guardCount(oldNoteLine) === 0 && guardCount(oneGuard) === 1,
+      { old: guardCount(oldNoteLine), guarded: guardCount(oneGuard) }
+    )
+    expect(
+      'every async exit in the panel re-asks which paper is on screen',
+      guardCount(panelSrc) === 15 &&
+        (panelSrc.match(/scope\.current\.switchTo\(/g) ?? []).length === 1 &&
+        (panelSrc.match(/createDocumentScope\(/g) ?? []).length === 1,
+      { guards: guardCount(panelSrc) }
+    )
+    expect(
+      'the candidate list carries its paper and is patched with that paper id',
+      (panelSrc.match(/valueForDocument\(/g) ?? []).length === 1 &&
+        panelSrc.includes('setCands({ docId: id, value: list })') &&
+        panelSrc.includes('patchDoc(ownerId, c.patch)') &&
+        (panelSrc.match(/const id = doc\.id/g) ?? []).length === 4,
+      {
+        valueCalls: (panelSrc.match(/valueForDocument\(/g) ?? []).length,
+        capturedIds: (panelSrc.match(/const id = doc\.id/g) ?? []).length
+      }
+    )
+    expect(
+      'switching papers resets the spinner, the save flag and the dirty note',
+      (panelSrc.match(/setLooking\(false\)/g) ?? []).length === 2 &&
+        (panelSrc.match(/setSaving\(false\)/g) ?? []).length === 3 &&
+        (panelSrc.match(/noteDirty\.current = false/g) ?? []).length === 2,
+      {
+        looking: (panelSrc.match(/setLooking\(false\)/g) ?? []).length,
+        saving: (panelSrc.match(/setSaving\(false\)/g) ?? []).length,
+        dirty: (panelSrc.match(/noteDirty\.current = false/g) ?? []).length
+      }
+    )
+  }
+
   // Links and citation markers each walked every page of a continuous PDF
   // with their own copy of the same loop, including a literal batch size of
   // 8. Pulling it into a pure controller is only safe if the event sequence
@@ -7401,6 +7534,137 @@ export async function runSmoke() {
       (detFields.type?.opts ?? []).length === 14,
     detFields.type
   )
+  // A lookup started under paper A used to come back on paper B's panel: the
+  // candidate box showed A's title and clicking one patched B's cloud record
+  // with A's metadata. Hold the lookup open with a controlled promise so the
+  // paper really changes while it is in flight (174).
+  // contextBridge exposes `api` with configurable=false and writable=false,
+  // so neither its properties nor the window binding can be replaced from
+  // the renderer. Hold the two IPC handlers in the main process instead:
+  // save the exact listeners Electron registered, put controlled ones in
+  // their place, and put those same listeners back afterwards. A handler
+  // that could not be swapped would make the UI assertions pass vacuously,
+  // so the first assertion is part of their premise.
+  const invokeHandlers = (
+    ipcMain as unknown as {
+      _invokeHandlers?: Map<string, (...args: unknown[]) => unknown>
+    }
+  )._invokeHandlers
+  const savedMeta = invokeHandlers?.get('meta:lookup')
+  const savedPatch = invokeHandlers?.get('doc:patch')
+  const heldOk = !!savedMeta && !!savedPatch
+  expect(
+    'the smoke run can reach the two invoke handlers it is about to hold open',
+    heldOk,
+    { meta: !!savedMeta, patch: !!savedPatch, hasMap: !!invokeHandlers }
+  )
+  const held: { resolve?: (v: MetaCandidate[]) => void } = {}
+  const heldLookup = new Promise<MetaCandidate[]>((r) => {
+    held.resolve = r
+  })
+  const patchCalls: { id: string; body: Record<string, unknown> }[] = []
+  if (heldOk) {
+    ipcMain.removeHandler('meta:lookup')
+    ipcMain.removeHandler('doc:patch')
+    ipcMain.handle('meta:lookup', async () => heldLookup)
+    // A held patch throws instead of writing: the old panel would still call
+    // it — that is exactly the failure being looked for — while the test
+    // touches neither the cloud record nor the library state.
+    ipcMain.handle('doc:patch', async (_e, id: string, body: Record<string, unknown>) => {
+      patchCalls.push({ id, body })
+      throw new Error('smoke: patch held')
+    })
+  }
+  let metaRace: Record<string, unknown> = {}
+  try {
+    if (heldOk) {
+      const first = JSON.parse(
+        await w.webContents.executeJavaScript(
+          '(async()=>{'
+          + 'const frame=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));'
+          + 'const rows=[...document.querySelectorAll("div.row")];'
+          + 'const sel=()=>{const r=document.querySelector("div.row.sel");return r?(r.dataset.id||""):""};'
+          + 'const meta=()=>[...document.querySelectorAll(".meta-actions button")]'
+          + '.find(b=>(b.textContent||"").indexOf("补全元数据")>=0);'
+          + 'if(rows.length<2)return JSON.stringify({error:"not enough rows",rows:rows.length});'
+          + 'window.__metaBefore=sel();'
+          + 'rows[0].click();await frame();'
+          + 'const a=sel();const btn=meta();'
+          + 'if(!btn||btn.disabled)return JSON.stringify({error:"no enabled lookup button",a:a});'
+          + 'btn.click();await frame();'
+          + 'rows[1].click();await frame();'
+          + 'const b=sel();'
+          // The button changes its label while a lookup is running, so ask
+          // whether any button says "查询中" rather than looking the button
+          // up by the label it only has when idle (166: a detector that
+          // cannot find the thing it is looking for also reports all clear).
+          + 'const spinner=[...document.querySelectorAll(".meta-actions button")]'
+          + '.some(b=>(b.textContent||"").indexOf("查询中")>=0);'
+          + 'return JSON.stringify({a:a,b:b,spinner:spinner})})()'
+        )
+      ) as Record<string, unknown>
+      // Resolve the held lookup from the main process, then let the renderer
+      // collect the IPC answer and commit its state. A round trip through
+      // that same handler is the barrier, not a guessed sleep.
+      const candidate: MetaCandidate[] = [
+        {
+          from: 'crossref',
+          score: 0.99,
+          title: 'A 的标题',
+          patch: { title: 'A 的标题', year: 1999 }
+        }
+      ]
+      held.resolve?.(candidate)
+      const second = JSON.parse(
+        await w.webContents.executeJavaScript(
+          '(async()=>{'
+          + 'await window.api.lookupMeta("smoke-barrier");'
+          + 'const frame=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));'
+          + 'await frame();await frame();'
+          + 'const boxes=document.querySelectorAll(".cand-box").length;'
+          + 'const row=document.querySelector(".cand-box .cand-row");'
+          + 'if(row)row.click();'
+          + 'await frame();await frame();'
+          + 'const restore=[...document.querySelectorAll("div.row")]'
+          + '.find(r=>(r.dataset.id||"")===window.__metaBefore);'
+          + 'if(restore)restore.click();await frame();'
+          // clicking a row can move the right pane back to the PDF tab; the
+          // notes assertions that follow need the details pane back where it was
+          + 'const back=[...document.querySelectorAll(".pane-right button")]'
+          + '.find(x=>(x.textContent||"").trim()==="详情");'
+          + 'if(back)back.click();await frame();'
+          + 'return JSON.stringify({boxes:boxes,restored:!!restore,details:!!back,'
+          + 'noteBox:!!document.querySelector("textarea.note-box")})})()'
+        )
+      ) as Record<string, unknown>
+      metaRace = { ...first, ...second, calls: patchCalls.slice() }
+    }
+  } finally {
+    if (heldOk && savedMeta && savedPatch) {
+      ipcMain.removeHandler('meta:lookup')
+      ipcMain.removeHandler('doc:patch')
+      ipcMain.handle('meta:lookup', savedMeta as Parameters<typeof ipcMain.handle>[1])
+      ipcMain.handle('doc:patch', savedPatch as Parameters<typeof ipcMain.handle>[1])
+    }
+  }
+  log('metadata lookup across a paper change', metaRace)
+  expect(
+    'a lookup started under the previous paper cannot appear on the new one',
+    heldOk &&
+      metaRace.error === undefined &&
+      typeof metaRace.a === 'string' && metaRace.a !== '' &&
+      typeof metaRace.b === 'string' && metaRace.b !== '' &&
+      metaRace.a !== metaRace.b &&
+      metaRace.boxes === 0 &&
+      Array.isArray(metaRace.calls) && metaRace.calls.length === 0,
+    metaRace
+  )
+  expect(
+    'the new paper does not inherit the previous lookup spinner',
+    heldOk && metaRace.spinner === false && metaRace.noteBox === true,
+    { spinner: metaRace.spinner, noteBox: metaRace.noteBox, heldOk }
+  )
+
   const setNote = (v: string) =>
     w.webContents.executeJavaScript(
       `(()=>{const t=document.querySelector("textarea.note-box");if(!t)return "no notes box";`

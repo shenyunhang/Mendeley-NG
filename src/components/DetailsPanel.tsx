@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Doc, Folder, MetaCandidate } from '../../shared/types'
+import {
+  createDocumentScope,
+  valueForDocument,
+  type ForDocument
+} from '../lib/documentScope'
 import { byName } from '../lib/tree'
 import { DOC_TYPES, DOC_TYPE_LABELS } from '../lib/doctypes'
 
@@ -67,12 +72,28 @@ export default function DetailsPanel({
   })
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
-  const [cands, setCands] = useState<MetaCandidate[] | null>(null)
+  // A candidate list carries the id of the paper that was looked up, so a
+  // list that somehow outlives its paper cannot even be drawn (155 / 174).
+  const [cands, setCands] = useState<ForDocument<MetaCandidate[]> | null>(null)
   const [looking, setLooking] = useState(false)
   const [tags, setTags] = useState('')
   const [note, setNote] = useState('')
+  const noteDirty = useRef(false)
+
+  /**
+   * Switched during render, on purpose. Anything awaiting an IPC in this
+   * panel asks `isCurrent` before it writes; if the switch happened only in
+   * an effect, the other effects in that same commit would still see the
+   * previous paper (155), and a lookup started under paper A could answer
+   * onto paper B's panel and be patched with B's id.
+   */
+  const scope = useRef(createDocumentScope(doc.id))
+  scope.current.switchTo(doc.id)
 
   const doiOf = (d: Doc) => d.identifiers?.doi ?? d.doi ?? ''
+
+  const visibleCands = cands ? (valueForDocument(cands, doc.id) ?? []) : []
+  const candOwnerId = cands?.docId ?? doc.id
 
   useEffect(() => {
     setForm({
@@ -99,12 +120,18 @@ export default function DetailsPanel({
     })
     setMsg(null)
     setCands(null)
+    setLooking(false)
+    setSaving(false)
+    noteDirty.current = false
     setTags((doc.tags ?? []).join(', '))
     setNote('')
     window.api
       .loadNotes()
       .then((n) => {
-        // the doc may have changed while the notes were in flight
+        // `doc.id` here is the id that started this read. The old comment
+        // said the doc may have changed while the notes were in flight and
+        // then checked with that same old id, which proved nothing.
+        if (!scope.current.isCurrent(doc.id)) return
         if (n && typeof n[doc.id] === 'string' && !noteDirty.current) setNote(n[doc.id])
       })
       .catch(() => undefined)
@@ -126,6 +153,7 @@ export default function DetailsPanel({
     form.keywords !== (doc.keywords ?? []).join(', ')
 
   const save = async () => {
+    const id = doc.id
     setSaving(true)
     setMsg(null)
     const body: Record<string, unknown> = {
@@ -154,33 +182,36 @@ export default function DetailsPanel({
       .map((s) => s.trim())
       .filter(Boolean)
     try {
-      const updated = await window.api.patchDoc(doc.id, body)
+      const updated = await window.api.patchDoc(id, body)
+      if (!scope.current.isCurrent(id)) return
       onSaved({ ...doc, ...updated })
       setMsg('已保存到云端')
     } catch (e) {
+      if (!scope.current.isCurrent(id)) return
       setMsg('保存失败：' + String(e))
+    } finally {
+      if (scope.current.isCurrent(id)) setSaving(false)
     }
-    setSaving(false)
   }
-
-  const noteDirty = useRef(false)
 
   /** Notes are per document and local, so the whole map is rewritten rather
    *  than patched.  A stray blur with no changes must not touch the file. */
   const saveNote = async () => {
     if (!noteDirty.current) return
+    const id = doc.id
     noteDirty.current = false
     try {
       const all = await window.api.loadNotes()
+      if (!scope.current.isCurrent(id)) return
       const text = note.trim()
-      if (text) all[doc.id] = text
-      else delete all[doc.id]
+      if (text) all[id] = text
+      else delete all[id]
       await window.api.saveNotes(all)
       // the list keeps its own copy of the notes so it can search inside
       // them; it has no way of knowing this happened otherwise
-      onNoteSaved?.(doc.id, text)
+      onNoteSaved?.(id, text)
     } catch {
-      setMsg('笔记保存失败')
+      if (scope.current.isCurrent(id)) setMsg('笔记保存失败')
     }
   }
 
@@ -188,12 +219,14 @@ export default function DetailsPanel({
    *  The response is trusted over the local guess because Mendeley normalises
    *  tags, and an emptied list comes back absent rather than as []. */
   const setFlags = async (patch: Partial<Doc>) => {
+    const id = doc.id
     setMsg(null)
     try {
-      const updated = await window.api.patchDoc(doc.id, patch)
+      const updated = await window.api.patchDoc(id, patch)
+      if (!scope.current.isCurrent(id)) return
       onSaved({ ...doc, ...updated })
     } catch (e) {
-      setMsg('保存失败：' + String(e))
+      if (scope.current.isCurrent(id)) setMsg('保存失败：' + String(e))
     }
   }
 
@@ -209,34 +242,43 @@ export default function DetailsPanel({
   const owned = new Set(doc.folder_uuids ?? [])
 
   const findMeta = async () => {
+    const id = doc.id
     setLooking(true)
     setMsg(null)
     try {
-      const list = await window.api.lookupMeta(doc.id)
-      setCands(list)
+      const list = await window.api.lookupMeta(id)
+      if (!scope.current.isCurrent(id)) return
+      // The answer carries the id of the paper it was looked up for, so a
+      // list that outlives its paper can neither be drawn nor applied.
+      setCands({ docId: id, value: list })
       if (!list.length) setMsg('没找到可信的匹配（阈值 0.90，宁缺勿错）')
     } catch (e) {
+      if (!scope.current.isCurrent(id)) return
       setMsg('查询失败：' + String(e))
+    } finally {
+      if (scope.current.isCurrent(id)) setLooking(false)
     }
-    setLooking(false)
   }
 
-  const applyCandidate = async (c: MetaCandidate) => {
+  const applyCandidate = async (c: MetaCandidate, ownerId: string) => {
+    if (!scope.current.isCurrent(ownerId)) return
     setSaving(true)
     try {
-      const updated = await window.api.patchDoc(doc.id, c.patch)
+      const updated = await window.api.patchDoc(ownerId, c.patch)
+      if (!scope.current.isCurrent(ownerId)) return
       onSaved({ ...doc, ...updated })
       setCands(null)
       setMsg('已按 ' + c.from + ' 补全')
     } catch (e) {
-      setMsg('写入失败：' + String(e))
+      if (scope.current.isCurrent(ownerId)) setMsg('写入失败：' + String(e))
+    } finally {
+      if (scope.current.isCurrent(ownerId)) setSaving(false)
     }
-    setSaving(false)
   }
 
   return (
     <>
-      {cands && cands.length > 0 && (
+      {visibleCands.length > 0 && (
         <div className="cand-box">
           <div className="cand-head">
             <span>候选元数据 · 点一条写回云端</span>
@@ -245,8 +287,8 @@ export default function DetailsPanel({
               收起
             </button>
           </div>
-          {cands.map((c, i) => (
-            <div key={i} className="cand-row" onClick={() => applyCandidate(c)}>
+          {visibleCands.map((c, i) => (
+            <div key={i} className="cand-row" onClick={() => applyCandidate(c, candOwnerId)}>
               <span className="t" title={c.title}>
                 {c.title}
               </span>

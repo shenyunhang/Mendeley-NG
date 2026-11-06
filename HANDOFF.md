@@ -8,14 +8,14 @@
 
 ## 0. 一页速览
 
-**还没做的：§9.10 第四轮体检还有两项在飞的排期（② / ③），都已复核带行号。**
+**还没做的：§9.10 第四轮体检只剩 ③ 在飞（中文姓的合成引文 key 两边发散），已复核带行号。**
 第 9.1 的待办已经清空，第 9 节剩下的是竞品对照快照（9.2）、"差距可以接受，先不做"（9.3）、
 "明确不做"（9.4）；9.7 的代码审查按序推进清单已由 161–166 全部清完，
 只剩一个论证过的否决项（⑤）；9.8 的三项已由 167 / 168 / 169 清完；
 9.9 的两项已由 171（v0.1.98）/ 172（v0.1.99）清完；
-9.10 的 ① 已由 173（v0.1.100）落地，② / ③ 按序待下一轮。
+9.10 的 ① 已由 173（v0.1.100）、② 已由 174（v0.1.101）落地，③ 待下一轮。
 
-编号 1–173 全部已落地，按版本记在第 10 节。
+编号 1–174 全部已落地，按版本记在第 10 节。
 
 **改完代码必做的两件事**：
 
@@ -26,12 +26,12 @@
    忘了这一步的后果不是报错，是**安静地全绿**：新加的断言根本没被编译进去，
    屏幕上跑的还是上一版，而你手里多了一份"测试通过"的错觉。判别办法是看日志里
    有没有你新写的断言名——没有就是没跑。
-3. `npm run smoke`——514 个 `expect` 调用点，跑的是真实库。冒烟会真的读 PDF、真的建索引，
+3. `npm run smoke`——528 个 `expect` 调用点，跑的是真实库。冒烟会真的读 PDF、真的建索引，
    所以"功能还在但测试找不到它"这类假失败也能被抓到。**口径**：503 是源码里的调用点，
    一轮日志的 PASS 数会少几条（有 4 条是分支断言，只在满足数据条件时才跑，见 145 / 146）。
    之前这里写的 342 是错的——用同一把尺子量 git 历史：147 版 337、148 版 344、
    149 / 150 版 344、151 版 349、152 版 358、153 版 366、154 版 375、
-   155 版 383、156 版 391、157 版 392、158 版仍 392、159 版 400、160 版 402、161 版 411、162 版 421、163 版 427、164 版 435、165 版 446、166 版 456、167 版 462、168 版 471、169 版 481、170 版仍 481、171 版 492、172 版 503、173 版 514，148 那一行记的「336 → 342」也少算了两条。
+   155 版 383、156 版 391、157 版 392、158 版仍 392、159 版 400、160 版 402、161 版 411、162 版 421、163 版 427、164 版 435、165 版 446、166 版 456、167 版 462、168 版 471、169 版 481、170 版仍 481、171 版 492、172 版 503、173 版 514、174 版 528，148 那一行记的「336 → 342」也少算了两条。
    **计数用 `grep -cE "^[[:space:]]*expect\(" electron/main/smoke.ts`，不要凭印象写**。
 
 **往 `build` 里加东西时，同一个动作要问一遍 `dist` 要不要**：
@@ -51,7 +51,7 @@
 | 6 | Mendeley API 的怪癖（改这块之前必读） |
 | 7 | 环境与打包的坑 |
 | 8 | 功能对照：1.19.8 有什么，NG 现在有什么 |
-| 9 | **还没做的**：待办四条 · 竞品仍缺 · 可接受的差距 · 明确不做 · 代码审查排期（9.7，已清空）· 新一轮体检（9.8，已清空）· 第三轮体检（9.9，已清空）· 第四轮体检（9.10，① 已落地，②③ 在飞） |
+| 9 | **还没做的**：待办四条 · 竞品仍缺 · 可接受的差距 · 明确不做 · 代码审查排期（9.7，已清空）· 新一轮体检（9.8，已清空）· 第三轮体检（9.9，已清空）· 第四轮体检（9.10，①② 已落地，③ 在飞） |
 | 10 | 已落地：基础能力 1–18 · 19–94 · 95–172 |
 | 11 | 主题要点：索引 · 阅读器 · 列表与列 · 键盘焦点浮层 · 图标 · 窗口更新打包 · 确认 · 引导 · 文件夹 · 性能 · 通用 |
 
@@ -761,21 +761,27 @@ Word 插件、分组协作、通用文献管理器的功能军备竞赛。
 §9.9 清完之后按同一把尺子再扫了一遍：TODO / FIXME、`any` / `@ts-ignore`、
 裸字面量、跨文件重复块、异步写入与边界条件，以及**注释写下的承诺有没有兑现**。
 前三类产品侧仍是零残留；本轮三项都是「承诺没兑现」或「同一条规则两处答案不同」，
-按「是不是坐实了用户可见错误」排序。**① 173（v0.1.100）已落地，② / ③ 在飞。**
+按「是不是坐实了用户可见错误」排序。**① 173（v0.1.100）· ② 174（v0.1.101）已落地，只剩 ③ 在飞。**
 
 | 序 | 发现（带行号） | 判断与排期理由 |
 | --- | --- | --- |
 | ① 已做（173） | `src/lib/pdfcache.ts:71–79` 的 `clear()` 只清 `done` / `busy` 两个 Map，而同文件注释明写「在途渲染不得落到换了论文之后的画布」；`:55–61` 的 `.then` 已经挂在 promise 上，删表停不了它。`src/lib/pdfgeom.ts:129` 的 `bitmapKey(n, scale, dpr)` 不含文档 id | **已坐实的用户可见错误**：换论文时 A 的在途位图以 B 会命中的那个 key 写回 `done`，`PdfViewer.tsx:515` 的 `fits()` 只比宽高，于是把 A 的一页画到 B 的 canvas 上；`warm()` 首行 `if (done.has(key)) return` 还让 B 自己的预热被跳过，错位稳定留到 LRU 挤出它。`render()` 在 `:519–528` join 一个旧 flight 之后没有任何再校验，是第二条画错的路。修法见 10.3 的 173；**做这轮时顺带把 DOM 从规则里摘出去**，否则这段时序只能在真窗口里碰运气 |
-| ② 待做 | `src/components/DetailsPanel.tsx:211–235` 的 `findMeta` 在 `lookupMeta` 飞行中换论文，回来的 `setCands(A 的候选)` 会落在 B 的面板上；`applyCandidate` 用的是 B 那次 render 的 `doc.id`，于是把 A 的标题 / 年份 PATCH 到 B（**会写坏云端**）。同组件 `:103–111` 的 `loadNotes().then` 注释自己写着「the doc may have changed while the notes were in flight」，检查用的却正是闭包里那个旧 `doc.id`，且没有 cleanup；`App.tsx:2348` 不给 `DetailsPanel` 加 `key`，组件跨论文复用 | **会写数据，排在 ② 只因为它要动组件层而不是纯模块**。复核过：`smoke.ts` 对 `lookupMeta` 与换论文后的候选框零断言，笔记断言（`:7173–7217`）只在一篇上做。修法应复用 `src/lib/documentScope.ts` 已有的「值带文档 id + 读带代次」两条规则，别再发明第三套；验收要能固定两次 IPC 的完成顺序，不能靠 sleep |
+| ② 已做（174） | `src/components/DetailsPanel.tsx:211–235` 的 `findMeta` 在 `lookupMeta` 飞行中换论文，回来的 `setCands(A 的候选)` 会落在 B 的面板上；`applyCandidate` 用的是 B 那次 render 的 `doc.id`，于是把 A 的标题 / 年份 PATCH 到 B（**会写坏云端**）。同组件 `:103–111` 的 `loadNotes().then` 注释自己写着「the doc may have changed while the notes were in flight」，检查用的却正是闭包里那个旧 `doc.id`；`App.tsx:2348` 不给 `DetailsPanel` 加 `key`，组件跨论文复用 | **动手前复核后从三处扩到六处**：`save` / `setFlags` 的 `onSaved`、`saveNote` 的 `loadNotes().then` 都会把旧论文的结果写进新论文，同一条守卫漏了六个出口。修法没有发明第三套代次：`documentScope.ts` 增 `createDocumentScope`，`switchTo` 在**渲染期**同步切换，否则同一次 commit 里的其它 effect 仍读旧 id（155）；六个出口捕获发起时的 `doc.id`、写回前 `isCurrent`；候选列表改成 `ForDocument<MetaCandidate[]>`，用 `valueForDocument` 渲染、`patchDoc(ownerId, ...)` 写回；换论文时复位 `looking` / `saving` / `noteDirty`。**没有用 `key` 重挂载掩盖**：生命周期碰巧兜住不等于规则保证。冒烟十四条含真窗口端到端，见 10.3 的 174 |
 | ③ 待做 | `src/lib/cite.ts:88–94` 的 `syntheticKey` 注释写「Mirrors what the BibTeX export synthesises, so the two agree」，`src/lib/export.ts:30–34` 的 `surnameKey` 实际差三处：取姓（`surname()` 会回退 / 只取 `last_name`）、字符过滤（前者留 CJK `\u3400-\u9fff`，后者只留 ASCII）、尾部消歧字母 | **注释撒谎且答案已经发散**：同一篇中文作者的文献，复制 `\cite{...}` 给 `张三2023`，BibTeX 导出给 `anon2023a`，写进稿子就对不上。**消歧后缀是有意不同**（批量导出要区分两篇 Smith 2023，单篇引文不需要），所以只能按 172 的注入式收口共享「姓氏段 + 年份」，后缀与取姓留在调用点。`export.ts:340` 的 EndNote `ref-id` 也复用 `surnameKey`，改动会一起到达，要单独核 |
 
 和 §9.7 / §9.8 / §9.9 一样，**排期里写下的诊断到动手前还要再复核一次**（163 / 164 / 168 / 169
-之后第五次）。这轮先复核了三处：① 的 join 路径（`:519–528`）是读源码时才认出来的第二条
-画错路，不在最初的诊断里；② 的 `loadNotes` 闭包与「无 `key` 不重挂载」是同一处病的两半；
-③ 的「Mirrors」注释确实是假的，不是命名不严谨。另有一批裸字面量观察（token 过期的
+之后第五、第六次）。这轮先复核了三处：① 的 join 路径（`:519–528`）是读源码时才认出来的第二条
+画错路，不在最初的诊断里；② 的 `loadNotes` 闭包与「无 `key` 不重挂载」是同一处病的两半，
+动手时又扩出 `save` / `setFlags` / `saveNote` 三个同族出口；③ 的「Mirrors」注释确实是假的，
+不是命名不严谨。**174 还撞上两次「测试自己写错」**：`window.api` 由 contextBridge 以
+`configurable=false, writable=false` 暴露，渲染进程里既不能改属性也不能换绑定，第一版
+renderer stub 没生效却让两条 UI 断言全绿——改成在主进程暂存并替换 `meta:lookup` /
+`doc:patch` 两个 invoke handler 才把时序握在手里；`spinner` 探测器原本按「补全元数据」
+找按钮，而按钮在查询中会改名为「查询中…」，于是永远返回 false（166 的翻版）。两条都是
+**先抓到假绿再修**，不是靠一轮全绿放行。另有一批裸字面量观察（token 过期的
 `3600 / 60` 四处、API 分页的 `limit` 与 `guard`、默认字号 `15` 三处、删除确认预览 `60`
 两处、`Settings.tsx:222` 写死的「前 3 页」）都核过了：**是「同语义多份」或「代码改了
-文案没跟」，不是用户可见错误**，按 §9.7 的排序放在 ②③ 之后，本轮不排期；其中
+文案没跟」，不是用户可见错误**，按 §9.7 的排序放在 ③ 之后，本轮不排期；其中
 `Settings.tsx:222` 留到做「文档与实现一致性」那一轮时和 170 一起处理。
 
 ## 10. 已落地
@@ -1084,6 +1090,7 @@ SetupGuide、批量进度、拖列宽、拖列换顺序、添加时间默认列�
 | 105 | **批量下载 PDF 没有**：只能一篇一篇点阅读器里那个按钮 | 批量栏加「下载 PDF（N）」，N 是选中里"云端有、本地没有"的篇数（为 0 就禁用并说明）；**三条并发**（S3 预签名 URL 并发高了直接被拒，两百条一起发只会失败更多）；有进度、可停止、失败只赔那一篇；路径**成批写回**而不是一篇一次——一次写回就要重跑一遍筛选和排序——**已落地（v0.1.49）** | 9.2c-41 / 9.2d-41「批量下载 PDF 没有」 |
 | 108 | **启动不会自动同步**：磁盘上的库只是云端的一份缓存，而"只在你记得点「同步云端」时才刷新"的缓存，落后的正好是另一台机器上干的那些活 | 有 token 时启动后自己拉一次**增量**（全量五六千篇久到会被察觉，而启动这个位置不需要它；删除只有全量能发现，那是按钮的活）；**静默**——失败 `.catch` 掉不出声（每次启动都因为恰好离线而弹一条红，比一份晚几小时的列表更糟）；`startedSync` ref 保证一次启动只拉一次；设置 → 同步 → 「打开软件时自动同步一次」可关（`syncOnStart`，默认开）——**已落地（v0.1.52）** | 9.2c-38 / 9.2d-38「启动不会自动同步」 |
 | 127 | **PDF 里的链接点不动**：参考文献、图表的交叉引用、正文里的 DOI / arXiv 链接，画在纸上却只是纸——内部章节跳不了，外部地址也开不了。1.19.8 里它们是能点的 | 读 pdf.js 的 link annotation（`getAnnotations({intent:'display'})` 里的 `subtype:'Link'`），画一层透明的 `<a>`：内部目标（可能是字符串名字，要 `getDestination` + `getPageIndex`）解析成页码走 `reveal`，外部地址过一遍**协议白名单**（`http:` / `https:` / `mailto:`，其余丢弃——PDF 是别人写的文件，它的链接是数据不是代码）。**默认不画框**——一篇论文几十个链接，满屏蓝框比没有链接更糟——只在悬停时给一圈描边和手型光标，外部链接加个 ↗；**开着拖选高亮时整层让位**（`pointer-events: none`），否则画高亮的每一次拖动都可能变成一次跳转。两处性能是量出来才做的：一篇十二页的论文有近千个锚点，**按页 memo 掉**（元素引用不变 React 整棵跳过重建），否则搜索框每敲一键都要重造它们——实测按键 194ms → 42ms；连续模式**攒够一屏再写一次 state**，一页一次的话五十页就是五十次全量重渲染。冒烟加三条：**哪篇有链接是问出来的不是写死的**（主进程已有 pdf.js，扫出首页确实带链接的那篇再按标题搜过去），内部链接点了 `1 → 4`，外部链接走打桩的 `shell:openExternal` 收到且只收到一条 `https://orcid.org/…`（不能真开浏览器）——**已落地（v0.1.56）** | 2026-11-02「pdf里面的超链接无法点击 内部章节跳转和外部网页跳转都不能用」 |
+| 174 | **换一篇论文时，「补全元数据」的在途候选会落到新论文上，点一下就把旧论文的元数据写进新论文的云端记录**：`DetailsPanel.tsx:211–235` 的 `findMeta` 在 `lookupMeta` 飞行中换论文，`setCands(A 的候选)` 落在 B 的面板；`applyCandidate` 用的是 B 那次 render 的 `doc.id`，`patchDoc(B.id, A.patch)` 直接写坏云端。同组件 `:103–111` 的 `loadNotes().then` 注释自称「the doc may have changed」却用闭包里那个旧 `doc.id` 检查；`save` / `setFlags` / `saveNote` 是同一族。**复核后从三处扩到六个出口**，且 `App.tsx:2348` 不给组件加 `key`，所以没有一次重挂载替它兜底 | ①`documentScope.ts` 增 `createDocumentScope`：`switchTo` 在**渲染期**同步切换，否则同一次 commit 的其它 effect 仍读到旧 id（155）；六个出口捕获发起时的 `doc.id`，跨 await 写回前 `isCurrent`。②候选列表改 `ForDocument<MetaCandidate[]>`，`valueForDocument` 决定能不能画、`patchDoc(ownerId, ...)` 决定写哪一篇；换论文时复位 `looking` / `saving` / `noteDirty`。**不用 `key` 重挂载掩盖**：生命周期碰巧兜住不等于规则保证。③冒烟十四条：纯规则手动 resolve 对照（含「effect-only 切换会放行旧读」判别式、值带 docId、空数组仍是答案）、静态读回数 15 处守卫 / 1 处 `switchTo` / 4 处 id 捕获 / 复位次数、以及一条**真窗口端到端**。`window.api` 是 `configurable=false, writable=false`，renderer 里改不动，改为在主进程暂存并替换 `meta:lookup` / `doc:patch` 两个 invoke handler，用受控 promise 固定换论文与返回的顺序，结束把**原 listener 原样装回**；被顶替的 patch 只记录并抛错，测试本身不碰云端与库。断言 514 → 528。**验证**：`typecheck` / `build` 通过；r1 抓到 stub 未生效的假绿与笔记搜索被污染（`rows:0`），r2 是我拼错注入脚本的一个 `}` 导致 `crashed` 提前退出，r3 是检查脚本自己误伤了 `&&` 链、build 没跑（**两次都当作真红查，没有记成噪声**），r4 明确报出 `configurable=false`，r5 **EXIT=0 / 524 PASS / 0 FAIL**；**对照轮**只撤 `DetailsPanel.tsx`、保留十四条断言，恰好红要求修复的五条（三条静态接线 + 两条 UI），守卫断言仍绿，UI 那条直接报 `spinner:true, boxes:1, calls:[{id:B}]`——**旧版真的用 B 的 id 发起了 PATCH**；另红四条 11.11 引文弹窗噪声，修复版轮次全绿。修好 spinner 探测器（按钮查询中会改名，按旧文案找永远返回 false，166 的翻版）后重跑对照轮才拿到这个结果。r6 **EXIT=0 / 524 PASS / 0 FAIL**，renderer hash r5 / r6 同为 `index-Bcg5dzan.js`、对照轮 `index-B8XRTZDl.js`。**已落地（v0.1.101）** | 9.10 ② · 2026-11-06「继续」 |
 | 173 | **换一篇论文时，上一篇的在途预取位图会以新论文会命中的 key 落进缓存**：`PrefetchCache.clear()` 只清 `done` / `busy` 两个 Map，可 `warm()` 的 `.then` 已经挂在 promise 上，`clear()` 停不了它；而 `bitmapKey(n, scale, dpr)` 里没有文档 id，A 的第 6 页与 B 的第 6 页在同一个缩放、同一个 dpr 下是同一个 key。`PdfViewer.tsx:515` 的 `fits()` 只比宽高，于是 A 的位图被 `drawImage` 到 B 的 canvas 上；`warm()` 首行 `if (done.has(key)) return` 让 B 自己的预热直接跳过，错页会一直留到 LRU 把它挤出去。`render()` 里 join 一个旧 flight 之后也照画不误，是第二条路。**同文件 `clear()` 上方的注释白纸黑字写着「在途渲染不得落到换了论文之后的画布」，实现从来没做到** | ①给缓存一代次：`clear()` 递增 `generation`，`warm()` 捕获它，落地写与失败清理都先比对；stale 时抛 `StaleFlight`，于是 `warmAround` 的 `.catch`、join flight 的 `render()` 的 `try/catch` 各自走**已有**的失败路径，不需要在产品代码里再画一条新分支。顺带堵上「stale 失败误删新一代次同 key 的 flight」。②**把 DOM 从规则里摘出去**：`stamp()` 改收注入回调、位图泛型化，窗口那三行 dataset 由 `PdfViewer` 的构造函数闭包提供；`tsconfig.node.json` 的 include 加一行，主进程就能直接 import 这个类，用**手动 resolve 的 promise** 逐场景验，不开 PDF、不睡。这是 159 那条「可注入不是为测试加接口」的同一笔。③冒烟十一条：把修复前的 `warm` / `clear` 逐字抄成对照类，先证明旧实现**真的**会把 `paper-A` 写进 `done`、也真的会把它交给 join 的翻页；再验 stale 不落地且两处等待者都拿到 `StaleFlight`、同代次仍正常、stale 失败不误删新 flight、旧渲染最后完成也盖不掉新位图、LRU / touch / drop 未变、以及「这些规则是在一个没有 document 的进程里验的」；静态三条先拿旧 `clear()` 原文喂探测器证明它**分得出**有无守卫（168），再数 `gen !== this.generation` 恰好两处、`new PrefetchCache<HTMLCanvasElement>(` 一处、`.stamp()` 两处。断言 503 → 514。**验证**：`typecheck` / `build` 通过；r1 505 PASS / 4 红（`prefetch serves a step back` / `forward` 与两条高亮 undo，全是 11.11 记过的时序类，且**基线轮这四条全绿**）；**对照轮**只把 `pdfcache.ts` 换成「DOM-free 但无代次」的基线、保留十一条新断言，恰好红要求修复的五条、六条守卫仍绿，其中 `the newer paper bitmap wins even when the old render finishes last` 直接报 `lateOutcome: 'resolved', tag: 'paper-A'`——**旧版为什么必须红有了字面证据**；renderer 产物 r1 / 最终轮同为 `index-B8XRTZDl.js`、基线轮为 `index-fd75Fcr6.js`，恢复后 hash 原样回来。r3 **EXIT=0 / 510 PASS / 0 FAIL**。**已落地（v0.1.100）** | 9.10 ① · 2026-11-06「继续未完成的工作」 |
 | 172 | **同一段「把一行里的文字碎片并成一个矩形」被手写了两遍**：`src/lib/pdffind.ts:60–70` 与 `src/lib/pdfsel.ts:43–55` 的合并体逐行相同（`right = max`、`x = min`、`w = right - x`、`h = max`），只有「算不算同一行」的判据不同——查找在 0..1 页坐标里用 `\|dy\| < 0.006` 且要求 `r.x <= t.x + t.w + 0.02`，选区在 CSS 像素里用 `\|dy\| < 3` 且不管间距。这段合并回答的是「一个文本 run 一个碎片，但读者要的是一行一个框」，既不是查找也不是选区，规则却复制在两个业务模块里连名字都没有（与 162 的页遍历同型） | 新建 `src/lib/rectLines.ts`：`mergeRectsIntoLines(rects, sameLine)` **只收口合并动作**，判据由调用者注入——统一谓词会静默改答案，这是 166「同一类表达式有两种形状」的翻版；排序也仍留在调用点，因为哪块成为行的锚点取决于顺序，搬进来等于多做一次行为决定。`LineRect` 是结构化类型，纯模块不 import `pdfgeom.ts`（同 `cardSpot.ts`）；`tsconfig.node.json` include 加一行。冒烟 11 条：两份旧循环**逐字**抄进 smoke，488 组输入（8 组手工造的强制合并 / 空隙 / NaN / 负宽，加 480 组确定性伪随机，覆盖 0..1 与像素两套量纲）× 2 谓词共 976 次逐值 `Object.is` 比对，零 drift；对照实验用一组 `dy = 1` 的碎片证明旧 find 答 2 行、旧 sel 答 1 行，注入两个谓词后各自仍答 2 / 1（证明「注入」不是形式主义）；输入数组不被修改、首块 y 保留、空 / 单块原样、非有限值不净化；静态读回两个文件数**调用点**、各一次 `raw.sort(` 证明排序仍在调用点、各自仍带自己的容差且没继承对方的；8 行旧代码喂给同一个 detector 证明「零残留」非 vacuous；新模块不含 `.sort(` 也不含任一容差。**对照轮**：只 `git stash push -- src/lib/pdffind.ts src/lib/pdfsel.ts`、保留新模块与 11 条断言，renderer `index-BK-vLw6N.js` → `index-C-rk1iFh.js`（正是 171 版产物），基线**恰好红「接线」与「零残留」两条**，其余九条仍绿，且基线没有额外噪声红；恢复后 hash 原样回来。r1 一条行菜单红（`titleCopied` 为空，§11.11 记过的剪贴板 / 行菜单噪声）、r2 五条红（四条行菜单 + prefetch）、r3 一条 `keystroke stays cheap` 红（101ms）、r4 五条红（130ms 按键 + 四条行菜单）、r5 四条行菜单 `open: 0`，红点逐轮变化且对照轮的基线自己也只红那两条接线，按 11.11 判机器噪声；11 条新断言每轮全绿；r6 **EXIT=0 / 499 PASS / 0 FAIL**。断言 492 → 503。**已落地（v0.1.99）** | 9.9 ② |
 | 171 | **设置面板把一个设置显示成两个数字**：页数输入框只在「输入不可用」时才写回自己；输入 `999` 时 `commit()` 把它夹成 50 交给 `onFtPages`，`App.tsx` 的 `changeFtPages` 立刻 `setFtPages(50)`、写配置、作废索引，而输入框仍是 `999`。读者看到的是「前 999 页」，实际建的是前 50 页；而且 `commit()` 自己还留着 `Math.min(50, Math.floor(n))` 和字面下界 `1`，正是 170 刚写进 README「边界与默认值只有一份规则」的那条规则的第二份 | 新建 `src/lib/pageBudgetCommit.ts`（DOM-free，主进程冒烟可直接 import）：`commitPageBudget(raw)` 返回 `{ shown, applied }`，`applied` 走 `clampFullTextPages`，`shown` 恒为 `String(applied)`；`Settings.tsx` 的 `commit()` 缩成三行，`setPages(shown)` + `onFtPages(applied)`，`DEFAULT_FT_PAGES` / `FULL_TEXT_MIN_PAGES` 都从 `shared/` 取。**刻意保留 `Number.isFinite` 判断**：它不是第二份边界，而是这个输入框接受什么——旧逻辑对 `Infinity` / 负数回默认 3，纯 `clampFullTextPages` 会给 50 / 1，那才是行为变化；`tsconfig.node.json` include 加一行。冒烟 11 条：旧 `commit()` 逐字抄进 smoke 当对照，311 组输入（空串 / 空格 / `abc` / NaN / ±Infinity / `0x10` / `+7` / `007` / 负数 / `-60..160` 全表 / 小数）逐值 `Object.is` 比对 `applied`，零移动；对照证明旧版 `shown` 是 `999` 而新版是 `50` 且 `applied` 相同（不是 no-op）；不可用输入仍回默认；`shown` 恒等于 `String(applied)` 且落在 `[1,50]` 整数；`clampFullTextPages` 幂等，证明 `App` 再夹一次不改值；静态读回 `Settings.tsx` 与纯模块数**调用点**（import 路径也含名字），证明接线真做了、模块只调一次共享规则且没有自己的 `Math.min` / `Math.floor`；四段旧代码喂给同一个探测器证明「零残留」不是 vacuous。**UI 端到端**：在设置面板里注入 `999` + Enter，读回 `{"shown":"50","ftPages":50}`。**对照轮**：只 `git stash push -- src/components/Settings.tsx`、保留纯模块与 11 条断言，renderer `index-C-rk1iFh.js` → `index-CpEXTiSO.js`（正是 169 版产物），基线**恰好红接线、零残留、UI 三条**，UI 那条报 `{"shown":"999","ftPages":50}`——bug 的直接证据；其余八条仍绿，恢复后 hash 原样回来。r1 四条红（shell actions / prefetch 前后两步 / 二次启动聚焦）、基线四条行菜单红、r2 一条 prefetch 红、r3 两条（`keystroke stays cheap` 量到 417ms，机器明显在忙；再加 prefetch），红点逐轮变化且基线自己也红，按 11.11 判机器噪声，不做额外回退；r4 **EXIT=0 / 488 PASS / 0 FAIL**。断言 481 → 492。**已落地（v0.1.98）** | 用户「继续」后的第三轮体检 9.9 ① |
@@ -2187,6 +2194,19 @@ demo 假设你知道，产品在你需要的时候告诉你。
 - **file:// 别用 `navigator.clipboard`**：渲染进程是 `loadFile` 出来的 file://
   页面，异步剪贴板能不能用取决于权限策略，静默失败最难查。走 Electron 的
   `clipboard` 模块，顺便让冒烟能 `readClipboard()` 回读验证。
+
+- **174 「这条异步结果还能不能写」要在渲染期就能答，而不是等 effect**：详情面板
+  跨论文复用同一个实例，六处跨 await 的写（候选列表、笔记、保存、星标、候选
+  PATCH）要么用闭包里的旧 `doc.id`、要么用当前 render 的新 `doc.id`，两种都错。
+  给组件一个 `createDocumentScope`，`switchTo` 放在**渲染期**——放进 effect 就等于
+  同一次 commit 里后面的 effect 还看着上一篇（155），在那一瞬间 resolve 的 promise
+  会直接穿过守卫。**值也要带文档 id**：候选列表存成 `ForDocument<T>`，
+  `valueForDocument` 决定能不能画，`ownerId` 决定写哪一篇；别把「没画出来」
+  当成「不会被写」，也别靠给组件加 `key` 重挂载来碰巧兜住。另一半是测试的诚实：
+  contextBridge 的 `window.api` 既不可写也不可重定义，第一版 renderer stub 没生效、
+  UI 断言却全绿；改成主进程暂存 invoke handler 才真正把时序握在手里。
+  **凡是「没有找到任何 X」的探测器，先证明它找得到 X**——spinner 那条按空闲文案
+  找按钮，按钮在查询中会改名，于是永远答 false（168）。
 
 - **172 抽「同一段代码」之前，先分清哪一部分才真的相同**：两份合并循环逐行一样，
   可「算不算同一行」的判据一个在 0..1 坐标里带邻接检查、一个在像素里只比 y；连判据一起收
