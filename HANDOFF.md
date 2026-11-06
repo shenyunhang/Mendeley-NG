@@ -13,7 +13,7 @@
 9.7 的代码审查按序推进清单已由 161–166 全部清完，只剩一个论证过的否决项（⑤）；
 9.8 的新一轮体检三项已由 167 / 168 / 169 全部清完。
 
-编号 1–169 全部已落地，按版本记在第 10 节。
+编号 1–170 全部已落地，按版本记在第 10 节。
 
 **改完代码必做的两件事**：
 
@@ -50,7 +50,7 @@
 | 7 | 环境与打包的坑 |
 | 8 | 功能对照：1.19.8 有什么，NG 现在有什么 |
 | 9 | **还没做的**：待办四条 · 竞品仍缺 · 可接受的差距 · 明确不做 · 代码审查排期（9.7，已清空）· 新一轮体检（9.8，已清空） |
-| 10 | 已落地：基础能力 1–18 · 19–94 · 95–169 |
+| 10 | 已落地：基础能力 1–18 · 19–94 · 95–170 |
 | 11 | 主题要点：索引 · 阅读器 · 列表与列 · 键盘焦点浮层 · 图标 · 窗口更新打包 · 确认 · 引导 · 文件夹 · 性能 · 通用 |
 
 第 11 节按**主题**重排，是踩过的坑；第 10 节按**编号**排，是做过的事。
@@ -132,12 +132,12 @@ Chromium 天然按系统 scale factor 缩放 CSS 像素，**不需要任何 DPI 
 
 ```bash
 npm install
-npm run build       # 产出 out/
+npm run build       # 产出 out/；smoke 不替你构建，跑的是 out/ 里那一版
 npm start           # 启动（走 scripts/start.mjs，见第 7 节）
 npm run dev         # 热重载
 npm run typecheck   # main/preload 与 renderer 双侧检查
 npm run dist        # 打包 NSIS 安装包
-npm run smoke       # 端到端自检，出两张截图
+npm run smoke       # 真实库 + 真实 PDF 自检，断言口径见 §0，出两张截图
 npm run smoke -- --no-sync   # 用本地缓存，跳过同步
 npm run demo        # 造一份虚构的库，截取 README 里的四张图
 ```
@@ -145,9 +145,11 @@ npm run demo        # 造一份虚构的库，截取 README 里的四张图
 **首次使用需要 token**，没有内置 client credential，每人都要注册自己的应用。
 完整步骤见 README「获取 token」，或直接跑 `node scripts/get-token.mjs <client_id> <client_secret>`。
 
-自检（`--smoke`）会拉库、开隐藏窗口、点第一行有 PDF 的文献、`capturePage` 截图。
-日志里打出的 canvas 后备尺寸应是 CSS 尺寸的 `dpr` 倍——**这是验证高 DPI 是否真生效的唯一可靠手段**，
-比肉眼看截图靠谱。
+自检（`--smoke`）会拉库、开隐藏窗口、逐条断言，并拍两张图到系统临时目录：
+`mendeley-ng-smoke.png` 与 `mendeley-ng-smoke-light.png`（浅色是临时改 DOM，拍完还原，
+不动用户配置）。两张都在点开第一行 PDF **之前**；点开之后改为读 canvas 后备尺寸与
+CSS 尺寸，前者应是后者的 `dpr` 倍——**这是验证高 DPI 是否真生效的唯一可靠手段**，
+比肉眼看截图靠谱。断言数、口径与时序噪声判据在 §0 和 §11.11。
 
 ## 4. 结构
 
@@ -172,60 +174,64 @@ electron/main/
     docs.ts       doc:* / folder:* / trash:* / meta:*
     marks.ts      annotations:* / notes:* / reading:*
     files.ts      pdf:download / pdf:rename / ft:*
-  smoke.ts        --smoke 自检（四千多行，自成一体，只在开发时跑）
+  smoke.ts        --smoke 自检（自成一体，只在开发时跑，断言数见 §0）
   perf.ts         --perf 测量
   demo.ts         --demo 截图
 electron/preload/index.ts   contextBridge，只暴露白名单方法
 src/                        renderer
   App.tsx            组装层：把 hooks 解构出来、排进 JSX，自己不再持有大块状态
-  lib/hooks/
-    useConfig.ts    落盘的那些值：列、排序、列宽、模板、引文样式、面板宽度、主题、字号
-    useLibrary.ts   云端库：缓存、同步、token 三态
-    useFullText.ts  全文检索：词、带词标签的命中、索引进度、重建 / 取消 / 清空（见 152）
-    useUndo.ts      撤销栈
-    useSelection.ts 选中了哪些行、右栏在看哪篇：状态袋，动作留在 App（见 149）
-    usePaneWidths   三栏的拖拽与落盘：整块自包含，只向 useConfig 借 setter
-    useExport.ts    把库写成文件（书目/笔记/标注/带走整个库）：对库只读，见 150
-    useFlashMessage 短消息：一个待触发的清除，卸载时收干净，见 151
-    useCiteCard    引文卡片：显示、定位、悬停延时、翻页关闭，见 158 / 159
-  lib/flash.ts      与 React 无关的一个待触发清除，泛化到任意 payload，见 151 / 156
-  lib/latestSearch.ts 只答当前那一个词的防抖调度器，时钟与请求可注入，见 152
-  lib/documentScope.ts 按文献 id 给状态贴标签、给读盘加代次，不依赖 React，见 153
-  lib/findScan.ts   一次 PDF 查找的边走边答与代次，答案带词标签，见 154
-  lib/lazyPages.ts  按文献代次管理的单页懒读，见 155
-  lib/pageWalk.ts   连续模式的页遍历：一屏一次写入，批大小具名，见 162
-  lib/bitmapPixelSize.ts 页 canvas 的背板像素尺寸与 dpr 兜底，四处共用，见 169
-  lib/cardSpot.ts  固定卡片的定位规则与 resize 重测，viewport 可注入，见 159
-  lib/panes.ts      三栏宽度与各栏的地板（拖拽与 useConfig 共用）
-  lib/columns.ts    列的定义、迁移与排序取值
-  components/       视图组件
+  components/        视图组件
     PdfViewer.tsx   阅读器：缩放、翻页、拖选，以及把下面这些拼起来的 JSX
     …               其余视图
-  lib/pdfgeom.ts    三个坐标空间的换算：PDF 点 / 页面 0..1 盒 / CSS 像素
-  lib/pdfcache.ts   邻近页的位图：留哪几张、哪张在渲染中（LRU）
-  lib/pdftext.ts    文本层（让高亮跟着词走，而不是跟着手画的框）
-  lib/pdffind.ts    在一页里找一个词，返回 0..1 矩形
-  lib/pdfsel.ts     把浏览器的选区换算成页面矩形
-  lib/hooks/
-    useConfig.ts        落盘的那些值：列、排序、列宽、模板、引文样式、面板宽度、主题、字号
-    useLibrary.ts       云端库：缓存、同步、token 三态
-    useFullText.ts      全文检索：词、命中、索引进度、重建 / 取消 / 清空
-    useUndo.ts          撤销栈
-    useContinuousPages  连续滚动的账本：哪几页画过、画在什么缩放、哪几页在视野里
-    usePdfFind          在这一篇里找一个词：命中带词标签、忙碌由答案派生，见 154
-    usePdfAnnotations   这篇的标注：本地、云端、选中的那条，都带 docId 标签（见 153）
-    usePdfLinks / usePdfRefs  链接与引文标记按页懒取，换论文时作废在飞读取；连续模式遍历共用 pageWalk（见 155 / 162）
-shared/types.ts             main / preload / renderer 三端共享类型与默认值
-shared/fullTextPages.ts     页数预算的唯一规则与边界，跨 IPC 两侧共用；配置恢复走 restoredPageBudget（见 161 / 163）
-src/lib/timing.ts          二十二处延时与短消息时长的具名常量；同值刻意各留一个键（见 164 / 168）
-shared/failures.ts         十二处静默失败的具名原因、忽略 / 上报两道门与可注入计数（见 165）
-shared/clamp.ts            六处裸夹取共用的纯规则 clampToRange，刻意不做非有限值兜底（见 166）
-scripts/                    start.mjs 启动器、demo.mjs 假库与截图、get-token.mjs、check-api.mjs、hooks/
-docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
+  lib/hooks/         React 状态簇，按「谁跟谁一起变」切
+    useConfig.ts    落盘的那些值：列、排序、列宽、模板、引文样式、面板宽度、主题、字号
+    useLibrary.ts   云端库：缓存、同步、token 三态
+    useFullText.ts  全文检索：词、带词标签的命中、索引进度、重建 / 取消 / 清空（152）
+    useUndo.ts      撤销栈
+    useSelection.ts 选中了哪些行、右栏在看哪篇：状态袋，动作留在 App（149）
+    usePaneWidths   三栏的拖拽与落盘，整块自包含，只向 useConfig 借 setter（149）
+    useExport.ts    把库写成文件：书目 / 笔记 / 标注 / 带走整个库，对库只读（150）
+    useFlashMessage 短消息：一个待触发的清除，卸载时收干净（151）
+    useCiteCard     引文卡片：显示、定位、悬停延时、翻页关闭（158 / 159）
+    useContinuousPages 连续滚动的账本：哪几页画过、画在什么缩放、哪几页在视野里
+    usePdfFind      在这一篇里找一个词：命中带词标签、忙碌由答案派生（154）
+    usePdfAnnotations 这篇的标注：本地、云端、选中的那条，都带 docId 标签（153）
+    usePdfLinks / usePdfRefs 链接与引文标记按页懒取，换论文时作废在飞读取；
+                    连续模式遍历共用 pageWalk，末页不丢批（155 / 162 / 167）
+  lib/               与 React 无关的纯规则，主进程冒烟能直接 import 来测
+    flash.ts        一个待触发清除，泛化到任意 payload（151 / 156）
+    latestSearch.ts 只答当前那一个词的防抖调度器，时钟与请求可注入（152）
+    documentScope.ts 按文献 id 给状态贴标签、给读盘加代次（153）
+    findScan.ts     一次 PDF 查找的边走边答与代次，答案带词标签（154）
+    lazyPages.ts    按文献代次管理的单页懒读（155）
+    pageWalk.ts     连续模式的页遍历：一屏一次写入、末页不丢批（162 / 167）
+    bitmapPixelSize.ts 页 canvas 的背板像素尺寸与 dpr 兜底，四处共用（169）
+    cardSpot.ts     固定卡片的定位规则与 resize 重测，viewport 可注入（159 / 160）
+    timing.ts       二十二处延时与短消息时长的具名常量（164 / 168）
+    panes.ts        三栏宽度与各栏的地板（拖拽与 useConfig 共用）
+    columns.ts      列的定义、迁移与排序取值
+    pdfgeom.ts      三个坐标空间的换算：PDF 点 / 页面 0..1 盒 / CSS 像素
+    pdfcache.ts     邻近页的位图：留哪几张、哪张在渲染中（LRU）
+    pdftext.ts      文本层（让高亮跟着词走，而不是跟着手画的框）
+    pdffind.ts      在一页里找一个词，返回 0..1 矩形
+    pdfsel.ts       把浏览器的选区换算成页面矩形
+    offline.ts / export.ts / import.ts / cite.ts / refly.ts / dupes.ts
+                    离线文案、导入导出、引文格式、补全元数据、查重
+    pdflinks.ts / pdfrefs.ts / pdfmeta.ts / popspot.ts / filters.ts
+                    PDF 链接与引文标记、抽标识符、浮层定位、筛选
+shared/             三端共享，只有一份的规则放这里
+  types.ts          main / preload / renderer 三端共享类型与默认值
+  text.ts           标题归一化与相似度（查源与查重共用）
+  fullTextPages.ts  页数预算的唯一规则与边界；配置恢复走 restoredPageBudget（161 / 163）
+  failures.ts       十二处静默失败的具名原因、忽略 / 上报两道门（165）
+  clamp.ts          六处裸夹取共用的纯规则 clampToRange（166）
+scripts/            start.mjs 启动器、demo.mjs 假库与截图、get-token.mjs、check-api.mjs、
+                    copy-worker.mjs、signcheck.mjs、make-icon.mjs、hooks/
+docs/screenshots/   README 用的四张图，由 `npm run demo` 生成
 ```
 
-`index.ts` 曾经过五千六百行：入口、窗口、同步、四十多个 IPC 通道，外加四千三百行的自检脚本。
-现在它只有八十几行，做的事情是"决定这次是哪一种启动"。**改主进程时先想清楚该落在哪个文件**——
+`index.ts` 曾经把入口、窗口、同步、四十多个 IPC 通道和整套自检脚本都装在一个文件里。
+现在它只剩"决定这次是哪一种启动"这一件事，自检也单独成篇。**改主进程时先想清楚该落在哪个文件**——
 新加一个 IPC 通道是"它属于哪个域"的问题，不是"插到列表哪里"的问题。
 
 渲染器这一侧是同样的思路，只是粒度更细：`App.tsx` 曾是近两千八百行的状态堆，
@@ -237,7 +243,7 @@ docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
 `PdfViewer.tsx` 曾有两千零三十六行，同一套道理往下走了一层：一个组件的"状态"和
 "这块在算什么"是可以分开的。算的东西进了 `lib/pdf*.ts`——几何换算、位图缓存、文
 本层、查找、选区——它们都不认识 React；要跟着挂载与卸载走的账本进了 `lib/hooks/`。
-组件自己剩下缩放、翻页、拖选和 JSX，一千一百多行。**判断依据同样不是长度**：连续
+组件自己只剩缩放、翻页、拖选和 JSX。**判断依据同样不是长度**：连续
 滚动那套"哪几页画过、画在什么缩放上"既不是缩放也不是查找，它是第三件事，所以它是
 第三个 hook。
 
@@ -989,7 +995,7 @@ Word 插件、分组协作、通用文献管理器的功能军备竞赛。
 | 93 | **两套把手会打架** | 宽度把手在列头右缘，它的 mousedown 冒泡到列头就同时启动了"换位置" | 把手里 `e.stopPropagation()` |
 | 94 | **落点位置说不清** | 高亮某一列回答的是"哪一列"，而读者问的是"插在哪两列之间" | 在**间隙**上画一条 2px 竖线，按指针在列中线的哪一侧决定插到哪 |
 
-### 10.3 95–169（2026-10-31 起）
+### 10.3 95–170（2026-10-31 起）
 
 先盘了一遍现状，把"还没做"的列出来。编号接着 9.2l 的 94 往下走。
 **已做过的不再重复**（错误条可关闭、Esc 关浮层、主题、幽灵文献、文件夹按名排、
@@ -1034,6 +1040,7 @@ SetupGuide、批量进度、拖列宽、拖列换顺序、添加时间默认列�
 | 105 | **批量下载 PDF 没有**：只能一篇一篇点阅读器里那个按钮 | 批量栏加「下载 PDF（N）」，N 是选中里"云端有、本地没有"的篇数（为 0 就禁用并说明）；**三条并发**（S3 预签名 URL 并发高了直接被拒，两百条一起发只会失败更多）；有进度、可停止、失败只赔那一篇；路径**成批写回**而不是一篇一次——一次写回就要重跑一遍筛选和排序——**已落地（v0.1.49）** | 9.2c-41 / 9.2d-41「批量下载 PDF 没有」 |
 | 108 | **启动不会自动同步**：磁盘上的库只是云端的一份缓存，而"只在你记得点「同步云端」时才刷新"的缓存，落后的正好是另一台机器上干的那些活 | 有 token 时启动后自己拉一次**增量**（全量五六千篇久到会被察觉，而启动这个位置不需要它；删除只有全量能发现，那是按钮的活）；**静默**——失败 `.catch` 掉不出声（每次启动都因为恰好离线而弹一条红，比一份晚几小时的列表更糟）；`startedSync` ref 保证一次启动只拉一次；设置 → 同步 → 「打开软件时自动同步一次」可关（`syncOnStart`，默认开）——**已落地（v0.1.52）** | 9.2c-38 / 9.2d-38「启动不会自动同步」 |
 | 127 | **PDF 里的链接点不动**：参考文献、图表的交叉引用、正文里的 DOI / arXiv 链接，画在纸上却只是纸——内部章节跳不了，外部地址也开不了。1.19.8 里它们是能点的 | 读 pdf.js 的 link annotation（`getAnnotations({intent:'display'})` 里的 `subtype:'Link'`），画一层透明的 `<a>`：内部目标（可能是字符串名字，要 `getDestination` + `getPageIndex`）解析成页码走 `reveal`，外部地址过一遍**协议白名单**（`http:` / `https:` / `mailto:`，其余丢弃——PDF 是别人写的文件，它的链接是数据不是代码）。**默认不画框**——一篇论文几十个链接，满屏蓝框比没有链接更糟——只在悬停时给一圈描边和手型光标，外部链接加个 ↗；**开着拖选高亮时整层让位**（`pointer-events: none`），否则画高亮的每一次拖动都可能变成一次跳转。两处性能是量出来才做的：一篇十二页的论文有近千个锚点，**按页 memo 掉**（元素引用不变 React 整棵跳过重建），否则搜索框每敲一键都要重造它们——实测按键 194ms → 42ms；连续模式**攒够一屏再写一次 state**，一页一次的话五十页就是五十次全量重渲染。冒烟加三条：**哪篇有链接是问出来的不是写死的**（主进程已有 pdf.js，扫出首页确实带链接的那篇再按标题搜过去），内部链接点了 `1 → 4`，外部链接走打桩的 `shell:openExternal` 收到且只收到一条 `https://orcid.org/…`（不能真开浏览器）——**已落地（v0.1.56）** | 2026-11-02「pdf里面的超链接无法点击 内部章节跳转和外部网页跳转都不能用」 |
+| 170 | **文档自己先烂了，而且烂的是最容易被当成事实的那几行**：README 还写着「编号 1–127」（实际已到 169）、结构树停在只有 8 个文件的早期版本、发布示例用轻量 `git tag v0.1.0`（项目铁律是 annotated tag，v0.1.71 / 0.1.72 就栽在这）、自检写「出两张截图」却给出并不存在的 `mendeley-ng-smoke-pdf.png`，还把截图说成发生在点开第一行 PDF 之后；HANDOFF §4 自己叠着**两个 `lib/hooks/` 块**，151–169 新建的一批模块一个都没进树 | 两份 `.md` 全量对齐到 `v0.1.96 / 1–169 / 481 断言 / §9.7 与 §9.8 已清空`，并**动手前逐条回源码核对**（`package.json` scripts、`start.mjs` 的 flag、`smoke.ts` 的 `capturePage` 与 `--no-sync`、`demo.mjs` 的 18 篇论文、真实目录清单、`release.yml` 触发条件）。README：改编号表述为「按编号排的改动历史」并**刻意不再写死会每轮都变的数字**（唯一事实源是 §0）；重写结构树到覆盖 `electron/main / hooks / lib / shared / scripts`；发布流程补 `npm version` 双文件 bump + Release commit + `git tag -a` + 只推 tag（post-commit 钩子自动推 main）；自检改为「真实库 + 真实 PDF 逐条断言」、两张截图正确名字与顺序、补 `npm run build` 不能省和 `SMOKE_ALLOW_OTHER_INSTANCE`；补全文检索搜不到的空态说明、页数预算只有一份规则、跨 IPC 规则只留一份的约定；修「见下」为「见上」、demo 不再写死页数。HANDOFF：§4 合并重复 hooks 块、把散落的 `shared/*` 行归位、清掉散文里已过时的当前行数，§3 同步构建顺序与截图名。断言口径仍是 **481，本轮零代码改动、零新增断言**；typecheck / build 通过，真实库冒烟 **EXIT=0 / 477 PASS / 0 FAIL**。**已落地（v0.1.97）** | 用户「更新所有文档」 |
 | 169 | **一页 canvas 的背板像素尺寸被手写了四遍，其中一遍还是「检查」而不是「写」**：`PdfViewer.tsx` 的离屏渲染、预取位图尺寸校验、单页新渲染，加上 `useContinuousPages.ts` 的连续栏，各自写 `Math.floor(viewport.width * dpr)` / `Math.floor(viewport.height * dpr)`。**检查与写入一旦不一致，每张预取位图都 miss，阅读器会静默地每页重画**，而这类错误没有任何报错 | **动手前更正 §9.8 的诊断**：排期写的第 5 处 `:536,537` 是 `canvas.width = bmp.width` / `canvas.height = bmp.height`，从已渲染位图复制尺寸，不是从 viewport 计算，收进来会改掉它的意思；真正同构的是 4 处。新建 `src/lib/bitmapPixelSize.ts`：`bitmapPixelSize(viewport, dpr)` 与 `devicePixelRatioOrOne(raw)` 都不碰 DOM，后者把 `window.devicePixelRatio || 1` 的兜底也搬进来（`tsconfig.node.json` 的 include 随之加一行）。`dpr` 仍在调用点读一次，因为 `setTransform` / `bitmapKey` 也要用；`render` 里把校验与新渲染共用同一个 `pixels`，等价于原来两次同值计算。冒烟十条零 sleep：12 组 dpr 兜底逐值比对；900 组宽 / 高 / dpr 逐值比对（含 NaN、±Infinity、负数、小数，用 `Object.is`）；故意改成 `Math.round` 的对照有 214 组 drift，证明比对会红；`100.9 × 1.25 = 126`、`200.9 × 1.25 = 251` 证明是向下截断；不擅自净化非有限值或负数；静态读回两个文件、**数 `bitmapPixelSize(` 调用点而不是数名字**（import 路径里也含模块名，初版按名字数成 4 / 3，实际是 2 / 1，改正后才对）；手写的 floor 与裸 `|| 1` 零残留；把 12 行旧代码喂给同一个探测器证明它真能抓到 12 个；`bmp.width` 复制仍原样保留。**对照轮**：只 stash 两个产品文件、保留新模块与 10 条断言，renderer `index-CpEXTiSO.js` → `index-DX5gAzRl.js`，基线恰好红「四处接线」与「零残留」两条，其余八条仍绿；恢复后 hash 原样回来。r1 / r2 各四条行菜单红且**基线也红同样四条**，r3 `prefetch serves a step back`，r4 **EXIT=0 / 477 PASS / 0 FAIL**。断言 471 → 481。**已落地（v0.1.96）** | 9.8 ③ |
 | 168 | **164 说「八处延时已清零」，可短消息还写着 14 个裸数字**：`App.tsx:315` 的 `setTimeout(..., 4000)`、9 处 `flashBatch` / `flashImport` 的时长，以及 `useExport.ts` 四处导出完成消息的 6000 / 6000 / 6000 / 12000。164 只扫了 `setTimeout` 的直接调用点，包在 `flash*` 第二参数里的时长整批漏掉——**同一条纪律第三次生效，连排期自己写下的「已清零」也要复核** | 14 个具名常量接进 `src/lib/timing.ts`（8 → 22），`App.tsx` 与 `useExport.ts` 各加一条 import，值一个没动。**同值刻意不合并**：四个 2500、两个 3000、三个 6000 各自答的是不同消息，今天相等不等于以后一起改，与 164 两个 400ms / 两个 250ms 的处理一致。冒烟九条零 sleep：逐键比对旧字面量（14 键 drift 空）、故意交换 2500 / 5000 证明比对会红、值多重集不变、14 键 / 8 个不同值证明没被合并、有限正整数、静态读回两个产品文件、每个名字恰好出现两次（import + 调用点）、裸数字零残留、**把 14 行旧代码逐字喂给同一个探测器证明它真能抓到 14 个**（13 个行尾 + 1 个换行后独占一行的 2400）——最后这条是防「检测器自己失灵时零残留看起来也全绿」。`tsconfig.node.json` 不必再改，164 已把 `src/lib/timing.ts` 收进 include。r1 六条红（四条行菜单 + prefetch + 二次启动聚焦）全是 11.11 记过的时序噪声、九条新断言全绿；r2 **EXIT=0 / 467 PASS / 0 FAIL**。断言 462 → 471。**已落地（v0.1.95）** | 9.8 ② |
 | 167 | **连续模式最后一页被占用时，最后一批链接 / 引文角标整批消失**：162 把两份手写循环收进 `createPageWalk<T>` 时，为守住「零行为变化」连旧 bug 一起搬了过来——`for` 里 `isClaimed(n)` 命中就 `continue`，而尾部批次的 flush 挂在 `n === last` 上；末页恰好被 claim（懒读正忙、或已在 `known` 里）时循环直接结束，手里那不足 8 页的 `batch` 永远不 `publish`。HANDOFF 当时明写「要修就另开一轮」，这一轮就是那一轮 | 循环正常结束后补一次尾批发布；`dead` 分支在循环内 `return`，所以被作废的遍历仍不会在退出时多写一次 state——**这是 152 那条「cancel 只作废、不额外 render」纪律的另一面**。冒烟把 162 的 11 场景等价证明拆成「其余 10 场景逐事件等价」+「claimed last 单独对照」，新加 6 条：①旧循环确实只写出 1 批且不含 10 / 11 页（证明损失真的发生过，不让修法变成永远通过的 no-op）；②新遍历写出第 2 批 `10,11` 且值对；③新事件序列恰好比旧的多一条 `write:10,11`，前缀逐事件相同（证明只多了这一次发布）；④`deadAt: 5` 的遍历读了 5 页却一次都不发布（证明尾部发布不会把已作废的遍历复活，且断言非空转）；⑤满批结束不重复发布；⑥零页 / 全被占用不发布。**对照轮**：`git stash push -- src/lib/pageWalk.ts` 只撤产品修复、保留 6 条新断言，renderer 从 `index-DtBNOyQM.js` 变 `index-C4J5bHn2.js`，基线恰好红 ②③（`writes: 1`、`newEvents: 31`），①④⑤⑥ 仍绿；恢复后 hash 原样回来。r1 / r2 / r4 / r5 / r6 的红点分别是行菜单取出文件夹、shell actions `n:0`、四条行菜单、prefetch step back、无——每轮不同且基线自己也红 `keystroke stays cheap`，按 11.11 判为时序噪声；r6 **EXIT=0 / 458 PASS / 0 FAIL**。断言 456 → 462。**已落地（v0.1.94）** | 9.8 ① |
@@ -2121,6 +2128,14 @@ demo 假设你知道，产品在你需要的时候告诉你。
 - **file:// 别用 `navigator.clipboard`**：渲染进程是 `loadFile` 出来的 file://
   页面，异步剪贴板能不能用取决于权限策略，静默失败最难查。走 Electron 的
   `clipboard` 模块，顺便让冒烟能 `readClipboard()` 回读验证。
+
+- **170 文档里不要写死每轮都变的数字**：README 把「编号 1–127」写死，
+  42 个编号过去它就成了假信息；把截图文件名写死，151 之后它指向一个根本不存在的
+  文件。**这类数字只该留在 HANDOFF 第 0 节这一个事实源里**，别的文档写「见 §0」
+  比抄一份副本更耐用。同理，「更新所有文档」不等于把所有文件改成同一段话：
+  回源码逐条核对（`package.json` scripts、flag、文件名、目录清单、workflow 触发）
+  才是更新，照着旧文档互相抄只会把错误复制两份。**文档也会积累重复块**——§4
+  那两个 `lib/hooks/` 是历轮追加时各加一次留下的，不是有意为之。
 
 - **169 数「调用点」而不是数「名字」，以及计划里的第 5 处其实是另一条规则**：
   静态读回源码证明接线时，按 `\bname\b` 数出现次数会把 import 路径里的模块名也数进去

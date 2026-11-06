@@ -3,7 +3,7 @@
 **本地优先的 Mendeley 客户端。** 文献、PDF、正文索引、高亮和笔记都落在你自己的
 磁盘上，读和搜都不需要联网。Electron + React + pdf.js。
 
-> 要接手开发，看 [HANDOFF.md](HANDOFF.md)：现状、架构、API 的坑、待办都在里面。
+> 要接手开发，看 [HANDOFF.md](HANDOFF.md)：现状、架构、API 的坑、按编号排的改动历史都在里面。
 
 ## 它为什么存在
 
@@ -212,7 +212,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | --- | --- |
 | 浏览 | 三栏：文件夹树 / 文献列表 / 详情或 PDF。列表是虚拟滚动，几千行也不卡；**单实例**：再点一次图标只会把已经开着的那个窗口叫回来 |
 | 搜索 | Ctrl+F，覆盖标题、作者、发表处、citation key、DOI、摘要、标签，以及这篇上写的本地笔记 |
-| 全文检索 | 「全文」模式下搜 PDF 正文，命中按篇分组、显示页码与上下文，点一条直接翻到那页 |
+| 全文检索 | 「全文」模式下搜 PDF 正文，命中按篇分组、显示页码与上下文，点一条直接翻到那页；**搜不到时会说清读了多少页、以及这不等于库里没有**，并给出改页数的入口 |
 | 筛选 | 按星标 / 未读 / 没有本地 PDF / 云端有本地没有 / 未归文件夹收窄，每档带条数 |
 | 排序 | 点列头切换升降序（年份 / 标题 / 作者 / 发表处 / Key / 星标 / 添加时间）。拖过列头的那一下不算点，不会顺手把刚挪好的列排一遍序；排序和列布局一样会记住 |
 | 列定制 | 「列」勾选要显示的列、上下调顺序，可存成命名视图 |
@@ -230,7 +230,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 功能 | 说明 |
 | --- | --- |
 | 同步 | 默认增量（`modified_since`），没改动时 3 秒；「全量」重拉全库，也是发现删除的唯一办法 |
-| 导入 token | 首次使用必读，见下 |
+| 导入 token | 首次使用必读，步骤见上文的「获取 token」 |
 | 补 PDF | 云端有附件但本地没有的，一键下载到本地 PDF 目录 |
 | 导入 PDF | 把 PDF 拖进窗口就建条目，元数据交给服务端从文件里抽 |
 | 导入 | 「导入」下两条：读一个 BibTeX / RIS / EndNote XML 文件（先预览，已有的标为重复），或按 DOI / arXiv id / 标题添加——**后者不需要 PDF** |
@@ -270,35 +270,68 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
   每份 130 ms；前 3 页约 60 MB、每份 39 ms。前者在内存里放不下，后者可以，
   而标题、作者、摘要和引言开头基本覆盖了会去搜的词。这个取舍写在界面上，不藏着，
   页数也能在「设置」里改——改了会丢索引，因为它描述的已经是另一份语料了。
+  页数的边界与默认值**只有一份规则**：设置面板、索引构建和开机时的配置恢复共用它，
+  不会出现界面说 3 页、索引却按 50 页建这种对不上的情况。
 - **合并只补缺失字段，落败的进回收站而不是删掉**。合并是不可逆操作里最容易
   手滑的，让它可恢复比让它快更重要——现在还有撤销栈兜底。
 
-还没做的：无。编号 1–127 的来龙去脉都在 [HANDOFF.md](HANDOFF.md) 第 10 节，
-第 9 节留着的是竞品对照快照和"明确不做"那几条。
+还没做的：无已坐实的缺陷，也没有在飞的排期。按编号排的改动历史在
+[HANDOFF.md](HANDOFF.md) 第 10 节；第 9 节留着的是竞品对照快照、"差距可以接受"、
+"明确不做"那几条，以及已经清空的两张代码审查排期表（9.7 / 9.8）。
+这里刻意不写编号和断言数——它们每轮都变，唯一事实源是 HANDOFF 第 0 节。
 
 ## 结构
 
 ```
-electron/main/mendeley.ts   Mendeley REST 客户端
-electron/main/store.ts      本地缓存：文献、文件夹、标注、配置
-electron/main/pdfindex.ts   把 "作者 - 年份 - 标题.pdf" 匹配回文献
-electron/main/lookup.ts     Crossref / arXiv 元数据查询
-electron/main/updater.ts    electron-updater 自更新
-electron/main/index.ts      主进程，IPC，mendeley:// 协议，--smoke 自检
-electron/preload/index.ts   contextBridge，只暴露白名单方法
-src/                        renderer：React + 虚拟滚动 + pdf.js 文本层
-src/lib/dupes.ts            查重分组与保留哪一条的取舍
-src/lib/import.ts           BibTeX / RIS / EndNote XML 解析
-src/lib/export.ts           BibTeX / RIS / EndNote XML 生成
-src/lib/pdfmeta.ts          从 PDF 前两页抽 DOI / arXiv id
-shared/types.ts             三端共享的类型
-shared/text.ts              标题归一化与相似度（查源与查重共用）
-scripts/start.mjs           启动器
-scripts/get-token.mjs       OAuth 授权码流程，产出 token.json
-scripts/check-api.mjs       API 冒烟测试（不启 GUI）
+electron/main/          主进程：IPC、本地库、全文索引、自更新
+  index.ts              入口：一个窗口、是不是第二个实例、这次是哪一种启动
+  library.ts            云端同步（增量水印、PDF 挂载、缓存合并）
+  fulltext.ts / ftops.ts 正文索引与它的驱动层
+  store.ts / pdfindex.ts 本地缓存与 "作者 - 年份 - 标题.pdf" 匹配
+  mendeley.ts / lookup.ts Mendeley REST 客户端、Crossref / arXiv 查元数据
+  window.ts / updater.ts / instance.ts  窗口记忆、检查更新、单实例锁
+  ipc/                  按域拆开的 IPC 注册
+  smoke.ts / perf.ts / demo.ts  开发期自检、性能测量、虚构库截图
+electron/preload/index.ts  contextBridge，只暴露白名单方法
+src/App.tsx              组装层：把 hooks 解构出来排进 JSX，不持有大块状态
+src/components/           视图组件（PdfViewer.tsx 是阅读器，其余见目录）
+src/lib/hooks/            React 状态簇，按「谁跟谁一起变」切
+  useConfig / useLibrary / useFullText / useUndo / useSelection / usePaneWidths
+  useExport / useFlashMessage / useCiteCard
+  useContinuousPages / usePdfFind / usePdfAnnotations / usePdfLinks / usePdfRefs
+src/lib/                  与 React 无关的纯规则，主进程冒烟能直接 import 来测
+  flash.ts              一条短消息只留一个待触发的清除（151 / 156）
+  latestSearch.ts       只答当前那一个词，时钟与请求可注入（152）
+  documentScope.ts / findScan.ts / lazyPages.ts  按文献 / 按词 / 按页给答案贴标签（153–155）
+  pageWalk.ts           连续模式一屏一次写入的页遍历，末页不丢批（162 / 167）
+  bitmapPixelSize.ts    页 canvas 的背板像素尺寸与 dpr 兜底，四处共用（169）
+  cardSpot.ts           固定卡片定位与窗口变窄后的重测（159 / 160）
+  timing.ts             二十二处延时与短消息时长的具名常量（164 / 168）
+  pdfgeom.ts / pdfcache.ts / pdftext.ts / pdffind.ts / pdfsel.ts
+                        PDF 坐标换算、位图缓存、文本层、篇内查找、选区
+  columns.ts / panes.ts / cite.ts / offline.ts / export.ts / import.ts
+                        列定义、三栏、引文格式、离线文案、导入导出
+  refly.ts / dupes.ts / pdfmeta.ts / pdflinks.ts / pdfrefs.ts
+                        补全元数据、查重、抽标识符、PDF 链接与引文标记
+  popspot.ts / filters.ts / view.ts / tree.ts / doctypes.ts / match.ts
+                        浮层定位、筛选、视图与文件夹树等其余纯逻辑
+shared/                   三端共享，只有一份的规则放这里
+  types.ts / text.ts    共享类型与标题归一化（查源与查重共用）
+  fullTextPages.ts      页数预算的唯一规则与边界（161 / 163）
+  clamp.ts              六处裸夹取共用的纯规则 clampToRange（166）
+  failures.ts           静默失败的具名原因、忽略 / 上报两道门（165）
+scripts/                  start.mjs 启动器、demo.mjs 假库与截图、get-token.mjs、
+                          check-api.mjs、copy-worker.mjs、signcheck.mjs、
+                          make-icon.mjs、hooks/
+docs/screenshots/         README 用的四张图，由 `npm run demo` 生成
 ```
 
-几个约定：类型不要三处各写一份，改 `shared/`；所有尺寸用 rem，字号旋钮才有效；
+完整的逐文件说明在 HANDOFF 第 4 节；上面这棵树的用途是让人一眼看出
+**哪一层能改状态、哪一层只是纯规则**——纯规则那一层不碰 React / DOM，
+所以冒烟能在主进程里直接喂假时钟和手控 promise 去测它。
+
+几个约定：类型不要三处各写一份，改 `shared/`；跨 IPC 的规则（页数预算、位图尺寸、
+夹取、延时、静默失败）也只留一份，别在调用点手抄；所有尺寸用 rem，字号旋钮才有效；
 主进程产物必须是 CJS，package.json 里不能有 `"type": "module"`；
 `contextIsolation: true`，renderer 拿不到 node，所有能力走 `window.api`。
 
@@ -311,13 +344,22 @@ scripts/check-api.mjs       API 冒烟测试（不启 GUI）
 `.github/workflows/release.yml` 会在推送 `v*` tag 时用 GitHub 的 Windows runner 编译并把 exe 挂到 Release：
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+npm version 0.1.97 --no-git-tag-version   # package.json 与 package-lock.json 一起改
+git add package.json package-lock.json
+git commit -m "Release v0.1.97"
+git tag -a v0.1.97 -m "Release v0.1.97"  # 必须是 annotated tag
+git push origin v0.1.97
 ```
+
+**tag 必须是 annotated（`-a`）**：本仓库踩过「Release commit 有了、tag 是轻量的，
+workflow 没触发，Release 页面是空的」的坑（v0.1.71 / v0.1.72）。
+`post-commit` 钩子会自动推 `main`，所以上面最后一句只需推 tag。
 
 公开仓库的标准 runner 免费、不限分钟，产物存储也免费。
 
-**版本号要先改 `package.json` 的 `version` 再打 tag**，两者需一致——安装包文件名和
-`latest.yml` 都取自它，不一致会让客户端的自更新判断错乱。
+**版本号要先改 `package.json` 与 `package-lock.json` 的 `version`，提交一个 Release
+commit，最后再打 tag**，三者需一致——安装包文件名和 `latest.yml` 都取自它，
+不一致会让客户端的自更新判断错乱。功能改动单独一个 commit，版本 bump 单独一个 commit。
 
 Release 附件必须同时包含**安装包和 `latest.yml`**：后者是 `electron-updater` 用来
 发现新版本的清单，漏了它客户端点了更新也找不到东西。CI 已经处理，手动发布时别忘。
@@ -369,18 +411,26 @@ cp scripts/hooks/post-commit .git/hooks/post-commit && chmod +x .git/hooks/post-
 ## 开发用的自检
 
 ```bash
-npm run smoke              # 全流程：拉库 → 渲染窗口 → 点第一行 → 出两张截图
+npm run build              # 先构建：smoke 不替你构建，跑的是 out/ 里那一版
+npm run smoke              # 真实库 + 真实 PDF 的端到端自检
 npm run smoke -- --no-sync # 用本地缓存，跳过同步
 ```
 
-`--smoke` 会跑完整同步、开一个隐藏窗口、点第一行有 PDF 的文献、等渲染完成后用
-`capturePage` 截图，存到系统临时目录 `mendeley-ng-smoke.png` /
-`mendeley-ng-smoke-pdf.png`。日志里会打出 `scaleFactor`、`devicePixelRatio`、
-canvas 的后备尺寸与 CSS 尺寸（后者应该是前者的 `1/dpr`），这是验证高 DPI 是否
-真的生效的唯一可靠办法。
+`--smoke` 跑的是**真实库和真实 PDF**：拉库、开隐藏窗口、逐条断言，日志用
+`[smoke] PASS` / `[smoke] FAIL` 打点，最后一行出现 `all checks passed` 才算过。
+断言数与口径以 HANDOFF 第 0 节为准，README 不重复写死。
 
-它还会造一次合成选区，验证文本层能选出文字并算出正确的矩形，然后把
-`annotations.json` **按文件快照**恢复回去——自检不能动真实数据。
+截图落在系统临时目录：`mendeley-ng-smoke.png`（深色）与
+`mendeley-ng-smoke-light.png`（临时把 DOM 切成浅色再拍，拍完还原，不动用户配置）。
+两张都在点开第一行 PDF **之前**；点开之后改为读 canvas 的后备尺寸与 CSS 尺寸做断言
+（后者应是前者的 `1/dpr`）——**这是验证高 DPI 是否真生效的唯一可靠办法**，比肉眼看
+截图靠谱。`npm run build` 不能省：`scripts/start.mjs` 只检查 `out/main/index.js` 在不在，
+忘了它跑的是上一版，而新断言根本没被编译进去，屏幕上会安静地全绿。
+
+它还会造一次合成选区，验证文本层能选出文字并算出正确的矩形，然后把配置和
+`annotations.json` **按文件快照**恢复回去——自检不能动真实数据。开跑前会查有没有
+第二份 Mendeley NG 在跑（两份会写同一个 `config.json`，跑出来的红是随机的），
+有就直接拒绝；确需降级用 `SMOKE_ALLOW_OTHER_INSTANCE=1`。
 
 ```bash
 npm run demo   # 造一份虚构的库，截取 README 里的四张图
@@ -388,8 +438,8 @@ npm run demo   # 造一份虚构的库，截取 README 里的四张图
 
 `--demo` 与自检同源，但方向相反：自检要真实数据才测得准，截图要假数据才敢公开。
 它用 `--user-data-dir=.demo` 把缓存、配置和全文索引都关在 `.demo/` 里，
-`library:sync` 直接返回本地缓存、不联网，索引是当场建的（十八份两页的 PDF，
-几秒钟）。
+`library:sync` 直接返回本地缓存、不联网；十八篇论文的 PDF 和正文都由脚本当场生成
+（标题、作者、DOI 全是编的），索引也就地建，几秒钟。
 
 ## 踩过的坑
 
