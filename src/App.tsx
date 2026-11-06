@@ -31,7 +31,20 @@ import {
   type SortKey
 } from './lib/columns'
 import { DEFAULT_LEFT_W, DEFAULT_RIGHT_PCT } from './lib/panes'
-import { COLUMN_WIDTH_PERSIST_DEBOUNCE_MS, UPDATE_INSTALL_DELAY_MS } from './lib/timing'
+import {
+  ALL_HAVE_PDF_MESSAGE_VISIBLE_MS,
+  BATCH_ACTION_MESSAGE_VISIBLE_MS,
+  BATCH_CLEAN_MESSAGE_VISIBLE_MS,
+  BATCH_FAILED_MESSAGE_VISIBLE_MS,
+  CITATION_COPIED_MESSAGE_VISIBLE_MS,
+  COLUMN_WIDTH_PERSIST_DEBOUNCE_MS,
+  DOWNLOAD_STOPPED_MESSAGE_VISIBLE_MS,
+  FOLDER_NOOP_MESSAGE_VISIBLE_MS,
+  IMPORT_FINISHED_MESSAGE_VISIBLE_MS,
+  RENAME_RESULT_MESSAGE_VISIBLE_MS,
+  STARTUP_UPDATE_CHECK_DELAY_MS,
+  UPDATE_INSTALL_DELAY_MS
+} from './lib/timing'
 import {
   FILTER_LABEL,
   FILTER_TEST,
@@ -312,7 +325,7 @@ export default function App() {
           if (!r?.available) setUpd(null)
         })
         .catch(() => setUpd(null))
-    }, 4000)
+    }, STARTUP_UPDATE_CHECK_DELAY_MS)
     return () => clearTimeout(t)
   }, [])
 
@@ -919,10 +932,10 @@ export default function App() {
    */
   const reportBatch = (what: string, ok: number, failed: string[]) => {
     if (!failed.length) {
-      flashBatch(`${what} ${ok} 条`, 2500)
+      flashBatch(`${what} ${ok} 条`, BATCH_CLEAN_MESSAGE_VISIBLE_MS)
       return
     }
-    flashBatch(`${what} ${ok} 条，${failed.length} 条失败`, 5000)
+    flashBatch(`${what} ${ok} 条，${failed.length} 条失败`, BATCH_FAILED_MESSAGE_VISIBLE_MS)
     setErr(
       `${what}时有 ${failed.length} 条没成功（其余 ${ok} 条已生效）：\n` +
         failed.join('\n')
@@ -1113,7 +1126,7 @@ export default function App() {
         // a count of renamed files is not an error, and the red banner was
         // the only place it had to go, so it landed there reading as one
         if (r.renamed) {
-          flashBatch(`已重命名 ${r.renamed} 个文件${r.skipped ? `，跳过 ${r.skipped} 个` : ''}`, 3000)
+          flashBatch(`已重命名 ${r.renamed} 个文件${r.skipped ? `，跳过 ${r.skipped} 个` : ''}`, RENAME_RESULT_MESSAGE_VISIBLE_MS)
         }
       }
     })
@@ -1131,7 +1144,7 @@ export default function App() {
     const inside = (d: Doc) => (d.folder_uuids ?? []).includes(folderId)
     const todo = list.filter((d) => (op === 'add' ? !inside(d) : inside(d)))
     if (!todo.length) {
-      flashBatch(op === 'add' ? '这些文献已经在这个文件夹里' : '这些文献不在这个文件夹里', 2500)
+      flashBatch(op === 'add' ? '这些文献已经在这个文件夹里' : '这些文献不在这个文件夹里', FOLDER_NOOP_MESSAGE_VISIBLE_MS)
       return
     }
     const verb = op === 'add' ? '加入' : '移出'
@@ -1245,7 +1258,7 @@ export default function App() {
   const batchDownload = async (list: Doc[]) => {
     const need = needsPdf(list)
     if (!need.length) {
-      flashBatch('这些本地都已经有 PDF 了', 2500)
+      flashBatch('这些本地都已经有 PDF 了', ALL_HAVE_PDF_MESSAGE_VISIBLE_MS)
       return
     }
     dlStop.current = false
@@ -1290,7 +1303,7 @@ export default function App() {
     setDlRun(null)
     const okN = need.length - failed.length - queue.length
     if (stopped) {
-      flashBatch(`已停止，下载了 ${okN} 篇`, 3000)
+      flashBatch(`已停止，下载了 ${okN} 篇`, DOWNLOAD_STOPPED_MESSAGE_VISIBLE_MS)
       return
     }
     reportBatch('已下载', okN, failed)
@@ -1325,7 +1338,7 @@ export default function App() {
         /* one failure should not abandon the rest of the batch */
       }
     }
-    flashBatch(`${label} ${n} 条`, 2200)
+    flashBatch(`${label} ${n} 条`, BATCH_ACTION_MESSAGE_VISIBLE_MS)
     if (n) {
       pushUndo(`${label} ${n} 条`, async () => {
         await Promise.all(
@@ -1570,7 +1583,7 @@ export default function App() {
     await window.api.copyText(text)
     flashBatch(
       list.length > 1 ? `已复制 ${list.length} 条引文` : `已复制引文：${text.split('\n')[0]}`,
-      2400
+      CITATION_COPIED_MESSAGE_VISIBLE_MS
     )
   }
   // the shortcut lives in a listener installed once, so it reads the current
@@ -1606,7 +1619,7 @@ export default function App() {
         setErr(`导入「${f.name}」失败：${String(err)}`)
       }
     }
-    flashImport(files.length > 1 ? `已导入 ${files.length} 篇` : '导入完成', 2500)
+    flashImport(files.length > 1 ? `已导入 ${files.length} 篇` : '导入完成', IMPORT_FINISHED_MESSAGE_VISIBLE_MS)
   }
 
   /**

@@ -78,13 +78,27 @@ import { createLazyPages, type PageAnswer } from '../../src/lib/lazyPages'
 // run checks the names against the old literals and reads the call sites to
 // confirm they actually use them (164).
 import {
+  ALL_HAVE_PDF_MESSAGE_VISIBLE_MS,
+  BATCH_ACTION_MESSAGE_VISIBLE_MS,
+  BATCH_CLEAN_MESSAGE_VISIBLE_MS,
+  BATCH_FAILED_MESSAGE_VISIBLE_MS,
+  CITATION_COPIED_MESSAGE_VISIBLE_MS,
   COLUMN_WIDTH_PERSIST_DEBOUNCE_MS,
   COPIED_FEEDBACK_VISIBLE_MS,
+  DOWNLOAD_STOPPED_MESSAGE_VISIBLE_MS,
+  EXPORT_ANNOTATIONS_MESSAGE_VISIBLE_MS,
+  EXPORT_BIBLIOGRAPHY_MESSAGE_VISIBLE_MS,
+  EXPORT_LIBRARY_MESSAGE_VISIBLE_MS,
+  EXPORT_NOTES_MESSAGE_VISIBLE_MS,
   FIND_QUERY_DEBOUNCE_MS,
+  FOLDER_NOOP_MESSAGE_VISIBLE_MS,
   FULL_TEXT_QUERY_DEBOUNCE_MS,
   HIGHLIGHT_UNDO_WINDOW_MS,
+  IMPORT_FINISHED_MESSAGE_VISIBLE_MS,
   PANE_WIDTH_PERSIST_DEBOUNCE_MS,
   READING_POSITION_PERSIST_DEBOUNCE_MS,
+  RENAME_RESULT_MESSAGE_VISIBLE_MS,
+  STARTUP_UPDATE_CHECK_DELAY_MS,
   UPDATE_INSTALL_DELAY_MS
 } from '../../src/lib/timing'
 // Continuous mode walks every page in the background, once for links and
@@ -3906,6 +3920,193 @@ export async function runSmoke() {
       'no bare delay literal is left at any call site',
       leftovers.length === 0,
       { leftovers }
+    )
+  }
+
+
+  // 164 named eight delays but only looked at direct setTimeout call sites.
+  // Fourteen more were hiding as arguments to flashBatch / flashImport (168):
+  // ten in App.tsx and four in useExport.ts. Naming them is a readability
+  // change only if not one number moved, and only if the call sites really
+  // stopped using the literals.
+  {
+    const legacy: Record<string, number> = {
+      STARTUP_UPDATE_CHECK_DELAY_MS: 4000,
+      BATCH_CLEAN_MESSAGE_VISIBLE_MS: 2500,
+      BATCH_FAILED_MESSAGE_VISIBLE_MS: 5000,
+      RENAME_RESULT_MESSAGE_VISIBLE_MS: 3000,
+      FOLDER_NOOP_MESSAGE_VISIBLE_MS: 2500,
+      ALL_HAVE_PDF_MESSAGE_VISIBLE_MS: 2500,
+      DOWNLOAD_STOPPED_MESSAGE_VISIBLE_MS: 3000,
+      BATCH_ACTION_MESSAGE_VISIBLE_MS: 2200,
+      CITATION_COPIED_MESSAGE_VISIBLE_MS: 2400,
+      IMPORT_FINISHED_MESSAGE_VISIBLE_MS: 2500,
+      EXPORT_BIBLIOGRAPHY_MESSAGE_VISIBLE_MS: 6000,
+      EXPORT_NOTES_MESSAGE_VISIBLE_MS: 6000,
+      EXPORT_ANNOTATIONS_MESSAGE_VISIBLE_MS: 6000,
+      EXPORT_LIBRARY_MESSAGE_VISIBLE_MS: 12000
+    }
+    const named: Record<string, number> = {
+      STARTUP_UPDATE_CHECK_DELAY_MS,
+      BATCH_CLEAN_MESSAGE_VISIBLE_MS,
+      BATCH_FAILED_MESSAGE_VISIBLE_MS,
+      RENAME_RESULT_MESSAGE_VISIBLE_MS,
+      FOLDER_NOOP_MESSAGE_VISIBLE_MS,
+      ALL_HAVE_PDF_MESSAGE_VISIBLE_MS,
+      DOWNLOAD_STOPPED_MESSAGE_VISIBLE_MS,
+      BATCH_ACTION_MESSAGE_VISIBLE_MS,
+      CITATION_COPIED_MESSAGE_VISIBLE_MS,
+      IMPORT_FINISHED_MESSAGE_VISIBLE_MS,
+      EXPORT_BIBLIOGRAPHY_MESSAGE_VISIBLE_MS,
+      EXPORT_NOTES_MESSAGE_VISIBLE_MS,
+      EXPORT_ANNOTATIONS_MESSAGE_VISIBLE_MS,
+      EXPORT_LIBRARY_MESSAGE_VISIBLE_MS
+    }
+    const drift = (got: Record<string, number>): string[] =>
+      Object.keys(legacy).filter((k) => got[k] !== legacy[k])
+
+    expect(
+      'every newly named message duration still answers its old literal',
+      Object.keys(legacy).length === 14 &&
+        Object.keys(named).length === 14 &&
+        drift(named).length === 0,
+      { checked: Object.keys(legacy).length, drift: drift(named) }
+    )
+
+    const swapped: Record<string, number> = {
+      ...named,
+      BATCH_CLEAN_MESSAGE_VISIBLE_MS: BATCH_FAILED_MESSAGE_VISIBLE_MS,
+      BATCH_FAILED_MESSAGE_VISIBLE_MS: BATCH_CLEAN_MESSAGE_VISIBLE_MS
+    }
+    expect(
+      'a swapped message duration really would be caught',
+      drift(swapped).length === 2,
+      { drift: drift(swapped) }
+    )
+
+    expect(
+      'the multiset of the fourteen durations did not change',
+      JSON.stringify(Object.values(legacy).sort((a, b) => a - b)) ===
+        JSON.stringify(Object.values(named).sort((a, b) => a - b)),
+      {
+        legacy: Object.values(legacy).sort((a, b) => a - b),
+        named: Object.values(named).sort((a, b) => a - b)
+      }
+    )
+
+    const distinct = new Set(Object.values(named)).size
+    expect(
+      'equal durations stay separate decisions rather than one shared key',
+      Object.keys(named).length === 14 &&
+        distinct === 8 &&
+        Object.values(named).filter((v) => v === 2500).length === 4 &&
+        Object.values(named).filter((v) => v === 3000).length === 2 &&
+        Object.values(named).filter((v) => v === 6000).length === 3,
+      { keys: Object.keys(named).length, distinct }
+    )
+
+    expect(
+      'every newly named delay is a finite positive whole number',
+      Object.values(named).every(
+        (v) => Number.isFinite(v) && Number.isInteger(v) && v > 0
+      ),
+      { values: Object.values(named) }
+    )
+
+    // Values alone do not prove the wiring. Read the two product files back
+    // from the checkout, as 164 did for its eight sites.
+    const sites: { file: string; names: string[] }[] = [
+      {
+        file: 'src/App.tsx',
+        names: [
+          'STARTUP_UPDATE_CHECK_DELAY_MS',
+          'BATCH_CLEAN_MESSAGE_VISIBLE_MS',
+          'BATCH_FAILED_MESSAGE_VISIBLE_MS',
+          'RENAME_RESULT_MESSAGE_VISIBLE_MS',
+          'FOLDER_NOOP_MESSAGE_VISIBLE_MS',
+          'ALL_HAVE_PDF_MESSAGE_VISIBLE_MS',
+          'DOWNLOAD_STOPPED_MESSAGE_VISIBLE_MS',
+          'BATCH_ACTION_MESSAGE_VISIBLE_MS',
+          'CITATION_COPIED_MESSAGE_VISIBLE_MS',
+          'IMPORT_FINISHED_MESSAGE_VISIBLE_MS'
+        ]
+      },
+      {
+        file: 'src/lib/hooks/useExport.ts',
+        names: [
+          'EXPORT_BIBLIOGRAPHY_MESSAGE_VISIBLE_MS',
+          'EXPORT_NOTES_MESSAGE_VISIBLE_MS',
+          'EXPORT_ANNOTATIONS_MESSAGE_VISIBLE_MS',
+          'EXPORT_LIBRARY_MESSAGE_VISIBLE_MS'
+        ]
+      }
+    ]
+    const root = path.join(__dirname, '../..')
+    const reads = sites.map((s) => {
+      const f = path.join(root, s.file)
+      return { file: s.file, text: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null }
+    })
+    expect(
+      'both product files can be read from this checkout',
+      reads.every((r) => r.text !== null),
+      { missing: reads.filter((r) => r.text === null).map((r) => r.file) }
+    )
+
+    const notWired = reads.flatMap((r, i) => {
+      const t = r.text ?? ''
+      const bad: string[] = []
+      if (!/from '[^']*timing'/.test(t))
+        bad.push(sites[i].file + ': no timing import')
+      for (const name of sites[i].names) {
+        const hits = (t.match(new RegExp('\\b' + name + '\\b', 'g')) ?? []).length
+        // once in the import, once at its own call site
+        if (hits !== 2) bad.push(sites[i].file + ': ' + name + ' appears ' + hits + ' times')
+      }
+      return bad
+    })
+    expect(
+      'all fourteen call sites use their named duration exactly once',
+      notWired.length === 0,
+      { notWired }
+    )
+
+    // A bare duration is either the trailing argument of a flash/setTimeout
+    // call, or -- for the one wrapped call -- a number alone on its own line.
+    const bareNumbers = (t: string): string[] => [
+      ...[...t.matchAll(/,\s*(\d{3,5})\s*\)/g)].map((m) => m[1]),
+      ...[...t.matchAll(/^[ \t]*(\d{3,5})[ \t]*$/gm)].map((m) => m[1])
+    ]
+    const leftovers = reads.flatMap((r) =>
+      bareNumbers(r.text ?? '').map((n) => r.file + ': ' + n)
+    )
+    expect(
+      'no bare message duration is left in either product file',
+      leftovers.length === 0,
+      { leftovers }
+    )
+
+    // Control: the fourteen lines exactly as they stood before 168 must all
+    // be caught by that detector, otherwise an empty result proves nothing.
+    const legacyLines = [
+      '    }, 4000)',
+      '      flashBatch(`${what} ${ok} 条`, 2500)',
+      '    flashBatch(`${what} ${ok} 条，${failed.length} 条失败`, 5000)',
+      "          flashBatch(`已重命名 ${r.renamed} 个文件${r.skipped ? `，跳过 ${r.skipped} 个` : ''}`, 3000)",
+      "      flashBatch(op === 'add' ? '这些文献已经在这个文件夹里' : '这些文献不在这个文件夹里', 2500)",
+      "      flashBatch('这些本地都已经有 PDF 了', 2500)",
+      '      flashBatch(`已停止，下载了 ${okN} 篇`, 3000)',
+      '    flashBatch(`${label} ${n} 条`, 2200)',
+      '      2400',
+      "    flashImport(files.length > 1 ? `已导入 ${files.length} 篇` : '导入完成', 2500)",
+      '      flashBatch(`已导出 ${target.length} 条到 ${r.path}`, 6000)',
+      '      flashBatch(`已导出 ${withNotes.length} 条笔记到 ${r.path}`, 6000)',
+      '      flashBatch(`已导出 ${picked.length} 条标注到 ${r.path}`, 6000)',
+      "        flashBatch(`已放到 ${dir}：${bits.join(' · ')}`, 12000)"
+    ]
+    expect(
+      'the leftover detector really sees all fourteen old literals',
+      legacyLines.length === 14 && bareNumbers(legacyLines.join('\n')).length === 14,
+      { lines: legacyLines.length, caught: bareNumbers(legacyLines.join('\n')) }
     )
   }
 

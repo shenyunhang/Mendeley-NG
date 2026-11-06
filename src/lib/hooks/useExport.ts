@@ -9,6 +9,12 @@ import {
   toNotesMarkdown,
   toRis
 } from '../export'
+import {
+  EXPORT_ANNOTATIONS_MESSAGE_VISIBLE_MS,
+  EXPORT_BIBLIOGRAPHY_MESSAGE_VISIBLE_MS,
+  EXPORT_LIBRARY_MESSAGE_VISIBLE_MS,
+  EXPORT_NOTES_MESSAGE_VISIBLE_MS
+} from '../timing'
 
 /**
  * Everything that writes the library out to a file or the clipboard: the
@@ -65,7 +71,7 @@ export function useExport({
     const r = await window.api.saveText(`library.${fmt}`, text, kind, fmt)
     if (r.error) setErr(`导出失败：${r.error}`)
     else if (r.path) {
-      flashBatch(`已导出 ${target.length} 条到 ${r.path}`, 6000)
+      flashBatch(`已导出 ${target.length} 条到 ${r.path}`, EXPORT_BIBLIOGRAPHY_MESSAGE_VISIBLE_MS)
     }
   }
   const exportBib = () => void exportAs('bib')
@@ -92,7 +98,7 @@ export function useExport({
     )
     if (r.error) setErr(`导出失败：${r.error}`)
     else if (r.path) {
-      flashBatch(`已导出 ${withNotes.length} 条笔记到 ${r.path}`, 6000)
+      flashBatch(`已导出 ${withNotes.length} 条笔记到 ${r.path}`, EXPORT_NOTES_MESSAGE_VISIBLE_MS)
     }
   }
   /** Whether there is anything to export, so the item can say so rather than
@@ -136,7 +142,7 @@ export function useExport({
     )
     if (r.error) setErr(`导出失败：${r.error}`)
     else if (r.path) {
-      flashBatch(`已导出 ${picked.length} 条标注到 ${r.path}`, 6000)
+      flashBatch(`已导出 ${picked.length} 条标注到 ${r.path}`, EXPORT_ANNOTATIONS_MESSAGE_VISIBLE_MS)
     }
   }
   /**
@@ -206,7 +212,7 @@ export function useExport({
         const bits = [`${target.length} 篇`, `${files.length} 个文件`]
         if (copies.length) bits.push(`${r.copied ?? 0} 份 PDF`)
         if (r.failed?.length) bits.push(`${r.failed.length} 份失败`)
-        flashBatch(`已放到 ${dir}：${bits.join(' · ')}`, 12000)
+        flashBatch(`已放到 ${dir}：${bits.join(' · ')}`, EXPORT_LIBRARY_MESSAGE_VISIBLE_MS)
       }
     } finally {
       off()
