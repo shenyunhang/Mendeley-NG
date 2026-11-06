@@ -32,6 +32,7 @@ import {
   type ZoomMode
 } from '../lib/pdfgeom'
 import { PrefetchCache } from '../lib/pdfcache'
+import { bitmapPixelSize, devicePixelRatioOrOne } from '../lib/bitmapPixelSize'
 import { READING_POSITION_PERSIST_DEBOUNCE_MS } from '../lib/timing'
 import { selectionRects, textInRect } from '../lib/pdfsel'
 import { drawTextLayer } from '../lib/pdftext'
@@ -460,9 +461,10 @@ export default function PdfViewer({
     async (canvas: HTMLCanvasElement, n: number, s: number) => {
       const pg = await pdf!.getPage(n)
       const viewport = pg.getViewport({ scale: s })
-      const dpr = window.devicePixelRatio || 1
-      canvas.width = Math.floor(viewport.width * dpr)
-      canvas.height = Math.floor(viewport.height * dpr)
+      const dpr = devicePixelRatioOrOne(window.devicePixelRatio)
+      const pixels = bitmapPixelSize(viewport, dpr)
+      canvas.width = pixels.width
+      canvas.height = pixels.height
       const ctx = canvas.getContext('2d')!
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, viewport.width, viewport.height)
@@ -474,7 +476,7 @@ export default function PdfViewer({
 
   const warm = (n: number, s: number): Promise<void> => {
     if (n < 1 || n > numPages || !pdf) return Promise.resolve()
-    const dpr = window.devicePixelRatio || 1
+    const dpr = devicePixelRatioOrOne(window.devicePixelRatio)
     return prefetch.current.warm(bitmapKey(n, s, dpr), () => {
       // created inside, so a warm that finds the page already cached costs
       // nothing at all
@@ -502,17 +504,16 @@ export default function PdfViewer({
     const canvas = canvasRef.current
     // in continuous mode the single-page canvas is not what is on screen
     if (!pdf || !canvas || continuous) return
-    const dpr = window.devicePixelRatio || 1
+    const dpr = devicePixelRatioOrOne(window.devicePixelRatio)
     const key = bitmapKey(page, scale, dpr)
     let cached = prefetch.current.peek(key)
     const pg = await pdf.getPage(page)
     const viewport = pg.getViewport({ scale })
     // a bitmap only helps if it is already the right size; anything else
     // means the scale or the device pixel ratio moved on
+    const pixels = bitmapPixelSize(viewport, dpr)
     const fits = (c: HTMLCanvasElement | undefined) =>
-      !!c &&
-      c.width === Math.floor(viewport.width * dpr) &&
-      c.height === Math.floor(viewport.height * dpr)
+      !!c && c.width === pixels.width && c.height === pixels.height
 
     if (!cached) {
       const flight = prefetch.current.flight(key)
@@ -559,8 +560,8 @@ export default function PdfViewer({
 
     // devicePixelRatio is what makes this crisp on a 4K panel; Mendeley
     // Desktop rendered at 1x and looked correspondingly soft
-    canvas.width = Math.floor(viewport.width * dpr)
-    canvas.height = Math.floor(viewport.height * dpr)
+    canvas.width = pixels.width
+    canvas.height = pixels.height
     canvas.style.width = `${viewport.width}px`
     canvas.style.height = `${viewport.height}px`
     const ctx = canvas.getContext('2d')!

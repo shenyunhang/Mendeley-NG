@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import type * as pdfjs from 'pdfjs-dist'
 import type { MutableRefObject } from 'react'
 import { PGAP, bitmapKey, type Size } from '../pdfgeom'
+import { bitmapPixelSize, devicePixelRatioOrOne } from '../bitmapPixelSize'
 import { drawTextLayer } from '../pdftext'
 
 /**
@@ -78,13 +79,14 @@ export function useContinuousPages(o: {
     async (n: number, s: number) => {
       const canvas = contCanvas.current.get(n)
       if (!pdf || !canvas || contBusy.current.has(n)) return
-      const dpr = window.devicePixelRatio || 1
+      const dpr = devicePixelRatioOrOne(window.devicePixelRatio)
       const k = bitmapKey(n, s, dpr)
       if (painted.current.get(n) === k) return
       const pg = await pdf.getPage(n)
       const viewport = pg.getViewport({ scale: s })
-      canvas.width = Math.floor(viewport.width * dpr)
-      canvas.height = Math.floor(viewport.height * dpr)
+      const pixels = bitmapPixelSize(viewport, dpr)
+      canvas.width = pixels.width
+      canvas.height = pixels.height
       canvas.style.width = `${viewport.width}px`
       canvas.style.height = `${viewport.height}px`
       const ctx = canvas.getContext('2d')!

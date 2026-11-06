@@ -21,6 +21,10 @@ import { DEFAULT_FT_PAGES, PROJECT_URL, type Annotation, type Doc } from '../../
 // idea of the default. The rule is shared now, and this run checks that the
 // extraction answers exactly what both old copies answered.
 import {
+  bitmapPixelSize,
+  devicePixelRatioOrOne
+} from '../../src/lib/bitmapPixelSize'
+import {
   clampFullTextPages,
   FULL_TEXT_MAX_PAGES,
   FULL_TEXT_MIN_PAGES,
@@ -4107,6 +4111,191 @@ export async function runSmoke() {
       'the leftover detector really sees all fourteen old literals',
       legacyLines.length === 14 && bareNumbers(legacyLines.join('\n')).length === 14,
       { lines: legacyLines.length, caught: bareNumbers(legacyLines.join('\n')) }
+    )
+  }
+
+
+  // Four call sites used to compute a page canvas's backing-store size by
+  // hand (169): three in PdfViewer (two writes and the prefetch cache size
+  // check) and one in the continuous column. If the check and the writes ever
+  // disagree, every warm bitmap misses and the reader silently rerenders.
+  // One function is only safe if it answers both old expressions exactly.
+  {
+    const oldRatio = (raw: number): number => raw || 1
+    const ratios = [0, 1, 1.25, 1.5, 2, 3, -1, NaN, Infinity, -Infinity, 0.5, 1e-9]
+    const ratioDrift = ratios.filter(
+      (r) => !Object.is(oldRatio(r), devicePixelRatioOrOne(r))
+    )
+    expect(
+      'the named pixel-ratio fallback answers the old expression for every input',
+      ratios.length === 12 &&
+        ratioDrift.length === 0 &&
+        devicePixelRatioOrOne(0) === 1 &&
+        devicePixelRatioOrOne(NaN) === 1,
+      { checked: ratios.length, drift: ratioDrift }
+    )
+
+    const widths = [0, 1, 100.9, 612, 792.5, 0.1, -5, NaN, Infinity, 1e6]
+    const heights = [0, 1, 100.9, 612, 792.5, 0.1, -5, NaN, Infinity, 1e6]
+    const dprs = [1, 1.25, 1.5, 2, 3, 0, -1, NaN, Infinity]
+    const oldSize = (w: number, h: number, d: number) => ({
+      width: Math.floor(w * d),
+      height: Math.floor(h * d)
+    })
+    let sizeChecked = 0
+    const sizeDrift: string[] = []
+    for (const w of widths)
+      for (const h of heights)
+        for (const d of dprs) {
+          sizeChecked += 1
+          const a = oldSize(w, h, d)
+          const b = bitmapPixelSize({ width: w, height: h }, d)
+          if (!Object.is(a.width, b.width) || !Object.is(a.height, b.height))
+            sizeDrift.push(`${w},${h},${d}`)
+        }
+    expect(
+      'the shared bitmap size answers both old floor expressions for every sampled input',
+      sizeChecked === widths.length * heights.length * dprs.length &&
+        sizeChecked >= 500 &&
+        sizeDrift.length === 0,
+      { checked: sizeChecked, drift: sizeDrift.slice(0, 5) }
+    )
+
+    let wrongDrift = 0
+    for (const w of widths)
+      for (const h of heights)
+        for (const d of dprs) {
+          const a = oldSize(w, h, d)
+          const b = { width: Math.round(w * d), height: Math.round(h * d) }
+          if (!Object.is(a.width, b.width) || !Object.is(a.height, b.height))
+            wrongDrift += 1
+        }
+    expect(
+      'a rule that rounds instead of truncating really would be caught',
+      wrongDrift > 0,
+      { wrongDrift, checked: sizeChecked }
+    )
+
+    const trunc = bitmapPixelSize({ width: 100.9, height: 200.9 }, 1.25)
+    expect(
+      'the shared rule truncates down instead of rounding up',
+      trunc.width === 126 &&
+        trunc.height === 251 &&
+        bitmapPixelSize({ width: 0, height: 0 }, 1).width === 0,
+      { trunc }
+    )
+
+    expect(
+      'the shared rule does not quietly sanitise non-finite or negative sizes',
+      Number.isNaN(bitmapPixelSize({ width: NaN, height: 1 }, 2).width) &&
+        bitmapPixelSize({ width: -5, height: 1 }, 2).width === -10 &&
+        bitmapPixelSize({ width: Infinity, height: 1 }, 2).width === Infinity,
+      {
+        nan: bitmapPixelSize({ width: NaN, height: 1 }, 2).width,
+        negative: bitmapPixelSize({ width: -5, height: 1 }, 2).width
+      }
+    )
+
+    // Values alone do not prove the wiring, and a "nothing left" assertion
+    // looks exactly like a pass when its detector is broken.
+    const sites = [
+      {
+        file: 'src/components/PdfViewer.tsx',
+        sizeCalls: 2, // renderTo + single-page render
+        ratioCalls: 3 // renderTo + warm + render
+      },
+      {
+        file: 'src/lib/hooks/useContinuousPages.ts',
+        sizeCalls: 1, // paintPage
+        ratioCalls: 1 // paintPage
+      }
+    ]
+    const root = path.join(__dirname, '../..')
+    const reads = sites.map((s) => {
+      const f = path.join(root, s.file)
+      return { file: s.file, text: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null }
+    })
+    expect(
+      'both bitmap call-site files can be read from this checkout',
+      reads.every((r) => r.text !== null),
+      { missing: reads.filter((r) => r.text === null).map((r) => r.file) }
+    )
+
+    // Count call sites, not bare name occurrences: the import path contains
+    // the module name too, so a name-only count would be two higher.
+    const calls = (t: string, name: string) =>
+      (t.match(new RegExp('\\b' + name + '\\s*\\(', 'g')) ?? []).length
+    const notWired = reads.flatMap((r, i) => {
+      const t = r.text ?? ''
+      const bad: string[] = []
+      if (!/from '[^']*bitmapPixelSize'/.test(t))
+        bad.push(sites[i].file + ': no shared-rule import')
+      const size = calls(t, 'bitmapPixelSize')
+      const ratio = calls(t, 'devicePixelRatioOrOne')
+      if (size !== sites[i].sizeCalls)
+        bad.push(sites[i].file + ': size rule called ' + size + ' times')
+      if (ratio !== sites[i].ratioCalls)
+        bad.push(sites[i].file + ': ratio rule called ' + ratio + ' times')
+      return bad
+    })
+    expect(
+      'all four compute sites call the shared size rule and no site reads dpr by hand',
+      notWired.length === 0,
+      { notWired }
+    )
+
+    const oldFragments = [
+      'Math.floor(viewport.width * dpr)',
+      'Math.floor(viewport.height * dpr)',
+      'window.devicePixelRatio || 1'
+    ]
+    const detector = (t: string) =>
+      oldFragments.filter((o) => t.includes(o)).length
+        ? oldFragments.flatMap((o) => {
+            const n = t.split(o).length - 1
+            return Array.from({ length: n }, () => o)
+          })
+        : []
+    const leftovers = reads.flatMap((r) =>
+      detector(r.text ?? '').map((o) => r.file + ': ' + o)
+    )
+    expect(
+      'no hand-written floor expression or raw dpr fallback is left at any call site',
+      leftovers.length === 0,
+      { leftovers }
+    )
+
+    const legacyText = [
+      'canvas.width = Math.floor(viewport.width * dpr)',
+      'canvas.height = Math.floor(viewport.height * dpr)',
+      'c.width === Math.floor(viewport.width * dpr) &&',
+      'c.height === Math.floor(viewport.height * dpr)',
+      'canvas.width = Math.floor(viewport.width * dpr)',
+      'canvas.height = Math.floor(viewport.height * dpr)',
+      'canvas.width = Math.floor(viewport.width * dpr)',
+      'canvas.height = Math.floor(viewport.height * dpr)',
+      'const dpr = window.devicePixelRatio || 1',
+      'const dpr = window.devicePixelRatio || 1',
+      'const dpr = window.devicePixelRatio || 1',
+      'const dpr = window.devicePixelRatio || 1'
+    ].join('\n')
+    expect(
+      'the leftover detector really sees the twelve old lines',
+      detector(legacyText).length === 12,
+      { caught: detector(legacyText).length }
+    )
+
+    // The plan listed five sites. The fifth, `canvas.width = bmp.width`,
+    // copies dimensions from an already-rendered bitmap instead of computing
+    // them from a viewport; folding it into this rule would change what it
+    // means. Prove it was deliberately left as it was.
+    const viewer = reads[0].text ?? ''
+    expect(
+      'the cached-bitmap dimension copy is deliberately left alone',
+      viewer.includes('canvas.width = bmp.width') &&
+        viewer.includes('canvas.height = bmp.height') &&
+        !viewer.includes('bmp.width = bitmapPixelSize'),
+      { copyKept: viewer.includes('canvas.width = bmp.width') }
     )
   }
 
