@@ -1,5 +1,6 @@
 import * as pdfjs from 'pdfjs-dist'
 import type { FindHit, Rect, Size, TextRun } from './pdfgeom'
+import { mergeRectsIntoLines } from './rectLines'
 
 /**
  * Finding a word inside a PDF.
@@ -59,17 +60,12 @@ export const rectsForRange = (
     })
   }
   raw.sort((p, q) => p.y - q.y || p.x - q.x)
-  const out: Rect[] = []
-  for (const r of raw) {
-    const line = out.find((t) => Math.abs(t.y - r.y) < 0.006 && r.x <= t.x + t.w + 0.02)
-    if (line) {
-      const right = Math.max(line.x + line.w, r.x + r.w)
-      line.x = Math.min(line.x, r.x)
-      line.w = right - line.x
-      line.h = Math.max(line.h, r.h)
-    } else out.push({ ...r })
-  }
-  return out
+  // 0..1 page coordinates: 0.006 is a fraction of the page height, and the
+  // next fragment has to sit next to this line, not merely level with it.
+  return mergeRectsIntoLines(
+    raw,
+    (t, r) => Math.abs(t.y - r.y) < 0.006 && r.x <= t.x + t.w + 0.02
+  )
 }
 
 /**

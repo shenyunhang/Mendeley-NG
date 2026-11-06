@@ -1,4 +1,5 @@
 import type { Rect } from './pdfgeom'
+import { mergeRectsIntoLines } from './rectLines'
 
 /**
  * What the reader has selected, as rectangles on the page.
@@ -34,18 +35,12 @@ export function rectsInLayer(layer: HTMLElement): Rect[] {
   }
   // a selection is one fragment per text run; stitch the ones on the same
   // line back into a single rectangle per line
-  const lines: Rect[] = []
-  for (const r of raw.sort((a, b) => a.y - b.y || a.x - b.x)) {
-    const line = lines.find((l) => Math.abs(l.y - r.y) < 3)
-    if (line) {
-      const right = Math.max(line.x + line.w, r.x + r.w)
-      line.x = Math.min(line.x, r.x)
-      line.w = right - line.x
-      line.h = Math.max(line.h, r.h)
-    } else {
-      lines.push({ ...r })
-    }
-  }
+  // CSS pixels here, so the tolerance is three pixels and a gap in x does
+  // not split a line: a selection can skip a run in the middle.
+  const lines = mergeRectsIntoLines(
+    raw.sort((a, b) => a.y - b.y || a.x - b.x),
+    (l, r) => Math.abs(l.y - r.y) < 3
+  )
   return lines.map((l) => ({
     x: l.x / box.width,
     y: l.y / box.height,

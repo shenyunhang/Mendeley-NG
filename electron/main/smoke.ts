@@ -34,6 +34,10 @@ import {
 // written and the number shown can be checked against the old form without
 // opening a window -- and its wiring is read back from the source (171).
 import { commitPageBudget } from '../../src/lib/pageBudgetCommit'
+// A text layer and a find hit both stitch one rectangle per line. The merge
+// is shared now, but each caller keeps its own "same line" test, so this run
+// checks both old loops verbatim and proves the two tests really differ (172).
+import { mergeRectsIntoLines } from '../../src/lib/rectLines'
 // This one lives with the renderer, but it is a pure function with no DOM in
 // it, and the note it carries is the only data in the app that exists nowhere
 // else — a claim about being able to take your library with you is worth one
@@ -3509,6 +3513,255 @@ export async function runSmoke() {
       'the settings sheet carries no second copy of the page budget rule',
       detector(settingsSrc ?? '').length === 0,
       { caught: detector(settingsSrc ?? '') }
+    )
+  }
+
+  // 172: `pdffind.ts` and `pdfsel.ts` each wrote out the same four-line
+  // "stitch fragments into one line box" merge. Only the answer to "are
+  // these two on the same line" differed: find uses 0..1 page coordinates
+  // with an adjacency test, selection uses CSS pixels and only compares y.
+  // Sharing the merge is safe only if both old loops agree value by value,
+  // and honest only if the two predicates are shown to really disagree.
+  {
+    type R = { x: number; y: number; w: number; h: number }
+
+    // Both old loops, copied verbatim. Controls, not dead code.
+    const legacyFind = (raw: R[]) => {
+      const out: R[] = []
+      for (const r of raw) {
+        const line = out.find(
+          (t) => Math.abs(t.y - r.y) < 0.006 && r.x <= t.x + t.w + 0.02
+        )
+        if (line) {
+          const right = Math.max(line.x + line.w, r.x + r.w)
+          line.x = Math.min(line.x, r.x)
+          line.w = right - line.x
+          line.h = Math.max(line.h, r.h)
+        } else out.push({ ...r })
+      }
+      return out
+    }
+    const legacySel = (raw: R[]) => {
+      const lines: R[] = []
+      for (const r of raw) {
+        const line = lines.find((l) => Math.abs(l.y - r.y) < 3)
+        if (line) {
+          const right = Math.max(line.x + line.w, r.x + r.w)
+          line.x = Math.min(line.x, r.x)
+          line.w = right - line.x
+          line.h = Math.max(line.h, r.h)
+        } else lines.push({ ...r })
+      }
+      return lines
+    }
+    const findLine = (t: R, r: R) =>
+      Math.abs(t.y - r.y) < 0.006 && r.x <= t.x + t.w + 0.02
+    const selLine = (l: R, r: R) => Math.abs(l.y - r.y) < 3
+    const sameRects = (a: R[], b: R[]) =>
+      a.length === b.length &&
+      a.every(
+        (r, i) =>
+          Object.is(r.x, b[i].x) &&
+          Object.is(r.y, b[i].y) &&
+          Object.is(r.w, b[i].w) &&
+          Object.is(r.h, b[i].h)
+      )
+
+    // Deterministic inputs in both coordinate spaces, plus hand-made cases
+    // that force a merge, a gap, NaN and negative widths.
+    const mk = (seed: number, scale: number): R[] => {
+      let s = Math.imul(seed, 7919) + 13
+      const next = () => {
+        s = (Math.imul(s, 1103515245) + 12345) >>> 0
+        return s / 4294967296
+      }
+      const n = 1 + Math.floor(next() * 14)
+      const raw: R[] = []
+      for (let i = 0; i < n; i++) {
+        raw.push({
+          x: Math.round(next() * scale * 100) / 100,
+          y: Math.round(next() * scale * 20) / 100,
+          w: Math.round(next() * scale * 12) / 100,
+          h: Math.round(next() * scale * 5) / 100
+        })
+      }
+      return raw.sort((a, b) => a.y - b.y || a.x - b.x)
+    }
+    const cases: R[][] = [
+      [],
+      [{ x: 0, y: 0, w: 1, h: 1 }],
+      [{ x: 0, y: 0, w: 10, h: 2 }, { x: 12, y: 0, w: 10, h: 3 }],
+      [{ x: 0, y: 0, w: 10, h: 2 }, { x: 12, y: 1, w: 10, h: 3 }],
+      [{ x: 0, y: 0, w: 10, h: 2 }, { x: 100, y: 0.001, w: 10, h: 3 }],
+      [{ x: 0, y: 0, w: NaN, h: 2 }, { x: 1, y: 0, w: 1, h: 1 }],
+      [{ x: -5, y: 0, w: -2, h: 2 }, { x: 0, y: 0, w: 3, h: 5 }],
+      [
+        { x: 0, y: 0, w: 10, h: 2 },
+        { x: 1, y: 0, w: 2, h: 1 },
+        { x: 20, y: 0, w: 4, h: 3 }
+      ]
+    ]
+    for (const scale of [1, 400]) {
+      for (let seed = 1; seed <= 240; seed++) cases.push(mk(seed, scale))
+    }
+
+    let checked = 0
+    const drift: string[] = []
+    for (const raw of cases) {
+      const copy = () => raw.map((r) => ({ ...r }))
+      const findOld = legacyFind(copy())
+      const findNew = mergeRectsIntoLines(copy(), findLine)
+      const selOld = legacySel(copy())
+      const selNew = mergeRectsIntoLines(copy(), selLine)
+      checked += 2
+      if (!sameRects(findOld, findNew)) drift.push('find:' + drift.length)
+      if (!sameRects(selOld, selNew)) drift.push('sel:' + drift.length)
+    }
+    expect(
+      'the shared stitch answers both old loops for every sampled input',
+      cases.length === 488 && checked >= 900 && drift.length === 0,
+      { cases: cases.length, checked, drift: drift.slice(0, 6) }
+    )
+
+    // The control. If one predicate could serve both callers, injecting it
+    // would be ceremony rather than a required separation (166).
+    const split: R[] = [
+      { x: 0, y: 0, w: 10, h: 2 },
+      { x: 100, y: 1, w: 10, h: 3 }
+    ]
+    expect(
+      'the two callers really mean different things by one line',
+      legacyFind(split).length === 2 &&
+        legacySel(split).length === 1 &&
+        mergeRectsIntoLines(split, findLine).length === 2 &&
+        mergeRectsIntoLines(split, selLine).length === 1,
+      {
+        findOld: legacyFind(split).length,
+        selOld: legacySel(split).length,
+        findNew: mergeRectsIntoLines(split, findLine).length,
+        selNew: mergeRectsIntoLines(split, selLine).length
+      }
+    )
+
+    const source: R[] = [
+      { x: 5, y: 2, w: 10, h: 3 },
+      { x: 7, y: 2, w: 4, h: 5 }
+    ]
+    const snapshot = source.map((r) => ({ ...r }))
+    const merged = mergeRectsIntoLines(source, selLine)
+    expect(
+      'merging does not mutate the caller array and keeps the first y',
+      sameRects(source, snapshot) &&
+        merged.length === 1 &&
+        merged[0].y === 2 &&
+        merged[0].x === 5 &&
+        merged[0].w === 10 &&
+        merged[0].h === 5,
+      { merged }
+    )
+
+    expect(
+      'an empty or single fragment is handed back unchanged',
+      mergeRectsIntoLines([], selLine).length === 0 &&
+        sameRects(
+          mergeRectsIntoLines([{ x: 1, y: 2, w: 3, h: 4 }], findLine),
+          [{ x: 1, y: 2, w: 3, h: 4 }]
+        ),
+      {}
+    )
+
+    const odd: R[] = [
+      { x: 0, y: 0, w: NaN, h: Infinity },
+      { x: 1, y: 0, w: -Infinity, h: -1 }
+    ]
+    expect(
+      'non-finite values are not silently cleaned up',
+      sameRects(mergeRectsIntoLines(odd, selLine), legacySel(odd)) &&
+        Number.isNaN(mergeRectsIntoLines(odd, selLine)[0].w),
+      { merged: mergeRectsIntoLines(odd, selLine) }
+    )
+
+    // Values alone do not prove the wiring. Count call sites, not names:
+    // the import path carries the module name too (169).
+    const rectRoot = path.join(__dirname, '../..')
+    const rectSites = [
+      { file: 'src/lib/pdffind.ts', predicate: '0.006' },
+      { file: 'src/lib/pdfsel.ts', predicate: '< 3' }
+    ]
+    const rectReads = rectSites.map((s) => {
+      const f = path.join(rectRoot, s.file)
+      return {
+        ...s,
+        text: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null
+      }
+    })
+    expect(
+      'both stitch call-site files can be read from this checkout',
+      rectReads.every((r) => r.text !== null),
+      { missing: rectReads.filter((r) => r.text === null).map((r) => r.file) }
+    )
+    const rectCalls = (t: string, name: string) =>
+      (t.match(new RegExp('\\b' + name + '\\s*\\(', 'g')) ?? []).length
+    expect(
+      'both call sites use the shared stitch once and keep sorting to themselves',
+      rectReads.every(
+        (r) =>
+          /from '[^']*rectLines'/.test(r.text ?? '') &&
+          rectCalls(r.text ?? '', 'mergeRectsIntoLines') === 1 &&
+          (r.text ?? '').split('raw.sort(').length - 1 === 1 &&
+          (r.text ?? '').includes(r.predicate)
+      ),
+      rectReads.map((r) => ({
+        file: r.file,
+        calls: rectCalls(r.text ?? '', 'mergeRectsIntoLines'),
+        sorts: (r.text ?? '').split('raw.sort(').length - 1,
+        predicate: (r.text ?? '').includes(r.predicate)
+      }))
+    )
+    expect(
+      'neither call site inherited the other tolerance',
+      !(rectReads[0].text ?? '').includes('Math.abs(l.y - r.y) < 3') &&
+        !(rectReads[1].text ?? '').includes('0.006') &&
+        !(rectReads[1].text ?? '').includes('t.x + t.w + 0.02'),
+      {}
+    )
+
+    const oldMergeLines = [
+      'const right = Math.max(line.x + line.w, r.x + r.w)',
+      'line.x = Math.min(line.x, r.x)',
+      'line.w = right - line.x',
+      'line.h = Math.max(line.h, r.h)'
+    ]
+    const mergeDetector = (t: string) =>
+      oldMergeLines.flatMap((o) =>
+        Array.from({ length: t.split(o).length - 1 }, () => o)
+      )
+    const legacyMergeText = [...oldMergeLines, ...oldMergeLines].join('\n')
+    expect(
+      'the leftover detector really sees both old merge bodies',
+      mergeDetector(legacyMergeText).length === 8,
+      { caught: mergeDetector(legacyMergeText).length }
+    )
+    expect(
+      'neither product file still carries the hand-written merge',
+      rectReads.every((r) => mergeDetector(r.text ?? '').length === 0),
+      rectReads.map((r) => ({
+        file: r.file,
+        caught: mergeDetector(r.text ?? '').length
+      }))
+    )
+
+    const sharedFile = path.join(rectRoot, 'src/lib/rectLines.ts')
+    const sharedSrc = fs.existsSync(sharedFile)
+      ? fs.readFileSync(sharedFile, 'utf8')
+      : null
+    expect(
+      'the shared rule does not sort and does not own either tolerance',
+      sharedSrc !== null &&
+        !sharedSrc.includes('.sort(') &&
+        !sharedSrc.includes('0.006') &&
+        !sharedSrc.includes('< 3'),
+      { present: sharedSrc !== null }
     )
   }
 
