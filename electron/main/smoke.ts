@@ -30,6 +30,10 @@ import {
   FULL_TEXT_MIN_PAGES,
   restoredPageBudget
 } from '../../shared/fullTextPages'
+// The Settings field is committed on blur. It is pure too, so the number
+// written and the number shown can be checked against the old form without
+// opening a window -- and its wiring is read back from the source (171).
+import { commitPageBudget } from '../../src/lib/pageBudgetCommit'
 // This one lives with the renderer, but it is a pure function with no DOM in
 // it, and the note it carries is the only data in the app that exists nowhere
 // else — a claim about being able to take your library with you is worth one
@@ -3346,6 +3350,165 @@ export async function runSmoke() {
         DEFAULT_FT_PAGES <= FULL_TEXT_MAX_PAGES &&
         outside === 0,
       { sample, outside, min: FULL_TEXT_MIN_PAGES, max: FULL_TEXT_MAX_PAGES }
+    )
+  }
+
+  // 171: the Settings field used to clamp with literals of its own and to
+  // write itself back only for an unusable value. Typing 999 therefore wrote
+  // 50 into the config and rebuilt the index against 50 while the field kept
+  // saying 999 -- one setting, two numbers. The commit is pure now: the
+  // number written must not move for any input, and the number shown must
+  // always be the number that took effect.
+  {
+    // The old commit, copied verbatim. It is a control, not dead code:
+    // without it "same number as before" is not a testable claim.
+    const legacyCommit = (raw: string) => {
+      let shown = raw
+      let applied = DEFAULT_FT_PAGES
+      const n = Number(raw)
+      if (!Number.isFinite(n) || n < 1) {
+        shown = String(DEFAULT_FT_PAGES)
+        applied = DEFAULT_FT_PAGES
+      } else {
+        applied = Math.min(50, Math.floor(n))
+      }
+      return { shown, applied }
+    }
+
+    const inputs: string[] = [
+      '', ' ', 'abc', 'NaN', 'Infinity', '-Infinity', 'null', '0', '-0',
+      '0.9', '1', '1.9', '2', '3', '3.9', '49', '50', '50.9', '51', '100',
+      '999', '1e3', '+7', '007', '-5', '-999', '0x10', '  8  ', '1.0001'
+    ]
+    for (let n = -60; n <= 160; n++) inputs.push(String(n))
+    for (let n = 0; n <= 60; n++) inputs.push(String(n + 0.5))
+
+    const moved: Array<{ raw: string; old: number; next: number }> = []
+    for (const raw of inputs) {
+      const old = legacyCommit(raw).applied
+      const next = commitPageBudget(raw).applied
+      if (!Object.is(old, next)) moved.push({ raw, old, next })
+    }
+    expect(
+      'committing the page budget still writes exactly what the old form wrote',
+      inputs.length >= 300 && moved.length === 0,
+      { inputs: inputs.length, moved: moved.slice(0, 6) }
+    )
+
+    // The control for the fix itself: the old field really did lie, and only
+    // the shown value changed. Green on both would mean 171 was a no-op.
+    const oldOver = legacyCommit('999')
+    const newOver = commitPageBudget('999')
+    expect(
+      'the old field kept a number that never took effect',
+      oldOver.shown === '999' &&
+        oldOver.applied === FULL_TEXT_MAX_PAGES &&
+        newOver.shown === String(FULL_TEXT_MAX_PAGES) &&
+        Object.is(newOver.applied, oldOver.applied),
+      { old: oldOver, next: newOver }
+    )
+
+    const unusable = ['abc', '', '0', '-5', 'Infinity', 'NaN', ' ']
+    expect(
+      'an unusable field still falls back to the shared default',
+      unusable.every((raw) => {
+        const c = commitPageBudget(raw)
+        return c.shown === String(DEFAULT_FT_PAGES) && c.applied === DEFAULT_FT_PAGES
+      }),
+      unusable.map((raw) => ({ raw, ...commitPageBudget(raw) }))
+    )
+
+    const drift = inputs.filter((raw) => {
+      const c = commitPageBudget(raw)
+      return (
+        c.shown !== String(c.applied) ||
+        !Number.isInteger(c.applied) ||
+        c.applied < FULL_TEXT_MIN_PAGES ||
+        c.applied > FULL_TEXT_MAX_PAGES
+      )
+    })
+    expect(
+      'the field always shows the value that takes effect',
+      drift.length === 0,
+      { inputs: inputs.length, drift: drift.slice(0, 6) }
+    )
+
+    expect(
+      'the shared rule is idempotent, so App clamping again changes nothing',
+      inputs.every((raw) => {
+        const applied = commitPageBudget(raw).applied
+        return Object.is(clampFullTextPages(applied), applied)
+      }),
+      inputs.length
+    )
+
+    // Values alone do not prove the wiring, and a "nothing left" assertion
+    // looks exactly like a pass when its detector is broken.
+    const pageRoot = path.join(__dirname, '../..')
+    const settingsFile = path.join(pageRoot, 'src/components/Settings.tsx')
+    const moduleFile = path.join(pageRoot, 'src/lib/pageBudgetCommit.ts')
+    const settingsSrc = fs.existsSync(settingsFile)
+      ? fs.readFileSync(settingsFile, 'utf8')
+      : null
+    const moduleSrc = fs.existsSync(moduleFile)
+      ? fs.readFileSync(moduleFile, 'utf8')
+      : null
+    expect(
+      'the settings sheet and the commit module can be read from this checkout',
+      settingsSrc !== null && moduleSrc !== null,
+      { settings: settingsSrc !== null, module: moduleSrc !== null }
+    )
+
+    // Count call sites, not bare names: the import path carries the name too.
+    const callCount = (t: string, name: string) =>
+      (t.match(new RegExp('\\b' + name + '\\s*\\(', 'g')) ?? []).length
+    expect(
+      'the settings sheet commits through the shared rule and the module uses it once',
+      /from '[^']*pageBudgetCommit'/.test(settingsSrc ?? '') &&
+        callCount(settingsSrc ?? '', 'commitPageBudget') === 1 &&
+        /from '[^']*fullTextPages'/.test(moduleSrc ?? '') &&
+        callCount(moduleSrc ?? '', 'clampFullTextPages') === 1,
+      {
+        wiring: callCount(settingsSrc ?? '', 'commitPageBudget'),
+        rule: callCount(moduleSrc ?? '', 'clampFullTextPages')
+      }
+    )
+    expect(
+      'the commit module has no clamp of its own',
+      !/Math\.min\(/.test(moduleSrc ?? '') &&
+        !/Math\.floor\(/.test(moduleSrc ?? '') &&
+        /FULL_TEXT_MIN_PAGES/.test(moduleSrc ?? ''),
+      { module: moduleSrc !== null }
+    )
+
+    const oldFragments = [
+      'Math.min(50, Math.floor(n))',
+      'setPages(String(DEFAULT_FT_PAGES))',
+      'onFtPages(DEFAULT_FT_PAGES)',
+      'Number.isFinite(n) || n < 1'
+    ]
+    const detector = (t: string) =>
+      oldFragments.flatMap((o) =>
+        Array.from({ length: t.split(o).length - 1 }, () => o)
+      )
+    const legacyLines = [
+      '    const n = Number(pages)',
+      '    if (!Number.isFinite(n) || n < 1) {',
+      '      setPages(String(DEFAULT_FT_PAGES))',
+      '      onFtPages(DEFAULT_FT_PAGES)',
+      '      return',
+      '    }',
+      '    onFtPages(Math.min(50, Math.floor(n)))'
+    ].join('\n')
+    expect(
+      'the leftover detector really sees the old commit body',
+      detector(legacyLines).length === 4,
+      { caught: detector(legacyLines).length }
+    )
+    expect(
+      'the settings sheet carries no second copy of the page budget rule',
+      detector(settingsSrc ?? '').length === 0,
+      { caught: detector(settingsSrc ?? '') }
     )
   }
 
@@ -8442,6 +8605,43 @@ export async function runSmoke() {
     voidedStat
   )
   // put it back the way it was, so the next run starts from the same place
+  await w.webContents.executeJavaScript(
+    `window.api.setConfig({ftPages:${JSON.parse(cfgBefore).ftPages ?? 3}})`
+  )
+  await new Promise((r) => setTimeout(r, 400))
+  // 171. The pure rule is checked above; this is the same claim at the
+  // window: an over-budget value has to be written back into the field, not
+  // just into the config. The old sheet kept showing the number typed.
+  await w.webContents.executeJavaScript(
+    '(()=>{const m=document.querySelector(".settings");'
+    + 'const inp=[...m.querySelectorAll("input")].find(i=>i.type!=="checkbox");if(!inp)return 0;'
+    + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
+    + 'set.call(inp,"999");inp.dispatchEvent(new Event("input",{bubbles:true}));'
+    + 'inp.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));return 1})()'
+  )
+  const clampedField = String(
+    (await until(
+      '(async()=>{const m=document.querySelector(".settings");'
+      + 'const inp=[...m.querySelectorAll("input")].find(i=>i.type!=="checkbox");'
+      + 'const c=await window.api.getConfig();'
+      + 'return JSON.stringify({shown:inp?inp.value:null,ftPages:c.ftPages??null})})()',
+      (v) => {
+        const s = String(v)
+        return (
+          s.includes('"shown":"' + FULL_TEXT_MAX_PAGES + '"') &&
+          s.includes('"ftPages":' + FULL_TEXT_MAX_PAGES)
+        )
+      },
+      8000
+    )) ?? '{}'
+  )
+  log('field after committing an over-budget value', clampedField)
+  expect(
+    'an over-budget page count is written back into the field',
+    clampedField.includes('"shown":"' + FULL_TEXT_MAX_PAGES + '"') &&
+      clampedField.includes('"ftPages":' + FULL_TEXT_MAX_PAGES),
+    clampedField
+  )
   await w.webContents.executeJavaScript(
     `window.api.setConfig({ftPages:${JSON.parse(cfgBefore).ftPages ?? 3}})`
   )

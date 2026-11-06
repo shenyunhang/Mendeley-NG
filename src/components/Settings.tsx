@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FtStatus, UpdateState } from '../../shared/types'
-import { DEFAULT_FT_PAGES, DEFAULT_PDF_TEMPLATE } from '../../shared/types'
+import { DEFAULT_PDF_TEMPLATE } from '../../shared/types'
+import { commitPageBudget } from '../lib/pageBudgetCommit'
 import logoUrl from '../../assets/logo.svg'
 
 /**
@@ -112,13 +113,9 @@ export default function Settings({
   }, [focus])
 
   const commit = () => {
-    const n = Number(pages)
-    if (!Number.isFinite(n) || n < 1) {
-      setPages(String(DEFAULT_FT_PAGES))
-      onFtPages(DEFAULT_FT_PAGES)
-      return
-    }
-    onFtPages(Math.min(50, Math.floor(n)))
+    const { shown, applied } = commitPageBudget(pages)
+    setPages(shown)
+    onFtPages(applied)
   }
 
   return (
