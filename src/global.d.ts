@@ -88,6 +88,13 @@ export interface Api {
   deleteRemoteAnnotation: (id: string) => Promise<{ ok: boolean }>
   fileHash: (docId: string) => Promise<string | null>
   saveAnnotations: (list: Annotation[]) => Promise<{ ok: boolean }>
+  /** Best-effort start-up pass over the papers that already have local marks. */
+  syncAnnotationsAtStart: () => Promise<{
+    docs: number
+    pulled: number
+    pushed: number
+    skipped: string[]
+  }>
   loadNotes: () => Promise<Record<string, string>>
   saveNotes: (notes: Record<string, string>) => Promise<{ ok: boolean }>
   loadReading: () => Promise<Record<string, number>>

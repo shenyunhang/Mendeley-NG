@@ -32,7 +32,8 @@ export const FAILURE = {
   undoFolderAdd: 'undo could not put a paper back in its folder',
   cloudHighlightRemoval: 'cloud highlight removal did not land',
   continuousPreference: 'continuous-mode preference was not saved',
-  readingPosition: 'reading position was not saved'
+  readingPosition: 'reading position was not saved',
+  startupAnnotationSync: 'start-up annotation sync is best effort'
 } as const
 
 export type FailureReason = (typeof FAILURE)[keyof typeof FAILURE]

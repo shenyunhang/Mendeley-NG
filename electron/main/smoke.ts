@@ -19,9 +19,19 @@ import {
   DEFAULT_FT_PAGES,
   PROJECT_URL,
   type Annotation,
+  type CloudAnnotation,
   type Doc,
-  type MetaCandidate
+  type MetaCandidate,
+  type PdfPos
 } from '../../shared/types'
+// A start-up pass over the marks must merge without an open PDF and without
+// losing a mark drawn while the network was in flight. Its rules are pure,
+// so the ordering is checked here with fixed inputs (176).
+import {
+  applyMergedAnnotations,
+  markPushed,
+  mergeCloudAnnotations
+} from '../../src/lib/annotationMerge'
 // The page budget is written in the renderer and read in the main process.
 // Both halves used to carry their own copy of the same clamp and their own
 // idea of the default. The rule is shared now, and this run checks that the
@@ -331,6 +341,24 @@ export async function runSmoke() {
     log('sync FAILED', String(e))
   }
 
+  // A start-up pass over the marks has to be asked for, not merely defined.
+  // Hold the handler before the window exists: the renderer's API is frozen
+  // by contextBridge, and swapping the main-process handler is the only way
+  // to count the call without talking to the real cloud (174).
+  const startupHandlers = (
+    ipcMain as unknown as {
+      _invokeHandlers?: Map<string, (...args: unknown[]) => unknown>
+    }
+  )._invokeHandlers
+  const savedMarksSync = startupHandlers?.get('annotations:syncAtStart')
+  let startSyncCalls = 0
+  if (savedMarksSync) {
+    ipcMain.removeHandler('annotations:syncAtStart')
+    ipcMain.handle('annotations:syncAtStart', async () => {
+      startSyncCalls += 1
+      return { docs: 0, pulled: 0, pushed: 0, skipped: [] }
+    })
+  }
   const w = new BrowserWindow({ width: 1500, height: 950, show: false, backgroundColor: '#1e1e1e',
     webPreferences: { preload: path.join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: false } })
   const errs: string[] = []
@@ -413,6 +441,26 @@ export async function runSmoke() {
   )
   expect('and shows no banner while doing it', startSync.err === false, startSync)
   expect('and it is on unless switched off', startSync.cfg !== false, startSync)
+
+  // The marks pass is started by that same quiet pull, after the library
+  // answer comes back. Poll the counter rather than assuming the status line
+  // and the answer arrive in one tick; the count is deterministic, only its
+  // arrival time is not.
+  for (let i = 0; i < 40 && startSyncCalls === 0; i++) {
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  expect(
+    'a start-up pull also asks for the cloud copy of the marks',
+    !!savedMarksSync && startSyncCalls >= 1,
+    { startSyncCalls, handlerPresent: !!savedMarksSync }
+  )
+  if (savedMarksSync) {
+    ipcMain.removeHandler('annotations:syncAtStart')
+    ipcMain.handle(
+      'annotations:syncAtStart',
+      savedMarksSync as Parameters<typeof ipcMain.handle>[1]
+    )
+  }
 
   // The bar is one row and every label on it is on one line.  A button
   // squeezed narrow enough wraps its own text — "检查" over "更新" — which
@@ -4277,6 +4325,161 @@ export async function runSmoke() {
     )
   }
 
+  // A start-up sync has no open PDF to measure a page with. It must merge
+  // only what the cloud already expresses in PDF points, never invent
+  // coordinates for a local mark that has none, and never overwrite a mark
+  // drawn while the network was in flight (176).
+  {
+    const pos = (page: number, x: number): PdfPos => ({ page, x, y: 10, w: 20, h: 5 })
+    const local = (o: Partial<Annotation> & { id: string }): Annotation => ({
+      docId: 'paper-a',
+      page: 1,
+      type: 'highlight',
+      color: '#ffe066',
+      rects: [],
+      created: '2026-01-01T00:00:00.000Z',
+      ...o
+    })
+    const cloud = (id: string, withPos = true): CloudAnnotation => ({
+      id,
+      document_id: 'paper-a',
+      type: 'highlight',
+      ...(withPos
+        ? {
+            positions: [
+              { top_left: { x: 5, y: 7 }, bottom_right: { x: 15, y: 12 }, page: 2 }
+            ]
+          }
+        : {})
+    })
+    const NOW = '2026-11-07T00:00:00.000Z'
+    const known = local({
+      id: 'l1',
+      remoteId: 'c1',
+      text: 'the words',
+      note: 'my note',
+      pos: [pos(1, 1)],
+      rects: [{ x: 0, y: 0, w: 1, h: 1 }]
+    })
+    const localOnly = local({ id: 'l2', pos: [pos(3, 4)] })
+    const localNoPos = local({ id: 'l3' })
+    const orphan = local({ id: 'l4', remoteId: 'gone' })
+    const mine = [known, localOnly, localNoPos, orphan]
+    const mineSnapshot = JSON.stringify(mine)
+    const cloudList = [
+      cloud('c1'),
+      cloud('c2'),
+      cloud('c3', false),
+      { ...cloud('c4', false), type: 'sticky_note' as const }
+    ]
+    const { merged, toPush } = mergeCloudAnnotations('paper-a', mine, cloudList, NOW)
+
+    expect(
+      'the merge keeps local words, notes and colours for a known cloud id',
+      (() => {
+        const m = merged.find((a) => a.id === 'l1')
+        return (
+          !!m && m.text === 'the words' && m.note === 'my note' &&
+          m.color === '#ffe066' && m.remoteId === 'c1' && m.pos?.[0]?.page === 2
+        )
+      })(),
+      { known: merged.find((a) => a.id === 'l1') }
+    )
+    expect(
+      'a cloud-only mark is added with its positions and a cloud id',
+      (() => {
+        const m = merged.find((a) => a.id === 'cloud-c2')
+        return !!m && m.remoteId === 'c2' && m.pos?.[0]?.x === 5 && m.created === NOW
+      })(),
+      { added: merged.find((a) => a.id === 'cloud-c2') }
+    )
+    expect(
+      'a cloud mark with no positions is skipped unless it is a sticky note',
+      !merged.some((a) => a.remoteId === 'c3') &&
+        merged.some((a) => a.remoteId === 'c4' && a.type === 'note'),
+      { ids: merged.map((a) => a.remoteId ?? a.id) }
+    )
+    expect(
+      'a remote id the cloud no longer lists is kept, not deleted',
+      merged.some((a) => a.id === 'l4'),
+      { ids: merged.map((a) => a.id) }
+    )
+    expect(
+      'only local-only marks carrying PDF points are offered for upload',
+      toPush.length === 1 && toPush[0].id === 'l2' && toPush[0].pos[0].page === 3,
+      { toPush }
+    )
+    expect(
+      'the merge does not mutate the caller arrays',
+      JSON.stringify(mine) === mineSnapshot && cloudList.length === 4,
+      { unchanged: JSON.stringify(mine) === mineSnapshot }
+    )
+
+    const meanwhile = local({ id: 'l5', text: 'drawn while syncing' })
+    const current = [...mine, meanwhile, local({ id: 'other', docId: 'paper-b' })]
+    const applied = applyMergedAnnotations(current, 'paper-a', merged)
+    expect(
+      'writing back keeps a mark drawn while the sync was in flight',
+      applied.some((a) => a.id === 'l5' && a.text === 'drawn while syncing') &&
+        applied.some((a) => a.id === 'other' && a.docId === 'paper-b'),
+      { ids: applied.map((a) => a.id) }
+    )
+    expect(
+      'writing back also adds the new cloud mark and updates remote ids',
+      applied.some((a) => a.id === 'cloud-c2') &&
+        (applied.find((a) => a.id === 'l1')?.pos?.[0]?.page ?? 0) === 2,
+      { ids: applied.map((a) => a.id) }
+    )
+    const pushed = markPushed(applied, 'l2', 'new-remote', [pos(3, 4)])
+    expect(
+      'a successful upload is recorded by id and leaves everything else alone',
+      (pushed.find((a) => a.id === 'l2')?.remoteId ?? '') === 'new-remote' &&
+        pushed.length === applied.length &&
+        pushed.find((a) => a.id === 'l5')?.text === 'drawn while syncing',
+      { pushedId: pushed.find((a) => a.id === 'l2')?.remoteId ?? null }
+    )
+
+    // Values alone do not prove the wiring. The detector is handed the old
+    // start-up line and one wired line before it is trusted to read source.
+    const syncRoot = path.join(__dirname, '../..')
+    const libSrc = fs.readFileSync(path.join(syncRoot, 'src/lib/hooks/useLibrary.ts'), 'utf8')
+    const marksSrc = fs.readFileSync(path.join(syncRoot, 'electron/main/ipc/marks.ts'), 'utf8')
+    const preloadSrc = fs.readFileSync(path.join(syncRoot, 'electron/preload/index.ts'), 'utf8')
+    const typesSrc = fs.readFileSync(path.join(syncRoot, 'src/global.d.ts'), 'utf8')
+    const syncCalls = (t: string) => (t.match(/syncAnnotationsAtStart\(/g) ?? []).length
+    const oldStart = 'window.api.sync(false).then((r) => setLib(r))'
+    const wiredStart = 'window.api.syncAnnotationsAtStart()'
+    expect(
+      'the wiring detector can really see the call it is looking for',
+      syncCalls(oldStart) === 0 && syncCalls(wiredStart) === 1,
+      { old: syncCalls(oldStart), wired: syncCalls(wiredStart) }
+    )
+    expect(
+      'the start-up pull, the API and the handler are all wired once',
+      syncCalls(libSrc) === 1 &&
+        (preloadSrc.match(/syncAnnotationsAtStart:/g) ?? []).length === 1 &&
+        (typesSrc.match(/syncAnnotationsAtStart:/g) ?? []).length === 1 &&
+        (marksSrc.match(/'annotations:syncAtStart'/g) ?? []).length === 1 &&
+        (marksSrc.match(/mergeCloudAnnotations\(/g) ?? []).length === 1 &&
+        (marksSrc.match(/applyMergedAnnotations\(/g) ?? []).length === 1 &&
+        (marksSrc.match(/markPushed\(/g) ?? []).length === 1,
+      {
+        inHook: syncCalls(libSrc),
+        inPreload: (preloadSrc.match(/syncAnnotationsAtStart:/g) ?? []).length,
+        inHandler: (marksSrc.match(/'annotations:syncAtStart'/g) ?? []).length
+      }
+    )
+    expect(
+      'the same switch turns the marks pass off and its failure has a name',
+      libSrc.includes('if (!syncOnStart') &&
+        libSrc.includes('ignoreFailure(FAILURE.startupAnnotationSync') &&
+        // split, so this file does not contain the exact empty-catch text
+        // the 165 detector is looking for in product code
+        !marksSrc.includes('catch' + '(() => {})'),
+      { named: libSrc.includes('FAILURE.startupAnnotationSync') }
+    )
+  }
+
   // Links and citation markers each walked every page of a continuous PDF
   // with their own copy of the same loop, including a literal batch size of
   // 8. Pulling it into a pure controller is only safe if the event sequence
@@ -5238,7 +5441,7 @@ export async function runSmoke() {
     const reasons = Object.values(FAILURE)
     expect(
       'the failure reasons are a fixed named set with no invented ones',
-      reasons.length === 11 &&
+      reasons.length === 12 &&
         new Set(reasons).size === reasons.length &&
         reasons.every((r) => typeof r === 'string' && r.length > 0),
       { count: reasons.length, reasons }
@@ -5340,8 +5543,8 @@ export async function runSmoke() {
     const ignores = [...body.matchAll(/ignoreFailure\(FAILURE\.([A-Za-z]+)/g)].map((m) => m[1])
     const reports = [...body.matchAll(/reportFailure\(FAILURE\.([A-Za-z]+)/g)].map((m) => m[1])
     expect(
-      'all eleven product catches go through a named door',
-      swallowed.length === 0 && ignores.length === 5 && reports.length === 6,
+      'all twelve product catches go through a named door',
+      swallowed.length === 0 && ignores.length === 6 && reports.length === 6,
       { swallowed: swallowed.length, ignores, reports }
     )
 
@@ -5351,6 +5554,7 @@ export async function runSmoke() {
       'appVersionCosmetic',
       'workerCleanupTimedOut',
       'workerCleanup',
+      'startupAnnotationSync',
       'testPdfCleanup'
     ]
     const REPORT_KEYS = [
@@ -5370,7 +5574,7 @@ export async function runSmoke() {
     const thisFile = fs.readFileSync(path.join(root, 'electron/main/smoke.ts'), 'utf8')
     const allText = body + '\n' + thisFile
     expect(
-      'every named reason is used and the twelfth cleanup is wired',
+      'every named reason is used and the test cleanup is wired',
       reasons.every((r) => {
         const key = Object.keys(FAILURE).find(
           (k) => FAILURE[k as keyof typeof FAILURE] === r

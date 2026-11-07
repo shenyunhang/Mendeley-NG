@@ -126,6 +126,13 @@ const api = {
   fileHash: (docId: string) =>
     ipcRenderer.invoke('annotations:fileHash', docId) as Promise<string | null>,
   saveAnnotations: (list: Annotation[]) => ipcRenderer.invoke('annotations:save', list),
+  syncAnnotationsAtStart: () =>
+    ipcRenderer.invoke('annotations:syncAtStart') as Promise<{
+      docs: number
+      pulled: number
+      pushed: number
+      skipped: string[]
+    }>,
   loadNotes: () => ipcRenderer.invoke('notes:load') as Promise<Record<string, string>>,
   saveNotes: (notes: Record<string, string>) =>
     ipcRenderer.invoke('notes:save', notes) as Promise<{ ok: boolean }>,

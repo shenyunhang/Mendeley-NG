@@ -93,6 +93,13 @@ export function useLibrary(syncOnStart: boolean, onError: (message: string | nul
         if (r && !('error' in r)) {
           setLib({ docs: r.docs, folders: r.folders, syncedAt: new Date().toISOString() })
           setFolders(r.folders)
+          // The papers are not the only thing with a cloud copy. A highlight
+          // made on another machine, or one drawn here but not uploaded yet,
+          // used to wait until somebody opened that PDF and pressed the button.
+          // Same switch, same silence, and nothing here waits for the answer.
+          void window.api
+            .syncAnnotationsAtStart()
+            .catch((e) => ignoreFailure(FAILURE.startupAnnotationSync, e))
         }
       })
       .catch(() => {
