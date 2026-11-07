@@ -2,12 +2,23 @@
  * Builds assets/logo.svg, build/icon.ico, build/icon.png and assets/icon.png
  * from one description of the mark.
  *
+ * The mark is Mendeley's own: the graphic half of the logo shipped with
+ * Mendeley Desktop 1.19.8 (MendeleyLogo.png), vectorised once with sub-pixel
+ * marching squares into two polygon rings — the outline and the round hole in
+ * the middle. The wordmark is deliberately not part of it; at 16 px a word is
+ * unreadable and the mark is what gets recognised.
+ *
+ * What changed is the colour, and only the colour. The official logo is solid
+ * black (or Mendeley red in the brand kit); this build fills the same shape
+ * with NG's violet-to-cyan horizontal gradient, so the reader can tell at a
+ * glance that this is the local-first client and not the old desktop app.
+ *
  * The shapes live here rather than in the SVG so that the vector source and
- * the raster files cannot drift apart: both are produced from the same table
- * by the same run.  Rasterising is done here too, by supersampling, because
- * there is no SVG rasteriser on this machine that can be relied on — the one
- * inside Electron needs a window, and a window is not something a build
- * should require.
+ * the raster files cannot drift apart: both are produced from RINGS by the
+ * same run. Rasterising is done here too, by supersampling, because there is
+ * no SVG rasteriser on this machine that can be relied on — the one inside
+ * Electron needs a window, and a window is not something a build should
+ * require.
  *
  * The generated files are committed: packaging runs on a CI machine with no
  * reason to have any of this set up, and an installer that quietly falls back
@@ -23,316 +34,106 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 /* ---------------------------------------------------------------- the mark */
 
 /**
- * A sheet of paper rolled up, with its free end still sticking out.
+ * Two closed rings in a 512 canvas, traced from the official bitmap at a
+ * 0.5 alpha contour and simplified to 0.7 px. The first is the outline
+ * (three bottom discs, two upper lobes and the two open side arches); the
+ * second is the round hole in the centre. Even-odd filling over both rings
+ * is what turns the hole back into background.
  *
- * The mark before this cut the sheet into thirty-two bamboo slips, threaded
- * two brown cords through them, and ran six colours along the run. At 16 px
- * the gaps became noise and the coil read as a rainbow caterpillar. The idea
- * was fine — paper wound up, one end loose — and everything layered on top of
- * it was the problem. So this one keeps the coil and removes the rest: no
- * tile, no slips, no cords, one cool gradient, one continuous thick band.
- *
- * There is still no rounded square behind it. What is recognised at a glance
- * is the outline of the thing, not a container with something sitting in it.
- *
- * The colour runs *along* the sheet rather than across the canvas, so what
- * you see is the winding and not a solid lit from one side. Two stops are
- * enough: a third hue family would start reading as a rainbow again.
+ * Normalised from the 210x116 crop of the official PNG: scaled by 480/210,
+ * left at x=16 and centred vertically. Keep this table as the single source
+ * of truth; every file below is derived from it.
  */
-const ROLL = {
-  /** Just over one turn: enough to read as a coil, open enough that the gap
-   *  between two turns is still visible when the whole icon is 16 px wide. */
-  turns: 1.15,
-  rIn: 70,
-  rOut: 168,
-  /** Half the thickness of the sheet. Thicker than before, so the small
-   *  sizes keep a solid shape instead of a hairline. */
-  half: 34,
-  /** How far the free end runs on past the roll. */
-  tail: 122,
-  /** How far the free end turns away as it runs on: a loose end, not a hook. */
-  spread: 0.85,
-  /** Where the outer end sits, so the free end sweeps out to the lower left
-   *  while the coil itself sits a little high on the canvas. */
-  at: Math.PI * 0.42
-}
+const RINGS = [
+  [[141.7,130.3],[128,134.8],[114.3,143],[102.1,155.4],[93.3,171.4],[89.1,203.4],[96.8,242.3],[97.5,260.6],[96.2,272],[91.4,283.1],[77.7,292.8],[57.1,294.1],[43.4,298.7],[28.2,310.9],[22.4,320],[19.8,333.7],[22,354.3],[28.8,368],[38.9,377.4],[54.9,384.6],[70.9,385.1],[82.3,382.2],[96,372.1],[103.8,361.1],[108.2,345.1],[106,326.9],[99.6,308.6],[101.8,290.3],[107.4,282.1],[118.9,273.1],[148.6,264.4],[164.6,264.4],[185.1,268.7],[198.9,275.8],[206.6,283.4],[211.2,292.6],[211.8,304],[203,329.1],[203,349.7],[212.1,368],[233.1,382.6],[246.9,385.1],[269.7,382.6],[290.7,368],[297.6,356.6],[300.6,345.1],[299.9,329.1],[291.6,308.6],[291,297.1],[293.6,288],[300.4,278.9],[310.9,271.5],[338.3,264.4],[354.3,264.4],[374.9,268.8],[388.6,275.8],[398.6,285.7],[402.7,294.9],[403.4,306.3],[394.7,336],[395,347.4],[401.5,365.7],[413.7,378.2],[427.4,384.5],[445.7,385.1],[459.4,380.3],[474,368],[480.5,354.3],[482.3,342.9],[480.8,324.6],[474.4,310.9],[464,300.8],[454.9,296.3],[420.6,291.3],[408.7,278.9],[405.3,253.7],[413.7,203.4],[412.6,182.9],[405.2,162.3],[388.6,143],[372.6,133.9],[358.9,129.7],[338.3,129.1],[324.6,132.1],[301.7,145.8],[269.7,181.5],[251.4,188.2],[233.1,181.3],[201.1,145.8],[187.4,136.3],[169.1,129.7],[141.7,130.3]],
+  [[244.6,203.4],[265.1,204.8],[278.9,212.1],[291,226.3],[295.9,240],[295.5,258.3],[286.3,276.6],[272,288.5],[253.7,293.3],[237.7,291],[224,283.9],[211.8,269.7],[206.9,256],[207.2,237.7],[214.6,221.7],[228.6,209.1],[244.6,203.4]]
+]
 
-/** Two stops, one cool family. Nothing warm: that was what turned the old
- *  mark into a rainbow and made the loose end look like a warning light. */
+/** Two stops, one cool family. The official mark is a single flat colour;
+ *  the gradient is the entire change, and it runs across the shape rather
+ *  than along it, so all three discs read as parts of one mark. */
 const RAMP = [
   [0.0, [0x6d, 0x3b, 0xf5]],
   [1.0, [0x1f, 0xd1, 0xe5]]
 ]
 
-/**
- * Deliberately no slips and no cords. The gaps used to be cut across the run
- * of the sheet and the cords ran along it at a fixed offset; both were things
- * this geometry could express, and both were exactly what made a 16 px icon
- * look like a strip of teeth. A single continuous sheet is the whole point
- * now, so the rasteriser has nothing to subtract.
- */
-
-/** Clear space kept around the mark on every side. */
-const MARGIN = 16
-
-const unit = ([x, y]) => {
-  const l = Math.hypot(x, y)
-  return [x / l, y / l]
-}
-
-const sub = (a, b) => [a[0] - b[0], a[1] - b[1]]
-
-/**
- * The centreline: an Archimedean spiral out from the core, then the free end.
- *
- * The end leaves the roll along the tangent it already had — there is a crease
- * in the mark if it does not — and then turns away from the coil, gently at
- * first so that the join has no corner in it, and gently again at the last so
- * that the end is straight by the time it stops.  Left carrying on along the
- * tangent it would hug the outside of the coil, which is what made the first
- * attempt look like a hook rather than like an end that has come loose.
- *
- * Sampled at 64 points, which is a ninth of a radian a step and leaves the
- * coil out of true by half a unit at the outside of the last turn -- a third
- * of a pixel at the largest size this is ever drawn, and the same polyline is
- * what the rasteriser measures against, so the vector and the rasters agree
- * exactly.  It is worth saying why it is not more: the whole centreline is
- * written into the vector file twice over, once for the sheet and once for
- * the masks that cut the slips and the cords into it, and the sample count is
- * what that costs.
- */
-function rollPath() {
-  const T = ROLL.turns * Math.PI * 2
-  const k = (ROLL.rOut - ROLL.rIn) / T
-  const n = 64
-  const pts = []
-  for (let i = 0; i <= n; i++) {
-    const th = (i / n) * T
-    const r = ROLL.rIn + k * th
-    const a = ROLL.at + th
-    pts.push([Math.cos(a) * r, Math.sin(a) * r])
-  }
-  const tip = pts[pts.length - 1]
-  const dir = unit(sub(tip, pts[pts.length - 2]))
-  const a0 = Math.atan2(dir[1], dir[0])
-  const step = ROLL.tail / 24
-  let x = tip[0]
-  let y = tip[1]
-  for (let i = 1; i <= 24; i++) {
-    const u = i / 24
-    const ang = a0 - ROLL.spread * u * u * (3 - 2 * u)
-    x += Math.cos(ang) * step
-    y += Math.sin(ang) * step
-    pts.push([x, y])
-  }
-  return pts
-}
-
-/**
- * The first and the last stretch of the line, each as a single segment.
- *
- * A stroke bulges past its end by half the thickness less however long the
- * end segment is, so with segments as short as these are it would bulge by
- * nearly the whole thickness and the ends would come out round.  Both ends
- * of the line are very nearly straight over that distance -- the spiral
- * turns by a fifth of a radian in it, and the free end has stopped turning
- * by then -- so each end can be one segment, and one long enough that there
- * is nothing left to bulge by.  What is left of the bulge is what makes the
- * ends of the sheet read as cut.
- */
-const squareEnds = (pts) => {
-  const first = pts[0]
-  const last = pts[pts.length - 1]
-  const away = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1])
-  let i = 1
-  while (i < pts.length - 2 && away(first, pts[i]) < ROLL.half) i++
-  let j = pts.length - 2
-  while (j > i && away(last, pts[j]) < ROLL.half) j--
-  return [first, ...pts.slice(i, j + 1), last]
-}
-
-/**
- * Scaled to leave `MARGIN` clear all round and centred on the ink, so the
- * numbers above can be changed without having to work out afresh where the
- * mark ends up.
- *
- * Centred halfway between the middle of the box and the middle of the ink.
- * The box alone puts the coil off to one side, with a bare corner opposite
- * the free end; the ink alone puts the free end hard against the edge and
- * leaves the same bare corner, larger, on the other side.  Halfway between
- * them keeps the mark as large as the box allows and still puts most of the
- * ink near the middle.  The ink is spread evenly along the sheet, so the
- * middle of the ink is the middle of the centreline taken by length.
- */
-const CANVAS = (() => {
-  const raw = squareEnds(rollPath())
-  const len = []
-  let total = 0
-  for (let i = 1; i < raw.length; i++) {
-    const l = Math.hypot(raw[i][0] - raw[i - 1][0], raw[i][1] - raw[i - 1][1])
-    len.push(l)
-    total += l
-  }
-  let gx = 0
-  let gy = 0
-  for (let i = 0; i < raw.length; i++) {
-    const w = ((i > 0 ? len[i - 1] : 0) + (i < len.length ? len[i] : 0)) / 2
-    gx += raw[i][0] * w
-    gy += raw[i][1] * w
-  }
-  gx /= total
-  gy /= total
-  let x0 = Infinity
-  let y0 = Infinity
-  let x1 = -Infinity
-  let y1 = -Infinity
-  for (const [x, y] of raw) {
-    x0 = Math.min(x0, x - ROLL.half)
-    y0 = Math.min(y0, y - ROLL.half)
-    x1 = Math.max(x1, x + ROLL.half)
-    y1 = Math.max(y1, y + ROLL.half)
-  }
-  gx = (gx + (x0 + x1) / 2) / 2
-  gy = (gy + (y0 + y1) / 2) / 2
-  const s = (256 - MARGIN) / Math.max(gx - x0, x1 - gx, gy - y0, y1 - gy)
-  return {
-    half: ROLL.half * s,
-    pts: raw.map(([x, y]) => [256 + (x - gx) * s, 256 + (y - gy) * s])
-  }
-})()
-
-const HALF = CANVAS.half
-const PATH = CANVAS.pts
-
-/** The sheet as segments, each carrying how far along the sheet it starts. */
-const SEG = []
-let TOTAL = 0
-for (let i = 1; i < PATH.length; i++) {
-  const [ax, ay] = PATH[i - 1]
-  const [bx, by] = PATH[i]
-  const len = Math.hypot(bx - ax, by - ay)
-  SEG.push({ ax, ay, bx, by, len, at: TOTAL })
-  TOTAL += len
-}
-
-/**
- * Which segments can reach into each cell of a grid laid over the canvas.
- *
- * The sheet is 250 segments long and asking about every one of them for
- * every sample of every pixel is a hundred times the work the mark used to
- * cost, back when it was three straight lines.  A segment can only matter to
- * a sample if it comes within half the thickness of that sample's cell, so
- * the candidates are worked out once per cell and the loop below looks at
- * nothing else.
- */
-const GRID = 24
-const CELLS = (() => {
-  const cells = Array.from({ length: GRID * GRID }, () => [])
-  const w = 512 / GRID
-  for (let s = 0; s < SEG.length; s++) {
-    const g = SEG[s]
-    const cx0 = Math.max(0, Math.floor((Math.min(g.ax, g.bx) - HALF) / w))
-    const cx1 = Math.min(GRID - 1, Math.floor((Math.max(g.ax, g.bx) + HALF) / w))
-    const cy0 = Math.max(0, Math.floor((Math.min(g.ay, g.by) - HALF) / w))
-    const cy1 = Math.min(GRID - 1, Math.floor((Math.max(g.ay, g.by) + HALF) / w))
-    for (let cy = cy0; cy <= cy1; cy++) {
-      for (let cx = cx0; cx <= cx1; cx++) cells[cy * GRID + cx].push(s)
-    }
-  }
-  return cells
-})()
-
-/**
- * Whether a point is on the sheet, and how far along the sheet it is.
- *
- * The sheet is everything within half the thickness of the centreline, which
- * is what an SVG stroke of that width covers with round caps and joins, and
- * is why the vector and the ten rasters agree without either of them knowing
- * how the other draws a stroke.  Past the first and the last segment there is
- * nothing, which is the square end the two pieces at the ends are drawn with.
- */
-function nearest(x, y) {
-  const cx = Math.min(GRID - 1, Math.max(0, Math.floor((x * GRID) / 512)))
-  const cy = Math.min(GRID - 1, Math.max(0, Math.floor((y * GRID) / 512)))
-  let best = Infinity
-  let along = 0
-  for (const s of CELLS[cy * GRID + cx]) {
-    const g = SEG[s]
-    const dx = g.bx - g.ax
-    const dy = g.by - g.ay
-    const l2 = dx * dx + dy * dy
-    let t = l2 === 0 ? 0 : ((x - g.ax) * dx + (y - g.ay) * dy) / l2
-    if (s === 0 && t < 0) continue
-    if (s === SEG.length - 1 && t > 1) continue
-    t = t < 0 ? 0 : t > 1 ? 1 : t
-    const qx = g.ax + t * dx - x
-    const qy = g.ay + t * dy - y
-    const d = qx * qx + qy * qy
-    if (d < best) {
-      best = d
-      along = g.at + g.len * t
-    }
-  }
-  const d = Math.sqrt(best)
-  return { d, t: along / TOTAL }
-}
-
-const rampAt = (t) => {
-  let i = 1
-  while (i < RAMP.length - 1 && t > RAMP[i][0]) i++
-  const [t0, c0] = RAMP[i - 1]
-  const [t1, c1] = RAMP[i]
-  const f = t1 === t0 ? 0 : Math.min(1, Math.max(0, (t - t0) / (t1 - t0)))
+const rampAt = (x) => {
+  const t = Math.min(1, Math.max(0, x))
+  const [t0, c0] = RAMP[0]
+  const [t1, c1] = RAMP[1]
+  const f = (t - t0) / (t1 - t0)
   return [0, 1, 2].map((j) => c0[j] + (c1[j] - c0[j]) * f)
 }
 
 const toHex = (c) =>
   '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')
 
+/* -------------------------------------------------------------- rasterising */
+
 /**
- * Four samples per pixel each way, then an exact area average down.  For an
- * integer factor that is the correct filter, not an approximation of one, so
- * the small sizes come out clean without a resampling library.
+ * Horizontal scanlines: for one sample row, the x positions where any ring
+ * crosses it. A point is inside when an odd number of crossings lie to its
+ * left, which is even-odd filling and handles the central hole for free.
+ * This is also what makes the supersampling affordable — a sample asks one
+ * short sorted list instead of walking all 109 edges.
  */
+function scanlines(r) {
+  const lines = []
+  for (let sy = 0; sy < r; sy++) {
+    const y = ((sy + 0.5) / r) * 512
+    const xs = []
+    for (const ring of RINGS) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i]
+        const [xj, yj] = ring[j]
+        if (yi > y !== yj > y) xs.push(xi + ((xj - xi) * (y - yi)) / (yj - yi))
+      }
+    }
+    xs.sort((a, b) => a - b)
+    lines.push(xs)
+  }
+  return lines
+}
+
+const inside = (x, xs) => {
+  let n = 0
+  for (const cx of xs) {
+    if (cx > x) break
+    n++
+  }
+  return n % 2 === 1
+}
+
+/** Four samples per pixel each way, then an exact area average down. */
 const SS = 4
+const lineCache = new Map()
 
 function raster(n) {
   const r = n * SS
-  const big = new Float64Array(r * r * 4)
-  for (let py = 0; py < r; py++) {
-    const y = ((py + 0.5) / r) * 512
-    for (let px = 0; px < r; px++) {
-      const x = ((px + 0.5) / r) * 512
-      const o = (py * r + px) * 4
-      const near = nearest(x, y)
-      if (near.d > HALF) continue
-      const c = rampAt(near.t)
-      big[o] = c[0]
-      big[o + 1] = c[1]
-      big[o + 2] = c[2]
-      big[o + 3] = 255
-    }
-  }
+  if (!lineCache.has(r)) lineCache.set(r, scanlines(r))
+  const lines = lineCache.get(r)
   const out = new Uint8ClampedArray(n * n * 4)
   const per = SS * SS
-  for (let y = 0; y < n; y++) {
-    for (let x = 0; x < n; x++) {
+  for (let py = 0; py < n; py++) {
+    for (let px = 0; px < n; px++) {
       let sr = 0
       let sg = 0
       let sb = 0
       let sa = 0
       for (let dy = 0; dy < SS; dy++) {
+        const xs = lines[py * SS + dy]
         for (let dx = 0; dx < SS; dx++) {
-          const o = ((y * SS + dy) * r + x * SS + dx) * 4
-          const a = big[o + 3]
-          sr += big[o] * a
-          sg += big[o + 1] * a
-          sb += big[o + 2] * a
-          sa += a
+          const x = ((px * SS + dx + 0.5) / r) * 512
+          if (!inside(x, xs)) continue
+          const c = rampAt(x / 512)
+          sr += c[0]
+          sg += c[1]
+          sb += c[2]
+          sa++
         }
       }
-      const o = (y * n + x) * 4
-      out[o + 3] = Math.round(sa / per)
+      const o = (py * n + px) * 4
+      out[o + 3] = Math.round((255 * sa) / per)
       if (sa > 0) {
         out[o] = Math.round(sr / sa)
         out[o + 1] = Math.round(sg / sa)
@@ -392,8 +193,8 @@ const encodePng = (n, rgba) => {
 
 /**
  * An ICO is a directory of images, and PNG entries have been valid in one
- * since Vista, which is the only reason this does not need a BMP writer.  A
- * width of 256 is stored as 0, because the field is a single byte.
+ * since Vista, which is the only reason this does not need a BMP writer.
+ * A width of 256 is stored as 0, because the field is a single byte.
  */
 const buildIco = (entries) => {
   const dir = Buffer.alloc(6 + 16 * entries.length)
@@ -416,70 +217,14 @@ const buildIco = (entries) => {
 
 /* ------------------------------------------------------------------- output */
 
-const pathD = (pts) =>
-  pts.map(([x, y], i) => (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1)).join('')
+const ringPath = (ring) =>
+  'M' + ring.map(([x, y]) => x.toFixed(1) + ' ' + y.toFixed(1)).join('L') + 'Z'
+const D = RINGS.map(ringPath).join('')
 
-/** Round joins, so a piece covers what nearest() says it covers. */
-const stroke = (pts, col, cap) =>
-  `<path d="${pathD(pts)}" stroke="${col}"` +
-  (cap ? ` stroke-linecap="${cap}"` : '') +
-  ` />`
-
-/**
- * The sheet cut into short pieces, each with its own colour.
- *
- * There is no way to put a gradient *along* a stroke in SVG — a paint server
- * is a function of the canvas, not of the distance travelled — so the ramp is
- * applied by hand, one stroked sub-path per piece.  The pieces are drawn with
- * round caps, so each one laps over the next by the thickness of the sheet
- * and no seam can open on the outside of a bend.  What that costs is that a
- * point ends up with the colour of the piece one or two ahead of it, which is
- * two per cent of the length of the sheet and two per cent of the ramp.
- *
- * The two pieces at the ends are drawn with a square cap instead: their inner
- * end is lapped over by the piece next to them anyway, so the only ends left
- * showing square are the two cut ends of the sheet.
- */
-const CHUNKS = 28
-const PIECES = (() => {
-  const per = TOTAL / CHUNKS
-  const out = []
-  let pts = [PATH[0]]
-  let acc = 0
-  let startAt = 0
-  for (let i = 1; i < PATH.length; i++) {
-    pts.push(PATH[i])
-    acc += SEG[i - 1].len
-    if (acc >= per && out.length < CHUNKS - 1) {
-      out.push({ pts, t: (startAt + acc / 2) / TOTAL })
-      startAt += acc
-      pts = [PATH[i]]
-      acc = 0
-    }
-  }
-  // a piece has to be at least two points to be a stroke at all; if the last
-  // one is a single point left over, the piece before it already ends there
-  if (pts.length > 1) out.push({ pts, t: (startAt + acc / 2) / TOTAL })
-  return out
-})()
-
-/**
- * The vector source is the same centreline, cut into short strokes and
- * coloured at the same `t` the rasteriser uses. Butt caps meet exactly, so
- * the pieces read as one continuous sheet with a gradient along the winding,
- * not as a row of tiles. There are no masks now: nothing is cut out of the
- * sheet and nothing is threaded through it.
- *
- * One centreline per piece instead of a single dashed path is what lets the
- * vector and the ten rasters agree on where each colour falls.
- */
-const W_SHEET = (HALF * 2).toFixed(1)
-
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Mendeley NG" fill="none" stroke-linejoin="round" stroke-linecap="butt">
-  <!-- generated by scripts/make-icon.mjs; edit the shapes there, not here -->
-  <g stroke-width="${W_SHEET}">
-${PIECES.map((p, i) => '  ' + stroke(p.pts, toHex(rampAt(p.t)), i === 0 || i === PIECES.length - 1 ? 'butt' : '')).join('\n')}
-  </g>
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Mendeley NG">
+  <!-- generated by scripts/make-icon.mjs; edit RINGS there, not here -->
+  <defs><linearGradient id="ng" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="512" y2="0"><stop offset="0" stop-color="${toHex(RAMP[0][1])}"/><stop offset="1" stop-color="${toHex(RAMP[1][1])}"/></linearGradient></defs>
+  <path d="${D}" fill="url(#ng)" fill-rule="evenodd"/>
 </svg>
 `
 

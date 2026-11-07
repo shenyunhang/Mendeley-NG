@@ -429,8 +429,8 @@ export async function runSmoke() {
 
   // The mark is checked from its pixels, not by eye. The generator writes
   // 8-bit RGBA with filter 0 on every row, so the icon can be read back with
-  // nothing but zlib: no tile behind the sheet, one cool colour family, and
-  // a vector source with no cut slips or cords (179).
+  // nothing but zlib: the official Mendeley outline (three discs, one round
+  // hole), no tile behind it, and the violet-to-cyan recolouring (183).
   {
     const decodeIconPng = (buf: Buffer) => {
       let off = 8
@@ -481,11 +481,66 @@ export async function runSmoke() {
       opaque > (n * n) / 20 && warm === 0,
       { opaque, warm, n }
     )
+    // The official mark has three separate discs along the bottom and one
+    // round hole in the middle. Counting opaque runs on two scanlines is a
+    // shape assertion, not a colour one: a recoloured blob would still fail.
+    const runsAt = (fy: number) => {
+      const y = Math.round(n * fy)
+      let runs = 0
+      let inRun = false
+      for (let x = 0; x < n; x++) {
+        const on = rgba[(y * n + x) * 4 + 3] > 200
+        if (on && !inRun) runs++
+        inRun = on
+      }
+      return runs
+    }
+    expect(
+      'the mark still has its three bottom discs',
+      runsAt(0.66) === 3 && runsAt(0.7) === 3,
+      { low: runsAt(0.66), lower: runsAt(0.7) }
+    )
+    expect(
+      'the mark still has the round hole between the upper lobes',
+      runsAt(0.45) === 2 && runsAt(0.5) === 2,
+      { mid: runsAt(0.45), centre: runsAt(0.5) }
+    )
+    // Colour is the part that changed: the official logo is one flat dark
+    // colour, this one runs from violet on the left to cyan on the right.
+    const edgeColour = (fromRight: boolean) => {
+      const y = Math.round(n * 0.7)
+      for (let k = 0; k < n; k++) {
+        const x = fromRight ? n - 1 - k : k
+        if (rgba[(y * n + x) * 4 + 3] < 200) continue
+        const o = (y * n + x) * 4
+        return [rgba[o], rgba[o + 1], rgba[o + 2]]
+      }
+      return null
+    }
+    const leftEdge = edgeColour(false)
+    const rightEdge = edgeColour(true)
+    // Violet #6d3bf5 is blue-dominant in RGB, not red-dominant: asking for
+    // r > b on the left was a detector that could never pass (166). What
+    // actually separates the two ends is the green channel and the red
+    // channel falling away as the ramp runs left to right.
+    expect(
+      'the colour was changed to violet-to-cyan, not the official flat black',
+      !!leftEdge &&
+        !!rightEdge &&
+        Math.abs(leftEdge[1] - rightEdge[1]) > 80 &&
+        leftEdge[0] > rightEdge[0] + 40 &&
+        Math.max(...leftEdge) > 150 &&
+        Math.max(...rightEdge) > 150,
+      { leftEdge, rightEdge }
+    )
+
     const svgText = fs.readFileSync(path.join(iconDir, 'logo.svg'), 'utf8')
     expect(
-      'the vector source has no cut slips or cords',
+      'the vector source is one even-odd path with a gradient and no masks',
       !svgText.includes('<mask') &&
         !svgText.includes('stroke-dasharray') &&
+        svgText.includes('fill-rule="evenodd"') &&
+        svgText.includes('<linearGradient') &&
         svgText.length < 4096,
       { bytes: svgText.length }
     )
@@ -494,14 +549,25 @@ export async function runSmoke() {
       'utf8'
     )
     expect(
-      'the generator draws one continuous sheet with two colour stops',
-      !genText.includes('const SLIP') &&
+      'the vector and every raster come from the same Mendeley ring table',
+      genText.includes('const RINGS = [') &&
+        genText.includes('RINGS.map(ringPath)') &&
+        genText.includes('for (const ring of RINGS)') &&
+        !genText.includes('const ROLL') &&
+        !genText.includes('const SLIP') &&
         !genText.includes('const CORD') &&
-        !genText.includes('inGap(') &&
-        !genText.includes('onCord(') &&
         (genText.match(/^  \[0\.0, \[/m) ?? []).length === 1 &&
         (genText.match(/^  \[1\.0, \[/m) ?? []).length === 1,
       { bytes: genText.length }
+    )
+    // A detector that cannot see the old shape table would report "all clear"
+    // for either generator (168).
+    const oldMarkLine = 'const ROLL = {\n  turns: 1.15'
+    const ringTables = (t: string) => (t.match(/const RINGS = \[/g) ?? []).length
+    expect(
+      'the ring detector can tell the old generator from the new one',
+      ringTables(oldMarkLine) === 0 && ringTables('const RINGS = [') === 1,
+      {}
     )
   }
   const info = await w.webContents.executeJavaScript(
