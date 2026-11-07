@@ -108,6 +108,7 @@ export interface Api {
     bytes: ArrayBuffer,
     ids: { doi?: string; arxiv?: string }
   ) => Promise<Doc>
+  reattachPdfs: () => Promise<Doc[]>
   downloadPdf: (docId: string) => Promise<{
     ok: boolean
     path?: string

@@ -4,6 +4,7 @@ import { attachPdfs } from './pdfindex'
 import { loadConfig, loadLibrary, saveConfig, saveLibraryFromSync } from './store'
 import { status } from './window'
 import { reconcileSyncWrite } from '../../shared/libraryReconcile'
+import { createSyncQueue } from '../../shared/syncQueue'
 
 /**
  * The API client, made once.
@@ -28,7 +29,16 @@ export function ensureClient(): Mendeley {
  *  its last_modified predates the timestamp we recorded when we started. */
 const SYNC_OVERLAP_MS = 60_000
 
-export async function sync(full: boolean) {
+/**
+ * Two pulls at once used to read the same watermark, then whichever finished
+ * last overwrote the other's library and pushed `syncedAt` forward. A paper
+ * the other request had just brought down could be lost for good. Serialise
+ * them: every caller still gets its own answer, but only one pull writes the
+ * cache at a time, and a later pull sees the earlier one's result.
+ */
+export const sync = createSyncQueue(pull)
+
+async function pull(full: boolean) {
   const c = ensureClient()
   const cfg = loadConfig()
   const prev = loadLibrary()

@@ -71,8 +71,24 @@ import {
   toBibtex,
   toEndnoteXml,
   toExitReadme,
-  toNotesMarkdown
+  toNotesMarkdown,
+  toRis
 } from '../../src/lib/export'
+// The fifth review found fifteen defects. Their rules are DOM-free and are
+// checked below with fixed arrays, deferred promises and injected page
+// fetchers rather than with real network timing (184-198).
+import { bibtexType, hasJournalField, risType } from '../../src/lib/exportTypes'
+import { parseBibtex, parseRis } from '../../src/lib/importText'
+import { continuousPageTop } from '../../src/lib/continuousScroll'
+import { noteForSelection } from '../../src/lib/annotationNote'
+import { createBatchGate } from '../../src/lib/batchGate'
+import { createViewGeneration } from '../../src/lib/viewGeneration'
+import { savedSearchMatches } from '../../src/lib/savedSearch'
+import { collectPaged } from '../../shared/paged'
+import { createSyncQueue } from '../../shared/syncQueue'
+import { docsWithAllWords } from '../../shared/wordCoverage'
+import { pdfNameFor } from './pdfname'
+import { attachPdfs, parseName } from './pdfindex'
 // A copied \cite{...} and an exported BibTeX key are supposed to name the
 // same paper, and they did not for a Chinese surname: one rule kept CJK
 // letters, the other stripped them to `anon`. The stem is shared now; the
@@ -94,7 +110,7 @@ import { shortDate } from '../../shared/shortDate'
 // A pull used to overwrite the cache with the snapshot it took at the start,
 // resurrecting papers trashed while it was in flight. The write is a
 // three-way decision now, checked here with fixed arrays (181).
-import { reconcileSyncWrite } from '../../shared/libraryReconcile'
+import { mergeDocFields, reconcileSyncWrite } from '../../shared/libraryReconcile'
 // GET /files is paged by the file's own id. Using document_id as the marker
 // made the server answer with page one again, so a 5399-file library looked
 // like 200 documents with attachments (182).
@@ -209,7 +225,9 @@ import {
   ftPending,
   ftSearch,
   ftStatus,
-  ftVoid
+  ftVoid,
+  fullTextPages,
+  setFullTextPages
 } from './fulltext'
 import {
   ftDocs,
@@ -8244,6 +8262,7 @@ export async function runSmoke() {
     + '.find(x=>x.textContent.trim()==="×");if(b)b.click();return 1})()'
   )
   await new Promise((r) => setTimeout(r, 400))
+  log('find box closed')
 
   // The selection layer is what turns a rubber band into a real highlight, so
   // the run makes a synthetic selection and checks that it produces sane
@@ -8258,20 +8277,29 @@ export async function runSmoke() {
   const readPath = path.join(app.getPath('userData'), 'library', 'reading.json')
   const readBackup = fs.existsSync(readPath) ? fs.readFileSync(readPath) : null
   const beforeCount = await w.webContents.executeJavaScript(
-    '(async()=>{const a=await window.api.loadAnnotations();window.__before=a;return a.length})()'
+    '(async()=>{try{const a=await window.api.loadAnnotations();window.__before=a;return a.length}'
+    + 'catch(e){return "ERR:"+String(e)}})()'
   )
+  log('annotation count before selecting', beforeCount)
   if (annBackup && beforeCount === 0 && JSON.parse(annBackup.toString() || '[]').length) {
     log('WARNING: store holds annotations but the renderer saw none')
   }
   const layerInfo = await w.webContents.executeJavaScript(
-    '(()=>{const sp=[...document.querySelectorAll(".tx-layer span.tx")];'
-    + 'if(sp.length<10)return JSON.stringify({spans:sp.length});'
-    + 'const a=sp[20],b=sp[26];const r=document.createRange();'
+    '(()=>{try{const sp=[...document.querySelectorAll(".tx-layer span.tx")];'
+    // The number of spans belongs to whichever page is open; a hard-coded
+    // 20 / 26 used to be undefined on a short page and the thrown TypeError
+    // ended the entire run. Pick two spans relative to what is actually there.
+    + 'if(sp.length<4)return JSON.stringify({spans:sp.length,short:true});'
+    + 'const a=sp[Math.floor(sp.length*0.6)],b=sp[sp.length-1];'
+    + 'const r=document.createRange();'
     + 'r.setStart(a.firstChild||a,0);r.setEnd(b.firstChild||b,Math.min(3,(b.textContent||"").length));'
     + 'const s=getSelection();s.removeAllRanges();s.addRange(r);'
-    + 'const rr=r.getBoundingClientRect();const box=document.querySelector(".tx-layer").getBoundingClientRect();'
+    + 'const rr=r.getBoundingClientRect();const lay=document.querySelector(".tx-layer");'
+    + 'if(!lay)return JSON.stringify({spans:sp.length,noLayer:true});'
+    + 'const box=lay.getBoundingClientRect();'
     + 'return JSON.stringify({spans:sp.length,sel:{w:Math.round(rr.width),h:Math.round(rr.height)},'
-    + 'box:{w:Math.round(box.width),h:Math.round(box.height)}})})()'
+    + 'box:{w:Math.round(box.width),h:Math.round(box.height)}})}'
+    + 'catch(e){return JSON.stringify({error:String(e)})}})()'
   )
   log('text layer', layerInfo)
   const addSinceBefore = () =>
@@ -8293,7 +8321,8 @@ export async function runSmoke() {
   const selectSomeText = () =>
     w.webContents.executeJavaScript(
       '(()=>{const sp=[...document.querySelectorAll(".tx-layer span.tx")];'
-      + 'if(sp.length<10)return 0;const a=sp[20],b=sp[26];'
+      + 'if(sp.length<4)return 0;'
+      + 'const a=sp[Math.floor(sp.length*0.6)],b=sp[sp.length-1];'
       + 'const r=document.createRange();'
       + 'r.setStart(a.firstChild||a,0);r.setEnd(b.firstChild||b,Math.min(3,(b.textContent||"").length));'
       + 'const s=getSelection();s.removeAllRanges();s.addRange(r);return 1})()'
@@ -8615,13 +8644,22 @@ export async function runSmoke() {
           + 'const sel=()=>{const r=document.querySelector("div.row.sel");return r?(r.dataset.id||""):""};'
           + 'const meta=()=>[...document.querySelectorAll(".meta-actions button")]'
           + '.find(b=>(b.textContent||"").indexOf("补全元数据")>=0);'
+          // Selecting a row that has a local PDF puts the right pane on the
+          // reader. Which row happens to be first is a fact about the library,
+          // not about this race, so put the pane back explicitly after each
+          // selection rather than depending on the first row being cloud-only.
+          + 'const details=()=>{const b=[...document.querySelectorAll(".pane-right button")]'
+          + '.find(x=>(x.textContent||"").trim()==="详情");if(b)b.click();};'
           + 'if(rows.length<2)return JSON.stringify({error:"not enough rows",rows:rows.length});'
           + 'window.__metaBefore=sel();'
-          + 'rows[0].click();await frame();'
+          + 'rows[0].click();await frame();details();await frame();'
           + 'const a=sel();const btn=meta();'
-          + 'if(!btn||btn.disabled)return JSON.stringify({error:"no enabled lookup button",a:a});'
+          + 'if(!btn||btn.disabled)return JSON.stringify({error:"no enabled lookup button",a:a,'
+          + 'actions:[...document.querySelectorAll(".meta-actions button")].map(b=>b.textContent),'
+          + 'pane:[...document.querySelectorAll(".pane-right button")].map(b=>b.textContent).slice(0,8),'
+          + 'details:!!document.querySelector(".details")});'
           + 'btn.click();await frame();'
-          + 'rows[1].click();await frame();'
+          + 'rows[1].click();await frame();details();await frame();'
           + 'const b=sel();'
           // The button changes its label while a lookup is running, so ask
           // whether any button says "查询中" rather than looking the button
@@ -11046,6 +11084,801 @@ export async function runSmoke() {
   // press happened to pick; the next run then started from that, and one red
   // line became a dozen more, each a symptom of the first and none of them
   // saying so.  Put back here, where every path out of the run goes past.
+  // ── The fifth code review: fifteen defects, verified in one batch ───────
+  // The rules are DOM-free and the races are fixed by resolving promises by
+  // hand or acting while a run still owns the file. Nothing here sleeps and
+  // nothing here waits on the network. Every detector below is first fed a
+  // copy of the old shape to prove it can actually see the old shape.
+  {
+    const root = path.join(__dirname, '../..')
+    const read = (f: string) => fs.readFileSync(path.join(root, f), 'utf8')
+    const appSrc = read('src/App.tsx')
+    const libSrc = read('electron/main/library.ts')
+    const storeSrc = read('electron/main/store.ts')
+    const clientSrc = read('electron/main/mendeley.ts')
+    const ftSrc = read('electron/main/fulltext.ts')
+    const viewerSrc = read('src/components/PdfViewer.tsx')
+    const continuousSrc = read('src/lib/hooks/useContinuousPages.ts')
+    const useLibSrc = read('src/lib/hooks/useLibrary.ts')
+    const filesSrc = read('electron/main/ipc/files.ts')
+    const preloadSrc = read('electron/preload/index.ts')
+    const globalsSrc = read('src/global.d.ts')
+    const typesSrc = read('shared/types.ts')
+    const exportSrc = read('src/lib/export.ts')
+    const importSrc = read('src/lib/importText.ts')
+
+    const deferred = <T,>() => {
+      let resolve!: (v: T) => void
+      let reject!: (e: unknown) => void
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res
+        reject = rej
+      })
+      return { promise, resolve, reject }
+    }
+
+    // ① Two pulls at once used to read the same watermark and each write the
+    // whole cache. The queue is checked by holding the first pull open.
+    {
+      const gates = [deferred<string>(), deferred<string>()]
+      const calls: boolean[] = []
+      const queue = createSyncQueue<string>((full) => {
+        calls.push(full)
+        return gates[calls.length - 1]!.promise
+      })
+      const first = queue(false)
+      const second = queue(true)
+      // The queue deliberately starts a pull on a microtask, so let the first
+      // one take the file before asking whether the second has been held.
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(
+        'two overlapping pulls do not both start',
+        calls.length === 1 && calls[0] === false,
+        { calls: calls.slice() }
+      )
+      gates[0]!.resolve('one')
+      await first
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(
+        'the queued pull starts after the first one with its own full flag',
+        calls.length === 2 && calls[1] === true,
+        { calls: calls.slice() }
+      )
+      gates[1]!.resolve('two')
+      expect(
+        'each caller still gets its own answer',
+        (await first) === 'one' && (await second) === 'two',
+        {}
+      )
+      const legacyStarts: boolean[] = []
+      const legacyPull = (full: boolean) => {
+        legacyStarts.push(full)
+        return Promise.resolve('x')
+      }
+      void legacyPull(false)
+      void legacyPull(true)
+      expect(
+        'the detector really sees the old unguarded double start',
+        legacyStarts.length === 2,
+        { legacyStarts }
+      )
+      let n = 0
+      const q2 = createSyncQueue(async () => {
+        n++
+        if (n === 1) throw new Error('offline')
+        return 'ok'
+      })
+      const failed = await q2(false).then(() => 'ok', () => 'failed')
+      const after = await q2(false)
+      expect(
+        'a failed pull does not poison the queue for the next one',
+        failed === 'failed' && after === 'ok' && n === 2,
+        { failed, after, n }
+      )
+      expect(
+        'the main-process sync is wired to the serial queue',
+        libSrc.includes('createSyncQueue(pull)') &&
+          !libSrc.includes('let pullQueue') &&
+          (libSrc.match(/createSyncQueue\(/g) ?? []).length === 1,
+        { bytes: libSrc.length }
+      )
+    }
+
+    // ② A pull used to replace a whole row, so a star or a downloaded PDF
+    // written while the network was in flight disappeared.
+    {
+      type F = {
+        id: string
+        starred?: boolean
+        localPdf?: string
+        title?: string
+        folder_uuids?: string[]
+      }
+      const base: F = { id: 'A', starred: false, title: 'old title', folder_uuids: ['f1'] }
+      const ours: F = {
+        ...base,
+        starred: true,
+        localPdf: 'C:/pdf/a.pdf',
+        folder_uuids: ['f2']
+      }
+      const theirs: F = { id: 'A', starred: false, title: 'cloud title', folder_uuids: ['f1'] }
+      const merged = mergeDocFields(base, ours, theirs)
+      expect(
+        'a star, a folder and a PDF attached during a pull survive the merge',
+        merged.starred === true &&
+          merged.localPdf === 'C:/pdf/a.pdf' &&
+          JSON.stringify(merged.folder_uuids) === '["f2"]',
+        { merged }
+      )
+      expect(
+        'a field the cloud also changed belongs to the cloud',
+        mergeDocFields(base, ours, { ...theirs, starred: true }).starred === true,
+        {}
+      )
+      expect(
+        'a field the local side never touched stays with the cloud',
+        merged.title === 'cloud title',
+        { merged }
+      )
+      const oldRow = { ...theirs }
+      expect(
+        'the old whole-row replacement really loses those local edits',
+        oldRow.starred === false && oldRow.localPdf === undefined,
+        { oldRow }
+      )
+      const viaReconcile = reconcileSyncWrite({
+        started: [base],
+        proposed: [theirs],
+        current: [ours],
+        trashedIds: new Set<string>()
+      })
+      expect(
+        'the sync write keeps local fields at every row it keeps',
+        viaReconcile[0]?.starred === true && viaReconcile[0]?.localPdf === 'C:/pdf/a.pdf',
+        { viaReconcile }
+      )
+      expect(
+        'the renderer applies the same three-way rule to its own state',
+        useLibSrc.includes('reconcileSyncWrite({') &&
+          useLibSrc.includes('proposed: r.docs') &&
+          useLibSrc.includes('current: l?.docs ?? null') &&
+          !useLibSrc.includes('setLib({ docs: r.docs'),
+        {}
+      )
+      expect(
+        'busy stays true until the last overlapping pull settles',
+        useLibSrc.includes('busyCount.current++') &&
+          useLibSrc.includes('setBusy(busyCount.current > 0)'),
+        {}
+      )
+    }
+
+    // ③ The exporters tested Mendeley types against BibTeX type names.
+    {
+      const doc = (type: string, extra: Partial<Doc> = {}): Doc =>
+        ({ id: 'x', type, title: 'T', ...extra }) as Doc
+      const map: [string, string, string][] = [
+        ['journal', 'article', 'JOUR'],
+        ['conference_proceedings', 'inproceedings', 'CONF'],
+        ['book', 'book', 'BOOK'],
+        ['book_section', 'incollection', 'CHAP'],
+        ['thesis', 'phdthesis', 'THES'],
+        ['report', 'techreport', 'RPRT'],
+        ['working_paper', 'unpublished', 'GEN'],
+        ['web_page', 'misc', 'ELEC'],
+        ['patent', 'misc', 'PAT'],
+        ['magazine_article', 'article', 'MGZN'],
+        ['newspaper_article', 'article', 'NEWS'],
+        ['computer_program', 'misc', 'COMP'],
+        ['generic', 'misc', 'GEN']
+      ]
+      const wrong = map.filter(
+        ([t, b, r]) => bibtexType(doc(t)) !== b || risType(doc(t)) !== r
+      )
+      expect(
+        'every Mendeley type maps into the BibTeX and RIS namespaces',
+        wrong.length === 0,
+        { wrong }
+      )
+      const legacyBibType = (d: Doc): string => {
+        const t = (d.type ?? 'article').toLowerCase()
+        return ['article', 'book', 'inproceedings', 'incollection', 'phdthesis'].includes(t)
+          ? t
+          : 'misc'
+      }
+      expect(
+        'the old lookup really turned a journal article into @misc',
+        legacyBibType(doc('journal')) === 'misc' && bibtexType(doc('journal')) === 'article',
+        { old: legacyBibType(doc('journal')) }
+      )
+      const j = doc('journal', { source: 'Nature' })
+      const bib = toBibtex([j])
+      const ris = toRis([j])
+      expect(
+        'a journal exports as @article with a journal field, not a booktitle',
+        bib.startsWith('@article{') &&
+          bib.includes('journal      = {Nature}') &&
+          !bib.includes('booktitle'),
+        { bib: bib.slice(0, 120) }
+      )
+      expect(
+        'the same journal is JOUR in RIS with a JO source',
+        ris.startsWith('TY  - JOUR') && ris.includes('JO  - Nature') && !ris.includes('T2  - '),
+        { ris: ris.slice(0, 120) }
+      )
+      expect(
+        'BibTeX and RIS round-trip back to the journal type',
+        parseBibtex(bib)[0]?.type === 'journal' && parseRis(ris)[0]?.type === 'journal',
+        { bib: parseBibtex(bib)[0]?.type, ris: parseRis(ris)[0]?.type }
+      )
+      // BibTeX has no distinct name for these four, so their type is carried
+      // by the generic entry name; the other nine must come back exactly.
+      const roundTrippable = [
+        'journal', 'conference_proceedings', 'book', 'book_section',
+        'thesis', 'report', 'working_paper', 'generic'
+      ]
+      const drift = roundTrippable.filter(
+        (t) => parseBibtex(toBibtex([doc(t)]))[0]?.type !== t
+      )
+      expect(
+        'every BibTeX type with a distinct name survives a round trip',
+        drift.length === 0,
+        { drift }
+      )
+      expect(
+        'the source-field decision follows the Mendeley type, not the output name',
+        hasJournalField(doc('journal')) &&
+          hasJournalField(doc('magazine_article')) &&
+          !hasJournalField(doc('conference_proceedings')) &&
+          !exportSrc.includes("type === 'article' ? 'journal' : 'booktitle'"),
+        {}
+      )
+    }
+
+    // ④ Unescaped braces ended a BibTeX record early and swallowed its other
+    // fields; a newline in a RIS value produced an untagged line.
+    {
+      const raw = 'A {weird} title with an unmatched } and a backslash \\'
+      const d = {
+        id: 'x',
+        type: 'journal',
+        title: raw,
+        authors: [{ first_name: 'Jane', last_name: 'Doe' }],
+        year: 2020,
+        doi: '10.1/x'
+      } as Doc
+      const bib = toBibtex([d])
+      const back = parseBibtex(bib)[0]
+      expect(
+        'a title with braces and a trailing backslash round-trips exactly',
+        back?.title === raw,
+        { want: raw, got: back?.title }
+      )
+      expect(
+        'the fields after that title are not swallowed',
+        back?.doi === '10.1/x' && back?.year === 2020 && back?.authors[0]?.last_name === 'Doe',
+        { back }
+      )
+      const legacyBib =
+        `@article{k,\n  title = {${raw}},\n  author = {Jane Doe},\n` +
+        '  year = {2020},\n  doi = {10.1/x}\n}'
+      const legacy = parseBibtex(legacyBib)[0]
+      expect(
+        'the unescaped legacy export really loses fields',
+        legacy?.title !== raw || legacy?.doi !== '10.1/x',
+        { legacy }
+      )
+      const withNewline = {
+        ...d,
+        title: 'First line\nSecond line',
+        abstract: 'alpha\nbeta'
+      } as Doc
+      const ris = toRis([withNewline])
+      const risLines = ris.split('\n')
+      expect(
+        'every RIS line still starts with a two-letter tag',
+        risLines.every((l) => /^[A-Z][A-Z0-9]\s{0,2}-\s?/.test(l)),
+        { risLines }
+      )
+      expect(
+        'a newline in a title becomes a space on the way back',
+        parseRis(ris)[0]?.title === 'First line Second line',
+        { got: parseRis(ris)[0]?.title }
+      )
+      expect(
+        'the importer skips escaped braces when it counts depth',
+        importSrc.includes('isEscaped(text, i)') &&
+          importSrc.includes('slashes % 2 === 1') &&
+          importSrc.includes('\\u0003'),
+        {}
+      )
+    }
+
+    // ⑤ The PDF match key dropped every CJK character, so a Chinese paper
+    // could never be attached to its local file.
+    const keyRoot = path.join(dataDir(), 'smoke-cjk-key')
+    fs.rmSync(keyRoot, { recursive: true, force: true })
+    fs.mkdirSync(keyRoot, { recursive: true })
+    fs.writeFileSync(path.join(keyRoot, '深度学习.pdf'), '%PDF')
+    const cjk: Doc = { id: 'cjk', title: '深度学习' } as Doc
+    attachPdfs([cjk], keyRoot)
+    const legacyKey = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 120)
+    expect(
+      'a Chinese title can be matched to its local PDF',
+      legacyKey('深度学习') === '' &&
+        !!cjk.localPdf &&
+        cjk.localPdf.endsWith('深度学习.pdf'),
+      { legacy: legacyKey('深度学习'), fixed: cjk.localPdf }
+    )
+    expect(
+      'the parsed file name keeps the Chinese title',
+      parseName('深度学习.pdf').title === '深度学习',
+      {}
+    )
+    fs.rmSync(keyRoot, { recursive: true, force: true })
+
+    // ⑥ A 32-bit bitmask made any query with 32 words return nothing.
+    {
+      const occurrences = (n: number) =>
+        Array.from({ length: n }, (_, i) => ({ docId: 'A', word: i, at: i * 10 }))
+      const legacyMatches = (n: number) => {
+        let mask = 0
+        for (let w = 0; w < n; w++) mask |= 1 << w
+        return mask === (1 << n) - 1
+      }
+      expect(
+        'the old bitmask really fails at 32 words',
+        legacyMatches(30) === true &&
+          legacyMatches(31) === false &&
+          legacyMatches(32) === false &&
+          legacyMatches(33) === false,
+        { at30: legacyMatches(30), at31: legacyMatches(31), at32: legacyMatches(32) }
+      )
+      expect(
+        '32 and 33 word queries both match a document containing every word',
+        docsWithAllWords(occurrences(32), 32).has('A') &&
+          docsWithAllWords(occurrences(33), 33).has('A') &&
+          docsWithAllWords(occurrences(40), 40).get('A') === 0,
+        {}
+      )
+      expect(
+        'a missing word still rules the document out',
+        docsWithAllWords(occurrences(9).filter((o) => o.word !== 4), 9).size === 0,
+        {}
+      )
+      expect(
+        'full-text search uses the unbounded rule and no bitmask',
+        ftSrc.includes('docsWithAllWords(occurrences, tokens.length)') &&
+          !ftSrc.includes('rec.mask') &&
+          !ftSrc.includes('1 << w'),
+        {}
+      )
+    }
+
+    // ⑦ A saved search kept only the star, while its name and its sidebar
+    // count claimed every filter that had been checked.
+    {
+      type SD = {
+        id: string
+        starred?: boolean
+        folder_uuids?: string[] | null
+        unread?: boolean
+      }
+      const a: SD = { id: 'a', starred: true, unread: true, folder_uuids: ['f1'] }
+      const b: SD = { id: 'b', starred: false, unread: false, folder_uuids: [] }
+      const tests: Record<string, (d: SD) => boolean> = {
+        star: (d) => !!d.starred,
+        unread: (d) => !!d.unread
+      }
+      const testFor = (k: string) => tests[k]
+      const hay = new Map<string, string>()
+      const s = { query: '', starred: false, filters: ['unread'] }
+      const oldCount = [a, b].filter((d) => !s.starred || !!d.starred).length
+      const newCount = [a, b].filter((d) =>
+        savedSearchMatches(d, s, testFor, hay, null)
+      ).length
+      expect(
+        'the saved unread filter is really applied to the count',
+        oldCount === 2 && newCount === 1,
+        { oldCount, newCount }
+      )
+      expect(
+        'query, star and folder still narrow the same count',
+        savedSearchMatches(a, { query: 'alpha', starred: true, filters: [] }, testFor,
+          new Map([['a', 'alpha beta']]), null) === true &&
+          savedSearchMatches(a, { query: 'zzz', starred: false, filters: [] }, testFor,
+            new Map([['a', 'alpha beta']]), null) === false &&
+          savedSearchMatches(a, { query: '', starred: false, filters: [] }, testFor,
+            hay, new Set(['f2'])) === false,
+        {}
+      )
+      expect(
+        'name, count, restored filters and type all come from the same field',
+        appSrc.includes('filters: [...filters]') &&
+          appSrc.includes('s.filters?.filter(') &&
+          appSrc.includes('savedSearchMatches(') &&
+          typesSrc.includes('filters?: string[]'),
+        {}
+      )
+    }
+
+    // ⑧ Continuous mode dropped a jump to page 20 when the page heights had
+    // not all arrived yet, and never retried.
+    {
+      const sizes = { 1: { h: 100 }, 2: { h: 200 } }
+      expect(
+        'the continuous offset is the sum of the pages above it',
+        continuousPageTop(1, {}, 2, 14) === 0 &&
+          continuousPageTop(3, sizes, 2, 14) === 628 &&
+          continuousPageTop(2, sizes, 1, 14) === 114,
+        { three: continuousPageTop(3, sizes, 2, 14) }
+      )
+      const legacyTop = (n: number, s: Record<number, { h: number }>) => {
+        let top = 0
+        for (let i = 1; i < n; i++) {
+          if (!s[i]) return undefined
+          top += s[i]!.h * 2 + 14
+        }
+        return top
+      }
+      expect(
+        'the old rule really gives up on an incomplete height table',
+        legacyTop(3, { 1: { h: 100 } }) === undefined &&
+          continuousPageTop(3, { 1: { h: 100 } }, 2, 14) === null,
+        {}
+      )
+      expect(
+        'a pending jump is retried as sizes arrive and invalidated on a new paper',
+        continuousSrc.includes('continuousPageTop(t.n, sizesRef.current, scale, PGAP)') &&
+          continuousSrc.includes('jump.current = null') &&
+          continuousSrc.includes('gen.current += 1') &&
+          (continuousSrc.match(/tryJump\(\)/g) ?? []).length >= 2,
+        {}
+      )
+    }
+
+    // ⑨ Changing the PDF directory triggered an incremental pull, which
+    // skips re-matching when the cloud changed nothing.
+    {
+      const dirA = path.join(dataDir(), 'smoke-reattach-a')
+      const dirB = path.join(dataDir(), 'smoke-reattach-b')
+      for (const d of [dirA, dirB]) {
+        fs.rmSync(d, { recursive: true, force: true })
+        fs.mkdirSync(d, { recursive: true })
+        fs.writeFileSync(path.join(d, 'same.pdf'), '%PDF')
+      }
+      const d: Doc = { id: 'r', title: 'same' } as Doc
+      attachPdfs([d], dirA)
+      const first = d.localPdf
+      d.localPdf = undefined
+      attachPdfs([d], dirB)
+      expect(
+        'clear-and-rematch really picks the new directory',
+        !!first && first.startsWith(dirA) && (d.localPdf ?? '').startsWith(dirB),
+        { first, second: d.localPdf }
+      )
+      fs.rmSync(dirA, { recursive: true, force: true })
+      fs.rmSync(dirB, { recursive: true, force: true })
+      expect(
+        'the directory picker forces a re-match after its sync',
+        appSrc.includes('await window.api.reattachPdfs()') &&
+          filesSrc.includes("ipcMain.handle('pdf:reattach'") &&
+          filesSrc.includes('attachPdfs(lib.docs') &&
+          preloadSrc.includes('reattachPdfs') &&
+          globalsSrc.includes('reattachPdfs'),
+        {}
+      )
+    }
+
+    // ⑩ The note box held a bare string that only two of the selection paths
+    // reset, so A's note was written onto a newly drawn highlight B.
+    {
+      const A = { id: 'A', note: 'note A' }
+      const B = { id: 'B', note: 'note B' }
+      expect(
+        'the note box is derived from the selected annotation',
+        noteForSelection(A, null) === 'note A' &&
+          noteForSelection(A, { id: 'A', text: 'typed' }) === 'typed' &&
+          noteForSelection(B, { id: 'A', text: 'typed' }) === 'note B' &&
+          noteForSelection(null, { id: 'A', text: 'typed' }) === '',
+        {}
+      )
+      const legacyShown = (lastShown: string) => lastShown
+      expect(
+        'the old bare string really kept A text after the selection moved to B',
+        legacyShown('note A') !== 'note B',
+        {}
+      )
+      const selCalls = (viewerSrc.match(/setSel\(/g) ?? []).length
+      expect(
+        'every selection path is covered by derivation, not by scattered resets',
+        viewerSrc.includes('noteForSelection(selected, noteDraft)') &&
+          (viewerSrc.match(/setNote\(/g) ?? []).length === 0 &&
+          selCalls >= 3,
+        { selCalls }
+      )
+    }
+
+    // ⑪ A page-budget change or a clear in the middle of a build detached
+    // the build from the offset table it was writing.
+    {
+      const ftDir = process.env.MENDELEY_FT_DIR || dataDir()
+      const metaPath = path.join(ftDir, 'fulltext.json')
+      const dataPath = path.join(ftDir, 'fulltext.dat')
+      const p0 = fullTextPages()
+      expect(
+        'the index is idle before the concurrency checks start',
+        ftStatus([]).building === false,
+        { building: ftStatus([]).building }
+      )
+      const probe: Doc = {
+        id: 'smoke-concurrent',
+        title: 'no such pdf',
+        localPdf: path.join(dataDir(), 'smoke-does-not-exist.pdf')
+      } as Doc
+
+      // Pick a real file with a text layer so the clear test has bytes that
+      // an early truncate could leave behind.
+      let textDoc: Doc | undefined
+      for (const d of (loadLibrary()?.docs ?? [])
+        .filter((x) => x.localPdf && fs.existsSync(x.localPdf))
+        .slice(0, 8)) {
+        ftClear()
+        const copy = { ...d, id: 'smoke-clear-probe' } as Doc
+        if (await ftAdd([copy], [copy.id]) > 0) {
+          textDoc = d
+          break
+        }
+      }
+      if (textDoc) {
+        ftClear()
+        const one = { ...textDoc, id: 'smoke-clear-during' } as Doc
+        const running = ftAdd([one], [one.id])
+        ftClear()
+        await running
+        const datSize = fs.existsSync(dataPath) ? fs.statSync(dataPath).size : 0
+        expect(
+          'a clear during an append leaves no text behind after the run settles',
+          datSize === 0 && ftStatus([]).indexed === 0,
+          { datSize }
+        )
+      }
+
+      ftClear()
+      const wanted = clampFullTextPages(p0 + 1) !== p0
+        ? clampFullTextPages(p0 + 1)
+        : clampFullTextPages(p0 - 1)
+      const running = ftBuild([probe], () => undefined, true)
+      const changed = setFullTextPages(wanted)
+      await running
+      const onDisk = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as {
+        pages: number
+        bytes: number
+        entries: Record<string, unknown>
+      }
+      const status = ftStatus([])
+      expect(
+        'a page-budget change mid-build lands after the build wrote its own table',
+        changed === true &&
+          fullTextPages() === wanted &&
+          onDisk.pages === wanted &&
+          onDisk.bytes === 0 &&
+          Object.keys(onDisk.entries).length === 0 &&
+          status.voided === null,
+        { wanted, onDisk, voided: status.voided }
+      )
+      setFullTextPages(p0)
+      ftClear()
+      expect(
+        'the build owns its table and the clear is deferred, not applied mid-run',
+        (ftSrc.match(/saveMeta\(fresh\)/g) ?? []).length === 2 &&
+          (ftSrc.match(/saveMeta\(m\)/g) ?? []).length === 1 &&
+          ftSrc.includes('clearedWhileBuilding = applyDeferred()') &&
+          ftSrc.includes("deferred = 'clear'"),
+        {}
+      )
+    }
+
+    // ⑫ Four marker-paged endpoints had none of the /files guards.
+    {
+      type R = { id?: string }
+      const pageOf = (n: number, count: number): R[] =>
+        Array.from({ length: count }, (_, i) => ({ id: `r-${n}-${i}` }))
+      const legacyWalk = async (
+        fetchPage: (marker?: string) => Promise<R[]>,
+        limit: number,
+        maxPages: number
+      ) => {
+        const out: R[] = []
+        let marker: string | undefined
+        for (let guard = 0; guard < maxPages; guard++) {
+          const batch = await fetchPage(marker)
+          if (!batch || batch.length === 0) break
+          out.push(...batch)
+          if (batch.length < limit) break
+          marker = batch[batch.length - 1]!.id
+        }
+        return out
+      }
+      const same = async () => pageOf(0, 2)
+      const legacy = await legacyWalk(same, 2, 10)
+      const fixed = await collectPaged(same, 2, 10)
+      expect(
+        'an endpoint ignoring its marker no longer writes pages of duplicates',
+        legacy.length === 20 && fixed.length === 2,
+        { legacy: legacy.length, fixed: fixed.length }
+      )
+      const pages = [pageOf(1, 2), pageOf(2, 2), pageOf(3, 1)]
+      const byMarker = async (marker?: string) => {
+        if (!marker) return pages[0]!
+        const i = pages.findIndex((p) => p.some((r) => r.id === marker))
+        return i < 0 ? pages[0]! : (pages[i + 1] ?? [])
+      }
+      const good = await collectPaged(byMarker, 2, 10)
+      expect(
+        'a normal three-page walk still returns every row once',
+        good.length === 5 && new Set(good.map((r) => r.id)).size === 5,
+        { good: good.length }
+      )
+      const stalled = await collectPaged(async (m) => (m ? pageOf(1, 2) : pageOf(1, 2)), 2, 10)
+      const idless = await collectPaged(async () => [{}, {}] as R[], 2, 10)
+      expect(
+        'a marker that never moves, and rows without ids, are both safe',
+        stalled.length === 2 && idless.length === 2,
+        { stalled: stalled.length, idless: idless.length }
+      )
+      expect(
+        'all four paged endpoints use the shared walker',
+        (clientSrc.match(/collectPaged</g) ?? []).length === 4 &&
+          !clientSrc.includes('params.marker ='),
+        { calls: (clientSrc.match(/collectPaged</g) ?? []).length }
+      )
+    }
+
+    // ⑬ A half-written config or a library with folders:null used to be
+    // accepted and then crash somewhere far away.
+    {
+      const libPath = path.join(dataDir(), 'library.json')
+      const cfgPath = path.join(dataDir(), 'config.json')
+      const libOriginal = fs.existsSync(libPath) ? fs.readFileSync(libPath) : null
+      const cfgOriginal = fs.existsSync(cfgPath) ? fs.readFileSync(cfgPath) : null
+      try {
+        const bad = [
+          JSON.stringify({ docs: [], folders: null }),
+          JSON.stringify({ docs: null, folders: [] }),
+          JSON.stringify({ docs: [], folders: [], syncedAt: 123 }),
+          '{not json'
+        ]
+        const rejected = bad.map((text) => {
+          fs.writeFileSync(libPath, text, 'utf8')
+          return loadLibrary() === null
+        })
+        expect(
+          'a malformed library is rejected instead of being written back',
+          rejected.every(Boolean),
+          { rejected }
+        )
+        fs.writeFileSync(cfgPath, JSON.stringify({ pdfDir: 123, fontSize: 'big', theme: 'dark' }))
+        const c = loadConfig() as unknown as Record<string, unknown>
+        expect(
+          'a hand-edited config cannot overwrite the typed defaults',
+          typeof c.pdfDir === 'string' &&
+            typeof c.fontSize === 'number' &&
+            c.theme === 'dark',
+          { c }
+        )
+      } finally {
+        if (libOriginal) fs.writeFileSync(libPath, libOriginal)
+        else fs.rmSync(libPath, { force: true })
+        if (cfgOriginal) fs.writeFileSync(cfgPath, cfgOriginal)
+        else fs.rmSync(cfgPath, { force: true })
+      }
+      expect(
+        'config writes are tmp-then-rename like every other write',
+        storeSrc.includes("cfgFile() + '.tmp'") &&
+          storeSrc.includes('fs.renameSync(tmp, cfgFile())') &&
+          !storeSrc.includes('fs.writeFileSync(cfgFile(),'),
+        {}
+      )
+    }
+
+    // ⑭ An async trash or notes answer used to drag the reader back.
+    {
+      const gen = createViewGeneration<string>('library')
+      const from = gen.read()
+      gen.set('reader')
+      expect(
+        'an async view answer is refused after the reader left',
+        gen.still(from) === false,
+        {}
+      )
+      const same = gen.read()
+      expect(
+        'and accepted when the view did not change',
+        gen.still(same) === true,
+        {}
+      )
+      const legacyOpen =
+        "void window.api.listTrash().then((docs) => setView({ kind: 'trash', docs }))"
+      expect(
+        'the detector really sees the old unchecked view setter',
+        legacyOpen.includes('setView(') && !legacyOpen.includes('still('),
+        {}
+      )
+      expect(
+        'both async view opens check the generation they started from',
+        (appSrc.match(/const from = viewRef\.current\.read\(\)/g) ?? []).length === 2 &&
+          (appSrc.match(/!viewRef\.current\.still\(from\)/g) ?? []).length === 2 &&
+          appSrc.includes('createViewGeneration(view.kind)'),
+        {}
+      )
+    }
+
+    // ⑮ Two syncs in a row downloaded the same PDFs twice.
+    {
+      const gate = createBatchGate()
+      expect(
+        'a second batch download is refused while one is running',
+        gate.tryStart() === true && gate.isRunning() === true && gate.tryStart() === false,
+        {}
+      )
+      gate.finish()
+      expect(
+        'and allowed again once the first has finished',
+        gate.isRunning() === false && gate.tryStart() === true,
+        {}
+      )
+      gate.finish()
+      expect(
+        'the batch downloader is wired to the gate',
+        appSrc.includes('createBatchGate()') &&
+          appSrc.includes('if (!dlRunning.current.tryStart()) return') &&
+          appSrc.includes('dlRunning.current.finish()'),
+        {}
+      )
+    }
+
+    // Two neighbours of the fifteen that the review listed as "only
+    // suspected": naming and import collisions are cheap to pin down now.
+    {
+      expect(
+        'a hyphenated title is no longer rewritten by the naming template',
+        pdfNameFor({ title: 'State-of-the-art survey' } as Doc, undefined, '{title}') ===
+          'State-of-the-art survey.pdf',
+        { got: pdfNameFor({ title: 'State-of-the-art survey' } as Doc, undefined, '{title}') }
+      )
+      expect(
+        'Windows device names, control characters and a doubled extension are safe',
+        pdfNameFor(undefined, 'CON.pdf', '{title}') === '_CON.pdf' &&
+          pdfNameFor(undefined, 'paper.pdf', '{title}') === 'paper.pdf' &&
+          !/[\x00-\x1f]/.test(pdfNameFor({ title: 'a\u0001b' } as Doc, undefined, '{title}')),
+        {
+          reserved: pdfNameFor(undefined, 'CON.pdf', '{title}'),
+          fallback: pdfNameFor(undefined, 'paper.pdf', '{title}')
+        }
+      )
+      const docsSrc = read('electron/main/ipc/docs.ts')
+      const systemSrc = read('electron/main/ipc/system.ts')
+      expect(
+        'importing a second PDF with the same name no longer overwrites the first',
+        docsSrc.includes('wanted.replace(/\\.pdf$/, ` (${n}).pdf`)') &&
+          docsSrc.includes('if (buf.length) {') &&
+          docsSrc.includes('doc.localPdf = dest'),
+        {}
+      )
+      expect(
+        'a dialog re-reads the config before writing its one field',
+        // pickDir already re-read it; the two file dialogs are the ones that
+        // used to write back a snapshot taken before the dialog opened.
+        (systemSrc.match(/saveConfig\(\{ \.\.\.loadConfig\(\)/g) ?? []).length === 3 &&
+          !systemSrc.includes('saveConfig({ ...cfg,'),
+        {}
+      )
+    }
+  }
+
   restoreSmokeConfig()
 
   if (fails.length) {

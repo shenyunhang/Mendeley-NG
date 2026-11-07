@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { ensureClient } from '../library'
 import { pdfNameFor } from '../pdfname'
+import { attachPdfs } from '../pdfindex'
 import { ftCancel, ftClear, ftSearch, ftStatus } from '../fulltext'
 import { ftDocs, indexAdded, startBuild } from '../ftops'
 import { DEFAULT_PDF_DIR, loadConfig, loadLibrary, saveLibrary } from '../store'
@@ -63,6 +64,20 @@ export function registerFilesIpc() {
       return { total: plan.length, renamed, skipped, sample }
     }
   )
+
+  /** Re-match every local PDF against the current directory. Changing the
+   *  directory used to trigger an incremental sync, which skips attachPdfs
+   *  entirely when the cloud changed nothing — so the new directory was in
+   *  the settings while the list still pointed at the old one. */
+  ipcMain.handle('pdf:reattach', () => {
+    const cfg = loadConfig()
+    const lib = loadLibrary()
+    if (!lib) return [] as Doc[]
+    for (const d of lib.docs) d.localPdf = undefined
+    attachPdfs(lib.docs, cfg.pdfDir || DEFAULT_PDF_DIR)
+    saveLibrary(lib.docs, lib.folders)
+    return lib.docs
+  })
 
   ipcMain.handle('pdf:download', async (_e, docId: string) => {
     try {

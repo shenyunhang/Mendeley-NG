@@ -32,6 +32,7 @@ import {
   type ZoomMode
 } from '../lib/pdfgeom'
 import { PrefetchCache } from '../lib/pdfcache'
+import { noteForSelection } from '../lib/annotationNote'
 import { bitmapPixelSize, devicePixelRatioOrOne } from '../lib/bitmapPixelSize'
 import { READING_POSITION_PERSIST_DEBOUNCE_MS } from '../lib/timing'
 import { selectionRects, textInRect } from '../lib/pdfsel'
@@ -105,7 +106,12 @@ export default function PdfViewer({
   const [err, setErr] = useState<string | null>(null)
   const [drag, setDrag] = useState<Rect | null>(null)
   const [sizes, setSizes] = useState<Record<number, Size>>({})
-  const [note, setNote] = useState('')
+  /** What is typed into the note box, tagged with the annotation it belongs
+   *  to.  A bare string used to be reset in only two of the places that
+   *  change the selection: drawing a new highlight selects it without
+   *  touching the box, so A's note sat there and Enter wrote it onto B.
+   *  Deriving the shown value from `sel` makes every setter correct at once. */
+  const [noteDraft, setNoteDraft] = useState<{ id: string; text: string } | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -797,6 +803,7 @@ export default function PdfViewer({
   }
 
   const selected = anns.find((a) => a.id === sel) || null
+  const note = noteForSelection(selected, noteDraft)
   const pageAnns = annsOn(page)
 
   /** One highlight rectangle, shared by the single page and the column. */
@@ -804,10 +811,7 @@ export default function PdfViewer({
     <div
       key={key}
       title={a.note || '高亮'}
-      onClick={() => {
-        setSel(a.id)
-        setNote(a.note || '')
-      }}
+      onClick={() => setSel(a.id)}
       style={{
         position: 'absolute',
         left: `${r.x * 100}%`,
@@ -1289,7 +1293,7 @@ export default function PdfViewer({
           <input
             placeholder="笔记…"
             value={note}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e) => setNoteDraft({ id: selected.id, text: e.target.value })}
             onBlur={() => saveNote(selected.id, note)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') saveNote(selected.id, note)
@@ -1323,7 +1327,6 @@ export default function PdfViewer({
                     onClick={() => {
                       setPage(a.page)
                       setSel(a.id)
-                      setNote(a.note ?? '')
                       if (continuous) scrollToPage(a.page)
                     }}
                     title={a.note || a.text || '高亮'}

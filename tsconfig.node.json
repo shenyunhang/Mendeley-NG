@@ -17,15 +17,20 @@
     "shared/**/*.ts",
     "electron.vite.config.ts",
     "src/lib/annotationMerge.ts",
+    "src/lib/annotationNote.ts",
+    "src/lib/batchGate.ts",
     "src/lib/bitmapPixelSize.ts",
     "src/lib/cardSpot.ts",
     "src/lib/cite.ts",
     "src/lib/citeKey.ts",
+    "src/lib/continuousScroll.ts",
     "src/lib/documentScope.ts",
     "src/lib/export.ts",
+    "src/lib/exportTypes.ts",
     "src/lib/findScan.ts",
     "src/lib/flash.ts",
     "src/lib/folderForDoc.ts",
+    "src/lib/importText.ts",
     "src/lib/lazyPages.ts",
     "src/lib/latestSearch.ts",
     "src/lib/listBlank.ts",
@@ -35,7 +40,9 @@
     "src/lib/pdfcache.ts",
     "src/lib/pdfgeom.ts",
     "src/lib/rectLines.ts",
+    "src/lib/savedSearch.ts",
     "src/lib/refly.ts",
-    "src/lib/timing.ts"
+    "src/lib/timing.ts",
+    "src/lib/viewGeneration.ts"
   ]
 }

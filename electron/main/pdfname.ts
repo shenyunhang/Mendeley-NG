@@ -16,9 +16,15 @@ export function pdfNameFor(
 ): string {
   const safe = (s: string) =>
     (s || '')
-      .replace(/[\\/:*?"<>|\r\n\t]+/g, ' ')
+      .replace(/[\x00-\x1f\x7f]+/g, ' ')
+      .replace(/[\\/:*?"<>|]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
+
+  /** Windows device names are not legal file basenames, with or without an
+   *  extension. Control characters make fs.writeFileSync fail on the same
+   *  platform, after the cloud document has already been created. */
+  const reserved = (s: string) => /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(s)
   const author = (() => {
     const a = doc?.authors?.[0]
     if (!a) return ''
@@ -35,9 +41,16 @@ export function pdfNameFor(
     type: safe(doc?.type ?? ''),
     doi: safe(doc?.identifiers?.doi ?? doc?.doi ?? '')
   }
-  const expanded = safe(template).replace(/\{(\w+)\}/g, (_, k: string) => vals[k] ?? '')
-  // split on the separator and drop the empty pieces, then put them back
-  const parts = expanded.split(/\s*-\s*/).filter((s) => s.trim())
-  const base = safe(parts.join(' - ') || safe(fallback || '') || 'download')
+  // Split the template, not the expanded value: splitting afterwards also
+  // cut a title like "State-of-the-art survey" into five segments and
+  // rejoined it with spaces, silently rewriting the title. Empty segments
+  // from missing fields are dropped before the pieces are put back.
+  const parts = template
+    .split(/\s*-\s*/)
+    .map((seg) => safe(seg.replace(/\{(\w+)\}/g, (_, k: string) => vals[k] ?? '')))
+    .filter(Boolean)
+  const fallbackBase = safe((fallback || '').replace(/\.pdf$/i, ''))
+  let base = safe(parts.join(' - ') || fallbackBase || 'download')
+  if (reserved(base)) base = '_' + base
   return (base.slice(0, 150) || 'download') + '.pdf'
 }

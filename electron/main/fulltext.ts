@@ -9,6 +9,7 @@ import { app } from 'electron'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { DEFAULT_FT_PAGES, type Doc, type FtHit, type FtStatus } from '../../shared/types'
 import { clampFullTextPages } from '../../shared/fullTextPages'
+import { docsWithAllWords, type WordOccurrence } from '../../shared/wordCoverage'
 /** One lane is the floor; four is the ceiling even on a many-core box. */
 const MIN_INDEX_LANES = 1
 const MAX_INDEX_LANES = 4
@@ -89,8 +90,18 @@ export function setFullTextPages(n: number): boolean {
   const next = clampFullTextPages(n)
   if (next === pages) return false
   pages = next
-  meta = null
   blob = null
+  // A build owns the offset table it started with.  Setting the module-level
+  // `meta` to null here would detach that object: the build would keep
+  // appending text to the file and to its own table while every saveMeta()
+  // looked at null, so a six-minute run ended with megabytes on disk and an
+  // index that said it had never been built.  Remember the change instead and
+  // apply it once the run has written its last table.
+  if (busy) {
+    deferred = 'budget'
+    return true
+  }
+  meta = null
   return true
 }
 
@@ -146,6 +157,11 @@ let building = false
  *  table, so two of them at once would put two papers on the same offset
  *  and every hit in one of them would be reported under the other. */
 let busy = false
+/** A page-budget change or a clear that arrived while a run owned the offset
+ *  table.  Both used to rewrite the module-level `meta` right away, which
+ *  detached the in-flight run from the object it was writing.  They are
+ *  applied after that run has saved its own table, never in the middle of it. */
+let deferred: 'clear' | 'budget' | null = null
 /** Set by `ftCancel`.  The build loop checks it between batches, which is
  *  often enough: a batch is one PDF per lane, not the whole library. */
 let cancelled = false
@@ -284,9 +300,44 @@ function endOf(m: Meta): number {
   return at
 }
 
-function saveMeta() {
-  if (!meta || !dir) return
-  fs.writeFileSync(metaFile(), JSON.stringify(meta))
+/** A build owns the meta object it started with. Writing the module-level
+ *  variable instead meant that changing the page budget or clearing the
+ *  index mid-build quietly discarded the whole run: the build kept writing
+ *  to its detached object while every saveMeta() saw `null` (or an empty
+ *  table). Pass the owner explicitly. */
+function saveMeta(owned: Meta | null = meta) {
+  if (!owned || !dir) return
+  fs.writeFileSync(metaFile(), JSON.stringify(owned))
+}
+
+/**
+ * Apply a budget change or a clear that was deferred because a run was busy.
+ *
+ * Called only from a run's `finally`, after that run has written the table it
+ * owns.  Writing an empty table here is not the same as dropping the run's
+ * work by accident: it is what the user asked for, and the text file is cut
+ * back in the same step so the two never disagree.  Returns whether the
+ * request was a clear, so the caller can also drop papers queued during the
+ * run instead of immediately indexing them into a just-cleared index.
+ */
+function applyDeferred(): boolean {
+  if (!deferred) return false
+  const wasClear = deferred === 'clear'
+  deferred = null
+  meta = { version: 2, pages: pages, bytes: 0, entries: {} }
+  skipped = []
+  reader = null
+  legacy = false
+  voided = null
+  voidedPages = 0
+  blob = null
+  try {
+    fs.writeFileSync(dataFile(), '')
+  } catch {
+    /* nothing to truncate */
+  }
+  saveMeta()
+  return wasClear
 }
 
 /** The whole corpus, lower-cased, loaded once and kept. */
@@ -522,6 +573,10 @@ export async function ftBuild(
     meta = { version: 2, pages: pages, bytes: 0, entries: {} }
   }
   const fresh = meta!
+  // One budget for the whole run.  Reading the module-level `pages` at each
+  // batch would let a mid-build setting change mix three-page text with
+  // five-page text in one table; the change is applied after the run instead.
+  const budget = pages
   const queue = docs.filter((d) => d.localPdf)
   progress = { done: 0, total: queue.length, current: '' }
   let out = -1
@@ -538,6 +593,8 @@ export async function ftBuild(
   let at = 0
   let byteAt = 0
   let lastPing = 0
+  /** Whether a clear arrived during the run and was applied in `finally`. */
+  let clearedWhileBuilding = false
   const ping = (cur: string) => {
     const now = Date.now()
     // throttled by time, not by count: a batch of slow PDFs and a batch of
@@ -615,7 +672,7 @@ export async function ftBuild(
       }
       ping(path.basename(todo[0]?.d.localPdf ?? ''))
       const got = await Promise.all(
-        todo.map((t) => extract(t.d.localPdf as string, pages))
+        todo.map((t) => extract(t.d.localPdf as string, budget))
       )
       // written in queue order even though it was read in parallel, so the
       // offsets stay contiguous and the entry table stays monotonic
@@ -657,7 +714,7 @@ export async function ftBuild(
       }
       // the offset table is written as we go, so a run that is cancelled or
       // crashes is not wasted
-      if (i % (width * 8) === 0) saveMeta()
+      if (i % (width * 8) === 0) saveMeta(fresh)
       // give the event loop a turn between batches: this is the only chance
       // a queued IPC, including a cancel, has to be delivered
       await new Promise((r) => setImmediate(r))
@@ -680,14 +737,22 @@ export async function ftBuild(
     // one of them said, and blaming the install would send somebody off to
     // reinstall over a single corrupt file.
     reader = readerErr && wrote === 0 && queue.length > 0 ? readerErr : null
-    saveMeta()
+    saveMeta(fresh)
+    clearedWhileBuilding = applyDeferred()
   }
   // Papers that arrived while the run was going.  A build takes its list of
   // what to read before it starts reading, so without this they would wait
   // for the next build — the wait this whole module exists to avoid.  They
   // are indexed after a cancelled run too: cancelling stops the run, it does
-  // not stop the paper from having been imported.
+  // not stop the paper from having been imported.  A clear is the one
+  // exception: indexing into an index the user just emptied would put back
+  // exactly what they asked to be gone.
   const queued = pending.splice(0)
+  if (clearedWhileBuilding) {
+    const s = ftStatus(docs)
+    onProgress(s)
+    return s
+  }
   if (queued.length) await ftAdd(queued, queued.map((d) => d.id))
   const s = ftStatus(docs)
   onProgress(s)
@@ -724,6 +789,7 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
   }
   busy = true
   const m = loadMeta()
+  const budget = pages
   let at = endOf(m)
   let byteAt = m.bytes
   // The byte anchor decides both where the text goes and whether the file has
@@ -734,6 +800,8 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
   const size = had ? fs.statSync(dataFile()).size : 0
   const out = fs.openSync(dataFile(), had && m.bytes <= size ? 'r+' : 'w')
   let added = 0
+  /** Whether a deferred clear was applied at the end of this append. */
+  let clearedWhileAdding = false
   try {
     if (had && m.bytes <= size) fs.ftruncateSync(out, m.bytes)
     else {
@@ -761,7 +829,7 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
       ) {
         continue
       }
-      const g = await extract(d.localPdf as string, pages)
+      const g = await extract(d.localPdf as string, budget)
       if (!g.text.trim()) continue
       const buf = Buffer.from(g.text, 'utf8')
       fs.writeSync(out, buf, 0, buf.length, byteAt)
@@ -785,17 +853,28 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
     // and without this a search straight after an import would read the text
     // as it was before the paper arrived.
     if (added) blob = null
-    saveMeta()
+    saveMeta(m)
+    clearedWhileAdding = applyDeferred()
   }
   // Whatever turned up while this run held the file gets its turn now.  It is
   // drained before the recursive call, so a run that keeps being handed
   // papers still terminates.
   const queued = pending.splice(0)
+  if (clearedWhileAdding) return added
   if (queued.length) added += await ftAdd(queued, queued.map((d) => d.id))
   return added
 }
 
 export function ftClear() {
+  // Clearing while a build is appending is not a matter of swapping one
+  // object: the build still holds the file open and will write its table in
+  // `finally`.  Stop the run and let it apply the clear once its own last
+  // write is on disk, so the text file and the empty table land together.
+  if (busy) {
+    cancelled = true
+    deferred = 'clear'
+    return
+  }
   meta = { version: 2, pages: pages, bytes: 0, entries: {} }
   skipped = []
   reader = null
@@ -882,7 +961,10 @@ export function ftSearch(q: string): FtHit[] {
   }
   if (phrase.length) return phrase
 
-  const seen = new Map<string, { mask: number; at: number }>()
+  // A bitmask of hit words used to be a 32-bit int: `(1 << 32) - 1 === 0`,
+  // so a query with 32 or more words matched nothing at all. The rule is a
+  // pure function now, checked with 32 and 33 words on every run.
+  const occurrences: WordOccurrence[] = []
   for (let w = 0; w < tokens.length; w++) {
     const t = tokens[w]!
     for (let at = body.indexOf(t); at !== -1; ) {
@@ -891,24 +973,16 @@ export function ftSearch(q: string): FtHit[] {
         at = body.indexOf(t, at + 1)
         continue
       }
-      const rec = seen.get(found[0])
-      if (rec) {
-        rec.mask |= 1 << w
-        if (at < rec.at) rec.at = at
-      } else {
-        seen.set(found[0], { mask: 1 << w, at })
-      }
+      occurrences.push({ docId: found[0], word: w, at })
       at = body.indexOf(t, found[1].start + found[1].len)
     }
   }
-  const want = (1 << tokens.length) - 1
-  for (const [id, rec] of seen) {
-    if (rec.mask !== want) continue
+  for (const [id, at] of docsWithAllWords(occurrences, tokens.length)) {
     const e = m.entries[id]!
     hits.push({
       docId: id,
-      page: pageOf(e, rec.at),
-      snippet: snippetAt(rec.at, tokens[0]!.length)
+      page: pageOf(e, at),
+      snippet: snippetAt(at, tokens[0]!.length)
     })
     if (hits.length >= MAX_HITS) break
   }

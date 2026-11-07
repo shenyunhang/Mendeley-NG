@@ -186,10 +186,19 @@ export function registerDocsIpc() {
       const cfg = loadConfig()
       const dir = cfg.pdfDir || DEFAULT_PDF_DIR
       fs.mkdirSync(dir, { recursive: true })
-      const dest = path.join(dir, pdfNameFor(doc, name, cfg.pdfNameTemplate))
-      if (buf.length) fs.writeFileSync(dest, buf)
-      doc.localPdf = dest
-      doc.file_attached = true
+      const wanted = pdfNameFor(doc, name, cfg.pdfNameTemplate)
+      let dest = path.join(dir, wanted)
+      // Two papers can legitimately want the same file name. Overwriting the
+      // first PDF with the second used to leave one paper pointing at the
+      // other's bytes.
+      for (let n = 2; fs.existsSync(dest) && n < 50; n++) {
+        dest = path.join(dir, wanted.replace(/\.pdf$/, ` (${n}).pdf`))
+      }
+      if (buf.length) {
+        fs.writeFileSync(dest, buf)
+        doc.localPdf = dest
+        doc.file_attached = true
+      }
       const lib = loadLibrary()
       if (lib) {
         saveLibrary(

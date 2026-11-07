@@ -28,6 +28,36 @@ export interface SyncReconcile<T extends { id: string }> {
   trashedIds: Set<string>
 }
 
+const same = (a: unknown, b: unknown): boolean =>
+  Object.is(a, b) ||
+  (typeof a === 'object' && typeof b === 'object' && a !== null && b !== null &&
+    JSON.stringify(a) === JSON.stringify(b))
+
+/**
+ * A three-way merge at the **field** level for one document that survives the
+ * pull. The first version of this module only decided whether a whole row
+ * should exist, so a star, a tag, a folder membership or a freshly downloaded
+ * `localPdf` written while the pull was in flight was silently replaced by the
+ * snapshot taken at the start. A field that the local side changed and the
+ * cloud did not belongs to the local side; everything else stays with the
+ * cloud answer.
+ */
+export function mergeDocFields<T extends { id: string }>(
+  base: T | undefined,
+  ours: T | undefined,
+  theirs: T
+): T {
+  if (!base || !ours) return theirs
+  const out = { ...theirs } as Record<string, unknown>
+  for (const key of Object.keys(ours) as string[]) {
+    const ov = ours[key as keyof T]
+    const bv = base[key as keyof T]
+    const tv = theirs[key as keyof T]
+    if (!same(ov, bv) && same(tv, bv)) out[key] = ov
+  }
+  return out as T
+}
+
 export function reconcileSyncWrite<T extends { id: string }>(
   input: SyncReconcile<T>
 ): T[] {
@@ -44,9 +74,11 @@ export function reconcileSyncWrite<T extends { id: string }>(
       : started.filter((d) => !currentIds.has(d.id)).map((d) => d.id)
   )
 
-  const kept = proposed.filter(
-    (d) => !trashedIds.has(d.id) && !locallyDeleted.has(d.id)
-  )
+  const startedById = new Map(started.map((d) => [d.id, d]))
+  const currentById = new Map((current ?? []).map((d) => [d.id, d]))
+  const kept = proposed
+    .filter((d) => !trashedIds.has(d.id) && !locallyDeleted.has(d.id))
+    .map((d) => mergeDocFields(startedById.get(d.id), currentById.get(d.id), d))
   const keptIds = new Set(kept.map((d) => d.id))
 
   // Something added locally during the pull (a dropped PDF, a new folder

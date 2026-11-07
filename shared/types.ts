@@ -139,6 +139,9 @@ export interface SavedSearch {
   query: string
   folderId: string | null
   starred: boolean
+  /** Every list filter that was on when the search was saved. `starred` is
+   *  kept for configs written before this field existed. */
+  filters?: string[]
 }
 
 /** Local preferences.  Shared so the renderer never has to guess the shape. */

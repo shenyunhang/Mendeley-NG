@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { CloudAnnotation, Doc, Folder } from '../../shared/types'
 import { collectFileDocumentIds, type FilePageRow } from '../../shared/filePages'
+import { collectPaged } from '../../shared/paged'
 
 const BASE = 'https://api.mendeley.com'
 const TOKEN_URL = BASE + '/oauth/token'
@@ -153,31 +154,28 @@ export class Mendeley {
    *  where "now" returns nothing and "an hour ago" returns the one document
    *  touched in that window. */
   async allDocuments(onPage?: (n: number) => void, since?: string): Promise<Doc[]> {
-    const out: Doc[] = []
-    const params: Record<string, string> = { limit: '100', view: 'all' }
-    if (since) params.modified_since = since
-    for (let guard = 0; guard < 200; guard++) {
-      const batch = await this.request<Doc[]>('GET', '/documents', { params })
-      if (!batch || batch.length === 0) break
-      out.push(...batch)
-      onPage?.(out.length)
-      if (batch.length < 100) break
-      params.marker = batch[batch.length - 1].id
-    }
-    return out
+    const base: Record<string, string> = { limit: '100', view: 'all' }
+    if (since) base.modified_since = since
+    return collectPaged<Doc>(
+      (marker) =>
+        this.request<Doc[]>('GET', '/documents', {
+          params: marker ? { ...base, marker } : base
+        }),
+      100,
+      200,
+      onPage
+    )
   }
 
   async allFolders(): Promise<Folder[]> {
-    const out: Folder[] = []
-    const params: Record<string, string> = { limit: '200' }
-    for (let guard = 0; guard < 20; guard++) {
-      const batch = await this.request<Folder[]>('GET', '/folders', { params })
-      if (!batch || batch.length === 0) break
-      out.push(...batch)
-      if (batch.length < 200) break
-      params.marker = batch[batch.length - 1].id
-    }
-    return out
+    return collectPaged<Folder>(
+      (marker) =>
+        this.request<Folder[]>('GET', '/folders', {
+          params: marker ? { limit: '200', marker } : { limit: '200' }
+        }),
+      200,
+      20
+    )
   }
 
   /** Document ids that actually carry a file.  file_attached lies often
@@ -289,21 +287,15 @@ export class Mendeley {
   /** Annotations for one document.  Highlight positions are absolute PDF
    *  points, not the normalised 0..1 rects we keep locally. */
   async listAnnotations(documentId: string): Promise<CloudAnnotation[]> {
-    const out: CloudAnnotation[] = []
-    const params: Record<string, string> = {
-      document_id: documentId,
-      limit: '200'
-    }
-    for (let guard = 0; guard < 50; guard++) {
-      const batch = await this.request<CloudAnnotation[]>('GET', '/annotations', {
-        params
-      })
-      if (!batch || batch.length === 0) break
-      out.push(...batch)
-      if (batch.length < 200) break
-      params.marker = batch[batch.length - 1].id
-    }
-    return out
+    const base: Record<string, string> = { document_id: documentId, limit: '200' }
+    return collectPaged<CloudAnnotation>(
+      (marker) =>
+        this.request<CloudAnnotation[]>('GET', '/annotations', {
+          params: marker ? { ...base, marker } : base
+        }),
+      200,
+      50
+    )
   }
 
   /**
@@ -348,16 +340,15 @@ export class Mendeley {
   }
 
   async listTrash(): Promise<Doc[]> {
-    const out: Doc[] = []
-    const params: Record<string, string> = { limit: '100', view: 'all' }
-    for (let guard = 0; guard < 100; guard++) {
-      const batch = await this.request<Doc[]>('GET', '/trash', { params })
-      if (!batch || batch.length === 0) break
-      out.push(...batch)
-      if (batch.length < 100) break
-      params.marker = batch[batch.length - 1].id
-    }
-    return out
+    const base: Record<string, string> = { limit: '100', view: 'all' }
+    return collectPaged<Doc>(
+      (marker) =>
+        this.request<Doc[]>('GET', '/trash', {
+          params: marker ? { ...base, marker } : base
+        }),
+      100,
+      100
+    )
   }
 
   /** Restore from trash.  Undocumented but stable, and the web client uses it. */

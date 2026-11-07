@@ -46,7 +46,9 @@ export function registerSystemIpc() {
     })
     if (r.canceled || !r.filePaths[0]) return null
     const dir = r.filePaths[0]
-    saveConfig({ ...cfg, exportDir: dir })
+    // Re-read: anything the reader changed while the dialog was open (theme,
+    // font, page budget) must not be rolled back by this stale snapshot.
+    saveConfig({ ...loadConfig(), exportDir: dir })
     return dir
   })
 
@@ -198,7 +200,7 @@ export function registerSystemIpc() {
       if (r.canceled || !r.filePath) return { canceled: true }
       try {
         fs.writeFileSync(r.filePath, text, 'utf8')
-        saveConfig({ ...cfg, exportDir: path.dirname(r.filePath) })
+        saveConfig({ ...loadConfig(), exportDir: path.dirname(r.filePath) })
         return { path: r.filePath }
       } catch (e) {
         return { error: String(e) }

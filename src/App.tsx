@@ -11,6 +11,9 @@ import type {
 import { DEFAULT_PDF_TEMPLATE } from '../shared/types'
 import { clampFullTextPages } from '../shared/fullTextPages'
 import { folderForOpenedDoc } from './lib/folderForDoc'
+import { createBatchGate } from './lib/batchGate'
+import { savedSearchMatches } from './lib/savedSearch'
+import { createViewGeneration } from './lib/viewGeneration'
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
 import TrashedDocPanel from './components/TrashedDocPanel'
@@ -122,6 +125,11 @@ export default function App() {
   // every new screen had to be slotted into a chain of ternaries and given a
   // precedence against screens it had nothing to do with.  See lib/view.ts.
   const [view, setView] = useState<View>(LIBRARY)
+  /** An async open (trash / notes) must not drag the reader back to a view
+   *  they have already left. Checked against the view that was on screen
+   *  when the request started, not against a stale closure. */
+  const viewRef = useRef(createViewGeneration(view.kind))
+  viewRef.current.set(view.kind)
   // first, because the library decides whether to start a sync on from
   // `syncOnStart` and cannot be asked twice
   const {
@@ -280,8 +288,12 @@ export default function App() {
   /** Opening the trash and switching the theme, named because the toolbar
    *  asks for them rather than doing them. */
   const openTrash = () => {
+    const from = viewRef.current.read()
     setPinned(null)
-    void window.api.listTrash().then((docs) => setView({ kind: 'trash', docs }))
+    void window.api.listTrash().then((docs) => {
+      if (!viewRef.current.still(from)) return
+      setView({ kind: 'trash', docs })
+    })
   }
   /** Both the bin row and the read-only panel can put a paper back or remove
    *  it for good.  One implementation, so the two cannot drift into asking
@@ -666,7 +678,8 @@ export default function App() {
         name,
         query: query.trim(),
         folderId,
-        starred: filters.includes('star')
+        starred: filters.includes('star'),
+        filters: [...filters]
       }
     ]
     setSaved(next)
@@ -677,7 +690,13 @@ export default function App() {
   const applySearch = (s: SavedSearch) => {
     setQuery(s.query)
     setFolderId(s.folderId)
-    setFilters(s.starred ? ['star'] : [])
+    // Before `filters` existed only the star switch survived a save, while
+    // the name and the count still claimed "未读 / 没有本地 PDF" etc.
+    setFilters(
+      (s.filters?.filter((k) => LIST_FILTERS.includes(k as ListFilter)) as
+        | ListFilter[]
+        | undefined) ?? (s.starred ? ['star'] : [])
+    )
     setActiveSearch(s.id)
     setMulti([])
   }
@@ -820,16 +839,18 @@ export default function App() {
   const savedCounts = useMemo(() => {
     const m = new Map<string, number>()
     for (const s of saved) {
-      const q = s.query.trim().toLowerCase()
       const ids = s.folderId ? new Set(tree.subtree.get(s.folderId) ?? [s.folderId]) : null
       m.set(
         s.id,
-        docs.filter((d) => {
-          if (s.starred && !d.starred) return false
-          if (ids && !(d.folder_uuids ?? []).some((f) => ids.has(f))) return false
-          if (q && !(haystack.get(d.id) ?? '').includes(q)) return false
-          return true
-        }).length
+        docs.filter((d) =>
+          savedSearchMatches(
+            d,
+            s,
+            (k) => FILTER_TEST[k as ListFilter],
+            haystack,
+            ids
+          )
+        ).length
       )
     }
     return m
@@ -1102,6 +1123,10 @@ export default function App() {
     if (!p) return
     setPdfDir(p)
     await doSync()
+    // A pull with no cloud changes skips attachPdfs; force the re-match
+    // against the new directory instead of leaving stale paths on screen.
+    const reattached = await window.api.reattachPdfs()
+    if (reattached.length) setLib((l) => (l ? { ...l, docs: reattached } : l))
   }
 
   /** The full-text page budget.  Written straight away: dropping the index is
@@ -1276,59 +1301,68 @@ export default function App() {
    * up as "the app went slow while it was downloading".
    */
   const dlStop = useRef(false)
+  const dlRunning = useRef(createBatchGate())
   const [dlRun, setDlRun] = useState<{ done: number; total: number } | null>(null)
   const batchDownload = async (list: Doc[]) => {
-    const need = needsPdf(list)
-    if (!need.length) {
-      flashBatch('这些本地都已经有 PDF 了', ALL_HAVE_PDF_MESSAGE_VISIBLE_MS)
-      return
-    }
-    dlStop.current = false
-    setDlRun({ done: 0, total: need.length })
-    const got = new Map<string, string>()
-    const failed: string[] = []
-    let done = 0
-    const flush = () => {
-      if (!got.size) return
-      const g = new Map(got)
-      got.clear()
-      setLib((l) =>
-        l
-          ? {
-              ...l,
-              docs: l.docs.map((x) => (g.has(x.id) ? { ...x, localPdf: g.get(x.id)! } : x))
-            }
-          : l
-      )
-    }
-    const queue = need.slice()
-    const lanes = Math.min(3, queue.length)
-    const work = async () => {
-      for (;;) {
-        const d = queue.shift()
-        if (!d || dlStop.current) return
-        try {
-          const r = await window.api.downloadPdf(d.id)
-          if (!r.ok || !r.path) throw new Error(r.error ?? '下载失败')
-          got.set(d.id, r.path)
-        } catch {
-          failed.push(d.title || '(无标题)')
-        }
-        done++
-        setDlRun({ done, total: need.length })
-        if (done % 10 === 0) flush()
+    // Two syncs in a row (or sync plus the batch button) used to start two
+    // downloads over the same list: duplicate requests, `xxx (2).pdf`, two
+    // progress bars fighting over dlRun, and two contradictory reports.
+    if (!dlRunning.current.tryStart()) return
+    try {
+      const need = needsPdf(list)
+      if (!need.length) {
+        flashBatch('这些本地都已经有 PDF 了', ALL_HAVE_PDF_MESSAGE_VISIBLE_MS)
+        return
       }
+      dlStop.current = false
+      setDlRun({ done: 0, total: need.length })
+      const got = new Map<string, string>()
+      const failed: string[] = []
+      let done = 0
+      const flush = () => {
+        if (!got.size) return
+        const g = new Map(got)
+        got.clear()
+        setLib((l) =>
+          l
+            ? {
+                ...l,
+                docs: l.docs.map((x) => (g.has(x.id) ? { ...x, localPdf: g.get(x.id)! } : x))
+              }
+            : l
+        )
+      }
+      const queue = need.slice()
+      const lanes = Math.min(3, queue.length)
+      const work = async () => {
+        for (;;) {
+          const d = queue.shift()
+          if (!d || dlStop.current) return
+          try {
+            const r = await window.api.downloadPdf(d.id)
+            if (!r.ok || !r.path) throw new Error(r.error ?? '下载失败')
+            got.set(d.id, r.path)
+          } catch {
+            failed.push(d.title || '(无标题)')
+          }
+          done++
+          setDlRun({ done, total: need.length })
+          if (done % 10 === 0) flush()
+        }
+      }
+      await Promise.all(Array.from({ length: lanes }, work))
+      flush()
+      const stopped = dlStop.current
+      setDlRun(null)
+      const okN = need.length - failed.length - queue.length
+      if (stopped) {
+        flashBatch(`已停止，下载了 ${okN} 篇`, DOWNLOAD_STOPPED_MESSAGE_VISIBLE_MS)
+        return
+      }
+      reportBatch('已下载', okN, failed)
+    } finally {
+      dlRunning.current.finish()
     }
-    await Promise.all(Array.from({ length: lanes }, work))
-    flush()
-    const stopped = dlStop.current
-    setDlRun(null)
-    const okN = need.length - failed.length - queue.length
-    if (stopped) {
-      flashBatch(`已停止，下载了 ${okN} 篇`, DOWNLOAD_STOPPED_MESSAGE_VISIBLE_MS)
-      return
-    }
-    reportBatch('已下载', okN, failed)
   }
 
   /**
@@ -1402,7 +1436,9 @@ export default function App() {
    * own, and a cached copy would quietly hide anything marked since.
    */
   const openNotes = async () => {
+    const from = viewRef.current.read()
     const all = await window.api.loadAnnotations()
+    if (!viewRef.current.still(from)) return
     setAnns(all)
     setView({ kind: 'annotations', anns: all })
   }

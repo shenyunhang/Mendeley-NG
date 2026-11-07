@@ -33,26 +33,36 @@ export const DEFAULT_PDF_DIR = path.join(
 export const DEFAULT_FONT_SIZE = 15
 
 export function loadConfig(): Config {
+  const fallback = { pdfDir: DEFAULT_PDF_DIR, fontSize: DEFAULT_FONT_SIZE }
   try {
-    return {
-      pdfDir: DEFAULT_PDF_DIR,
-      fontSize: DEFAULT_FONT_SIZE,
-      ...JSON.parse(fs.readFileSync(cfgFile(), 'utf-8'))
-    }
+    const raw = JSON.parse(fs.readFileSync(cfgFile(), 'utf-8')) as Record<string, unknown>
+    // A hand-edited or half-written config used to overwrite the defaults
+    // with `pdfDir: 123` and make path.join throw deep inside a handler.
+    if (raw.pdfDir !== undefined && typeof raw.pdfDir !== 'string') delete raw.pdfDir
+    if (raw.fontSize !== undefined && typeof raw.fontSize !== 'number') delete raw.fontSize
+    return { ...fallback, ...raw } as Config
   } catch {
-    return { pdfDir: DEFAULT_PDF_DIR, fontSize: DEFAULT_FONT_SIZE }
+    return fallback
   }
 }
 
+/** Atomic, like every other write in this file: a process killed mid-write
+ *  used to leave half a JSON behind and silently lose every setting. */
 export function saveConfig(c: Config) {
-  fs.writeFileSync(cfgFile(), JSON.stringify(c, null, 2), 'utf-8')
+  const tmp = cfgFile() + '.tmp'
+  fs.writeFileSync(tmp, JSON.stringify(c, null, 2), 'utf-8')
+  fs.renameSync(tmp, cfgFile())
 }
 
 export function loadLibrary(): Library | null {
   try {
     const raw = fs.readFileSync(libFile(), 'utf-8')
     const lib = JSON.parse(raw) as Library
-    if (!Array.isArray(lib.docs)) return null
+    // `folders: null` used to pass this check and then throw in every
+    // handler that calls lib.folders.map/filter; the bad value was even
+    // written straight back, so it kept itself alive.
+    if (!Array.isArray(lib.docs) || !Array.isArray(lib.folders)) return null
+    if (lib.syncedAt !== undefined && typeof lib.syncedAt !== 'string') return null
     return lib
   } catch {
     return null

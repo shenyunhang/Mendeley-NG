@@ -152,6 +152,7 @@ const api = {
     bytes: ArrayBuffer,
     ids: { doi?: string; arxiv?: string }
   ) => ipcRenderer.invoke('doc:importPdf', name, bytes, ids) as Promise<Doc>,
+  reattachPdfs: () => ipcRenderer.invoke('pdf:reattach') as Promise<Doc[]>,
   downloadPdf: (docId: string) =>
     ipcRenderer.invoke('pdf:download', docId) as Promise<{
       ok: boolean

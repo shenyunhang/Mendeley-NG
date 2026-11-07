@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import type * as pdfjs from 'pdfjs-dist'
 import type { MutableRefObject } from 'react'
 import { PGAP, bitmapKey, type Size } from '../pdfgeom'
+import { continuousPageTop } from '../continuousScroll'
 import { bitmapPixelSize, devicePixelRatioOrOne } from '../bitmapPixelSize'
 import { drawTextLayer } from '../pdftext'
 
@@ -47,6 +48,11 @@ export function useContinuousPages(o: {
   /** Pages currently inside the observer's margin. */
   const visible = useRef(new Set<number>())
   const contRef = useRef<HTMLDivElement>(null)
+  /** A jump that could not be made yet because page heights were still
+   *  arriving.  `gen` invalidates it when another document is opened, so a
+   *  late height from the old paper cannot move the new one. */
+  const jump = useRef<{ n: number; gen: number } | null>(null)
+  const gen = useRef(0)
 
   const forgetPaints = () => {
     // a bitmap of the paper being left must not land on a canvas that now
@@ -68,6 +74,8 @@ export function useContinuousPages(o: {
   // a new paper moves the scale, which happens to change the key.
   useEffect(() => {
     forgetPaints()
+    gen.current += 1
+    jump.current = null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [o.docKey])
 
@@ -181,18 +189,42 @@ export function useContinuousPages(o: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scale, continuous])
 
-  /** Scroll the column so that page `n` is at the top. */
-  const scrollToPage = (n: number) => {
+  /** Make a pending jump, if the heights it needs have arrived by now. */
+  const tryJump = () => {
+    const t = jump.current
+    if (!t) return
+    if (t.gen !== gen.current) {
+      jump.current = null
+      return
+    }
     const el = contRef.current
     if (!el) return
-    let top = 0
-    for (let i = 1; i < n; i++) {
-      const s = sizesRef.current[i]
-      if (!s) return
-      top += s.h * scale + PGAP
-    }
+    const top = continuousPageTop(t.n, sizesRef.current, scale, PGAP)
+    // null means "not all pages above n are measured yet", not "top of page
+    // one": guessing here would land short and the next scroll event would
+    // report the page actually shown, contradicting the page box.
+    if (top === null) return
     el.scrollTo({ top })
+    jump.current = null
   }
+
+  /** Scroll the column so that page `n` is at the top.  A jump asked for on
+   *  the frame a document opens almost never has the heights it needs, so the
+   *  target is kept and retried as they arrive instead of being dropped. */
+  const scrollToPage = (n: number) => {
+    jump.current = { n, gen: gen.current }
+    tryJump()
+  }
+
+  // Heights arrive one at a time from `sizeOf`, and every one of them changes
+  // `sizes`.  Without this effect, resuming at page 20 in continuous mode
+  // showed "20" in the page box with the column still at the top, and the
+  // first wheel event quietly changed the box back to 1.
+  useEffect(() => {
+    if (!continuous) return
+    tryJump()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sizes, scale, continuous, numPages])
 
   /** Keep the page box in step with whatever the user has scrolled to. */
   const onScroll = () => {

@@ -1,4 +1,5 @@
 import type { Annotation, Doc } from '../../shared/types'
+import { bibtexType, hasJournalField, risType } from './exportTypes'
 import { citationKeyStem } from './citeKey'
 
 /** EndNote ref-type name and its numeric code, which the desktop importer
@@ -22,6 +23,20 @@ const EN_TYPE: Record<string, [string, number]> = {
 
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/** BibTeX values are wrapped in braces, so an unmatched brace in a title used
+ *  to end the whole record early and silently drop the author, year and DOI.
+ *  Escape the three characters that change the parse; import.ts's parser
+ *  skips escaped braces when it counts depth, and untex() puts the character
+ *  back. A newline inside a field becomes a space. */
+const escBib = (s: string) =>
+  String(s ?? '')
+    .replace(/\r?\n\s*/g, ' ')
+    .replace(/([\\{}])/g, '\\$1')
+
+/** RIS is line oriented: every line must start with a two-letter tag. A
+ *  newline in a value produced an untagged line that the importer skipped. */
+const escRis = (s: string) => String(s ?? '').replace(/\r?\n\s*/g, ' ')
 
 const el = (name: string, v?: string | number | null): string =>
   v === undefined || v === null || String(v) === ''
@@ -50,27 +65,23 @@ function authorsFlat(d: Doc): string {
 export function toBibtex(docs: Doc[]): string {
   return docs
     .map((d, i) => {
-      const key = (d.citation_key || '').trim() || surnameKey(d, i)
-      const type = (d.type ?? 'article').toLowerCase()
+      const key = escBib((d.citation_key || '').trim() || surnameKey(d, i))
       const lines = [
-        `  title     = {${d.title ?? ''}}`,
-        `  author    = {${authorsFlat(d)}}`,
-        `  year      = {${d.year ?? ''}}`
+        `  title     = {${escBib(d.title ?? '')}}`,
+        `  author    = {${escBib(authorsFlat(d))}}`,
+        `  year      = {${escBib(String(d.year ?? ''))}}`
       ]
       if (d.source) {
-        const f = type === 'article' ? 'journal' : 'booktitle'
-        lines.push(`  ${f}      = {${d.source}}`)
+        const f = hasJournalField(d) ? 'journal' : 'booktitle'
+        lines.push(`  ${f}      = {${escBib(d.source)}}`)
       }
-      if (d.doi) lines.push(`  doi       = {${d.doi}}`)
-      if (d.arxiv) lines.push(`  eprint    = {${d.arxiv}}`)
-      if (d.pages) lines.push(`  pages     = {${d.pages}}`)
-      if (d.volume) lines.push(`  volume    = {${d.volume}}`)
-      if (d.publisher) lines.push(`  publisher = {${d.publisher}}`)
-      if (d.url) lines.push(`  url       = {${d.url}}`)
-      const t = ['article', 'book', 'inproceedings', 'incollection', 'phdthesis'].includes(type)
-        ? type
-        : 'misc'
-      return `@${t}{${key},\n${lines.join(',\n')}\n}`
+      if (d.doi) lines.push(`  doi       = {${escBib(d.doi)}}`)
+      if (d.arxiv) lines.push(`  eprint    = {${escBib(d.arxiv)}}`)
+      if (d.pages) lines.push(`  pages     = {${escBib(d.pages)}}`)
+      if (d.volume) lines.push(`  volume    = {${escBib(d.volume)}}`)
+      if (d.publisher) lines.push(`  publisher = {${escBib(d.publisher)}}`)
+      if (d.url) lines.push(`  url       = {${escBib(d.url)}}`)
+      return `@${bibtexType(d)}{${key},\n${lines.join(',\n')}\n}`
     })
     .join('\n\n')
 }
@@ -268,34 +279,26 @@ export function humanBytes(n: number): string {
 }
 
 export function toRis(docs: Doc[]): string {
-  const ty = (d: Doc): string => {
-    const t = (d.type ?? '').toLowerCase()
-    if (t === 'article') return 'JOUR'
-    if (t === 'inproceedings' || t === 'incollection') return 'CONF'
-    if (t === 'book') return 'BOOK'
-    if (t === 'phdthesis') return 'THES'
-    return 'GEN'
-  }
   return docs
     .map((d) => {
-      const out: string[] = ['TY  - ' + ty(d)]
-      if (d.title) out.push('TI  - ' + d.title)
-      if (d.abstract) out.push('AB  - ' + d.abstract)
+      const out: string[] = ['TY  - ' + risType(d)]
+      if (d.title) out.push('TI  - ' + escRis(d.title))
+      if (d.abstract) out.push('AB  - ' + escRis(d.abstract))
       for (const a of d.authors ?? []) {
         const n = [a.last_name, a.first_name].filter(Boolean).join(', ')
-        if (n) out.push('AU  - ' + n)
+        if (n) out.push('AU  - ' + escRis(n))
       }
-      if (d.year) out.push('PY  - ' + String(d.year))
+      if (d.year) out.push('PY  - ' + escRis(String(d.year)))
       if (d.source) {
-        out.push((ty(d) === 'JOUR' ? 'JO  - ' : 'T2  - ') + d.source)
+        out.push((hasJournalField(d) ? 'JO  - ' : 'T2  - ') + escRis(d.source))
       }
-      if (d.doi) out.push('DO  - ' + d.doi)
-      if (d.pages) out.push('SP  - ' + d.pages)
-      if (d.volume) out.push('VL  - ' + d.volume)
-      if (d.issue) out.push('IS  - ' + d.issue)
-      if (d.publisher) out.push('PB  - ' + d.publisher)
-      if (d.url) out.push('UR  - ' + d.url)
-      if (d.citation_key) out.push('ID  - ' + d.citation_key)
+      if (d.doi) out.push('DO  - ' + escRis(d.doi))
+      if (d.pages) out.push('SP  - ' + escRis(d.pages))
+      if (d.volume) out.push('VL  - ' + escRis(d.volume))
+      if (d.issue) out.push('IS  - ' + escRis(d.issue))
+      if (d.publisher) out.push('PB  - ' + escRis(d.publisher))
+      if (d.url) out.push('UR  - ' + escRis(d.url))
+      if (d.citation_key) out.push('ID  - ' + escRis(d.citation_key))
       out.push('ER  - ')
       return out.join('\n')
     })

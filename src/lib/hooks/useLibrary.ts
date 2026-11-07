@@ -1,6 +1,7 @@
 import { ignoreFailure, FAILURE } from '../../../shared/failures'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Folder, Library, SyncStatus } from '../../../shared/types'
+import type { Doc, Folder, Library, SyncStatus } from '../../../shared/types'
+import { reconcileSyncWrite } from '../../../shared/libraryReconcile'
 import { describeSyncFailure } from '../offline'
 
 /**
@@ -28,6 +29,36 @@ export function useLibrary(syncOnStart: boolean, onError: (message: string | nul
    *  rather than read is a guide shown to somebody who is already signed in. */
   const [hasToken, setHasToken] = useState<boolean | null>(null)
   const [version, setVersion] = useState('')
+  /** Read synchronously, so an effect or a pull starting in this commit sees
+   *  the library that is actually on screen rather than a closure from mount. */
+  const libRef = useRef<Library | null>(null)
+  libRef.current = lib
+  /** Two pulls can overlap (start-up plus a manual click). A single boolean
+   *  used to go false as soon as the first one finished, leaving the button
+   *  showing "idle" while the second was still writing. */
+  const busyCount = useRef(0)
+
+  const applyPull = useCallback(
+    (r: { docs: Doc[]; folders: Folder[] }, started: Doc[]) => {
+      // The answer from a pull is the cloud's view of the disk. Anything the
+      // reader did in this window while it ran — a star, a restored paper, a
+      // downloaded PDF — is only in React state, so replacing the state with
+      // r.docs threw it away. The same three-way rule the main process uses
+      // protects those local edits here too; it has no trash ids to check.
+      setLib((l) => ({
+        docs: reconcileSyncWrite({
+          started,
+          proposed: r.docs,
+          current: l?.docs ?? null,
+          trashedIds: new Set<string>()
+        }),
+        folders: r.folders,
+        syncedAt: new Date().toISOString()
+      }))
+      setFolders(r.folders)
+    },
+    []
+  )
 
   useEffect(() => {
     window.api.loadLibrary().then((r) => {
@@ -46,28 +77,33 @@ export function useLibrary(syncOnStart: boolean, onError: (message: string | nul
    *  only visible to a full one, which is why that stays one click away. */
   const sync = useCallback(
     async (full = false) => {
+      const started = libRef.current?.docs ?? []
+      busyCount.current++
       setBusy(true)
       onError(null)
-      const r = await window.api.sync(full)
-      if (r && 'error' in r) {
-        // Read the failure before reporting it.  "同步失败，可能需要导入 token"
-        // was the same sentence for a dead network as for an expired
-        // credential, and it never mentioned the library still on screen —
-        // which is the thing a reader who has just lost the cloud wants to be
-        // told.  This program was built so that losing it does not lose the
-        // papers, and the message now says so.
-        onError(describeSyncFailure(r.error, lib?.docs.length ?? 0).text)
-      } else if (r) {
-        setLib({ docs: r.docs, folders: r.folders, syncedAt: new Date().toISOString() })
-        setFolders(r.folders)
+      try {
+        const r = await window.api.sync(full)
+        if (r && 'error' in r) {
+          // Read the failure before reporting it.  "同步失败，可能需要导入 token"
+          // was the same sentence for a dead network as for an expired
+          // credential, and it never mentioned the library still on screen —
+          // which is the thing a reader who has just lost the cloud wants to be
+          // told.  This program was built so that losing it does not lose the
+          // papers, and the message now says so.
+          onError(describeSyncFailure(r.error, libRef.current?.docs.length ?? 0).text)
+        } else if (r) {
+          applyPull(r, started)
+        }
+        // handed back so a caller that wants to do something *after* a
+        // successful pull (bring down missing PDFs) can tell success from a
+        // failure without asking the API twice
+        return r
+      } finally {
+        busyCount.current--
+        setBusy(busyCount.current > 0)
       }
-      setBusy(false)
-      // handed back so a caller that wants to do something *after* a
-      // successful pull (bring down missing PDFs) can tell success from a
-      // failure without asking the API twice
-      return r
     },
-    [onError, lib]
+    [onError, applyPull]
   )
 
   /**
@@ -91,12 +127,12 @@ export function useLibrary(syncOnStart: boolean, onError: (message: string | nul
   useEffect(() => {
     if (!syncOnStart || hasToken !== true || startedSync.current) return
     startedSync.current = true
+    const started = libRef.current?.docs ?? []
     window.api
       .sync(false)
       .then((r) => {
         if (r && !('error' in r)) {
-          setLib({ docs: r.docs, folders: r.folders, syncedAt: new Date().toISOString() })
-          setFolders(r.folders)
+          applyPull(r, started)
           // The papers are not the only thing with a cloud copy. A highlight
           // made on another machine, or one drawn here but not uploaded yet,
           // used to wait until somebody opened that PDF and pressed the button.
@@ -110,7 +146,7 @@ export function useLibrary(syncOnStart: boolean, onError: (message: string | nul
         /* a start-up pull that failed is not news: the cached library is
            still on screen, and the button says when it last worked */
       })
-  }, [syncOnStart, hasToken])
+  }, [syncOnStart, hasToken, applyPull])
 
   /** A token has just been imported.  The answer is asserted rather than
    *  asked again, because the guide is waiting on it and a round trip through

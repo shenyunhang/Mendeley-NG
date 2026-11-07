@@ -8,10 +8,13 @@ import type { Doc } from '../../shared/types'
  *  the mapping is SQLCipher-encrypted, so the only way to attach a PDF to its
  *  record is to match on the title. */
 
+/** Match key for a title. CJK letters are kept: a library of Chinese papers
+ *  used to produce an empty key for every one of them, so no local PDF could
+ *  ever be attached. Same character class as the citation key stem (175). */
 const KEY = (s: string) =>
   (s || '')
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '')
+    .replace(/[^a-z0-9\u3400-\u9fff]+/g, '')
     .slice(0, 120)
 
 export interface ParsedName {
