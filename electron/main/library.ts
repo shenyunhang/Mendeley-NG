@@ -1,8 +1,9 @@
 import fs from 'node:fs'
 import { Mendeley, findToken, type Token } from './mendeley'
 import { attachPdfs } from './pdfindex'
-import { loadConfig, loadLibrary, saveConfig, saveLibrary } from './store'
+import { loadConfig, loadLibrary, saveConfig, saveLibraryFromSync } from './store'
 import { status } from './window'
+import { reconcileSyncWrite } from '../../shared/libraryReconcile'
 
 /**
  * The API client, made once.
@@ -36,12 +37,19 @@ export async function sync(full: boolean) {
   // timestamp is already a "before the request" stamp, which is exactly what
   // a since filter wants.
   const since =
-    !full && prev?.syncedAt
+    !full && prev?.syncedAt && Date.parse(prev.syncedAt) > 0
       ? new Date(Date.parse(prev.syncedAt) - SYNC_OVERLAP_MS).toISOString()
       : undefined
 
   status({ phase: 'folders', done: 0, total: 0, message: '拉取文件夹' })
   const folders = await c.allFolders()
+
+  // `/deleted_documents` is a 404, so GET /trash is the only deletion
+  // channel the API has. Ask on every pull, not just a full one: a document
+  // an earlier race wrote back must disappear on the very next incremental
+  // sync, not wait for somebody to press the full button.
+  status({ phase: 'documents', done: 0, total: 0, message: '核对回收站' })
+  const trashedIds = new Set((await c.listTrash()).map((d) => d.id))
 
   const label = since ? '拉取改动' : '拉取文献'
   status({ phase: 'documents', done: 0, total: 0, message: label })
@@ -92,7 +100,19 @@ export async function sync(full: boolean) {
     }
   }
 
-  saveLibrary(docs, folders)
+  // A pull runs for seconds or minutes, and everything it writes comes from
+  // the snapshot taken at the top. Re-read the cache now and let one rule
+  // decide what may be written: a paper trashed while this was in flight
+  // must not be resurrected, a paper imported locally must not be dropped,
+  // and anything in the cloud trash must not come back at all.
+  const current = loadLibrary()
+  const finalDocs = reconcileSyncWrite({
+    started: prev?.docs ?? [],
+    proposed: docs,
+    current: current?.docs ?? null,
+    trashedIds
+  })
+  saveLibraryFromSync(finalDocs, folders)
   // Read again rather than carrying the `cfg` from the top of the function:
   // a sync runs for seconds, and everything the reader changed while it ran —
   // a column pressed, a pane dragged, a sort chosen — would be written back
@@ -101,13 +121,13 @@ export async function sync(full: boolean) {
   saveConfig({ ...loadConfig(), lastSync: new Date().toISOString() })
   status({
     phase: 'done',
-    done: docs.length,
-    total: docs.length,
+    done: finalDocs.length,
+    total: finalDocs.length,
     message: since
-      ? `增量同步：改动 ${changed.length} 条，共 ${docs.length} 条文献（删除只在全量同步时发现）`
-      : `同步完成：${docs.length} 条文献，${folders.length} 个文件夹，本地 PDF 匹配 ${pdf.matched}/${pdf.total}`
+      ? `增量同步：改动 ${changed.length} 条，回收站对账 ${trashedIds.size} 条，共 ${finalDocs.length} 条文献`
+      : `同步完成：${finalDocs.length} 条文献，${folders.length} 个文件夹，本地 PDF 匹配 ${pdf.matched}/${pdf.total}，回收站对账 ${trashedIds.size} 条`
   })
-  return { docs, folders }
+  return { docs: finalDocs, folders }
 }
 
 /**

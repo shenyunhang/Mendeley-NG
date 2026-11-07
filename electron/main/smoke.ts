@@ -91,6 +91,10 @@ import { folderForOpenedDoc } from '../../src/lib/folderForDoc'
 // The list column and the details pane both answer "when did this join the
 // library?" with the same day, extracted from Mendeley's `created` (180).
 import { shortDate } from '../../shared/shortDate'
+// A pull used to overwrite the cache with the snapshot it took at the start,
+// resurrecting papers trashed while it was in flight. The write is a
+// three-way decision now, checked here with fixed arrays (181).
+import { reconcileSyncWrite } from '../../shared/libraryReconcile'
 import { describeSyncFailure } from '../../src/lib/offline'
 // One short-lived message and one pending clear, checked with a clock that
 // is advanced by hand: a timeout that outlives the message that asked for it
@@ -4793,6 +4797,132 @@ export async function runSmoke() {
         /readOnly/.test(panelSrc) &&
         /title=\{doc\.created \?\? ''\}/.test(panelSrc),
       { panel: panelSrc.length > 0 }
+    )
+  }
+
+  // A pull can run for minutes. While it talked to Mendeley the reader may
+  // have trashed a paper or imported one; the old sync wrote the starting
+  // snapshot straight back, so the trashed paper came back and stayed until
+  // a full pull. The old merge is copied verbatim below so the control is a
+  // real comparison, not an assertion about a rule nobody ran (181).
+  {
+    type D = { id: string; tag?: string }
+    const d = (id: string, tag?: string): D => (tag ? { id, tag } : { id })
+    const empty = new Set<string>()
+    const legacyWrite = (started: D[], proposed: D[]): D[] => {
+      const byId = new Map(started.map((x) => [x.id, x]))
+      for (const x of proposed) byId.set(x.id, x)
+      return [...byId.values()]
+    }
+    const reconcile = (
+      started: D[],
+      proposed: D[],
+      current: D[] | null,
+      trashedIds = empty
+    ) => reconcileSyncWrite({ started, proposed, current, trashedIds })
+
+    const started = [d('A'), d('B')]
+    const proposed = [d('A'), d('B')]
+    const currentAfterTrash = [d('B')]
+    const fixed = reconcile(started, proposed, currentAfterTrash)
+    const old = legacyWrite(started, proposed)
+    expect(
+      'the old sync really resurrects a paper trashed mid-pull',
+      old.some((x) => x.id === 'A') &&
+        !fixed.some((x) => x.id === 'A') &&
+        fixed.length === 1,
+      { old: old.map((x) => x.id), fixed: fixed.map((x) => x.id) }
+    )
+    expect(
+      'the reconcile keeps documents added locally during the pull',
+      (() => {
+        const r = reconcile([d('A')], [d('A'), d('C')], [d('A'), d('X')])
+        const ids = new Set(r.map((x) => x.id))
+        return ids.size === 3 && ids.has('A') && ids.has('C') && ids.has('X')
+      })(),
+      {}
+    )
+    expect(
+      'the reconcile drops cloud deletions, trash and written-back residue',
+      (() => {
+        const cloudDel = reconcile([d('A'), d('B')], [d('A')], [d('A'), d('B')])
+        const trashed = reconcile([d('A')], [d('A')], [d('A')], new Set(['A']))
+        const residue = reconcile(started, proposed, started, new Set(['A']))
+        return (
+          cloudDel.length === 1 && cloudDel[0].id === 'A' &&
+          trashed.length === 0 &&
+          residue.length === 1 && residue[0].id === 'B'
+        )
+      })(),
+      {}
+    )
+    expect(
+      'a locally added paper that went to the trash does not sneak back',
+      reconcile([d('A')], [d('A')], [d('A'), d('X')], new Set(['X']))
+        .every((x) => x.id === 'A'),
+      {}
+    )
+    expect(
+      'with no cache file yet the cloud answer is still filtered by trash',
+      reconcile([], [d('A'), d('B')], null, new Set(['A']))
+        .map((x) => x.id)
+        .join(',') === 'B',
+      {}
+    )
+    expect(
+      'the reconcile does not mutate any input array or set',
+      (() => {
+        const s = [d('A'), d('B')]
+        const p = [d('A'), d('B')]
+        const c = [d('B')]
+        const t = new Set(['B'])
+        const snap = JSON.stringify({ s, p, c, t: [...t] })
+        reconcile(s, p, c, t)
+        return JSON.stringify({ s, p, c, t: [...t] }) === snap
+      })(),
+      {}
+    )
+
+    const reconcileRoot = path.join(__dirname, '../..')
+    const libSrc = fs.readFileSync(
+      path.join(reconcileRoot, 'electron/main/library.ts'),
+      'utf8'
+    )
+    const storeSrc = fs.readFileSync(
+      path.join(reconcileRoot, 'electron/main/store.ts'),
+      'utf8'
+    )
+    const fromSyncCalls = (text: string) =>
+      (text.match(/saveLibraryFromSync\(/g) ?? []).length
+    const oldWrite = 'let docs = since ? [...byId.values()] : changed\n  saveLibrary(docs, folders)'
+    const wiredWrite = 'saveLibraryFromSync(finalDocs, folders)'
+    expect(
+      'the wiring detector can tell the old unconditional write from the new one',
+      fromSyncCalls(oldWrite) === 0 && fromSyncCalls(wiredWrite) === 1,
+      { old: fromSyncCalls(oldWrite), wired: fromSyncCalls(wiredWrite) }
+    )
+    expect(
+      'the sync asks the cloud trash on every pull and no longer says only a full pull finds deletions',
+      (libSrc.match(/listTrash\(\)/g) ?? []).length === 1 &&
+        libSrc.includes('回收站对账') &&
+        !libSrc.includes('删除只在全量同步时发现') &&
+        /Date\.parse\(prev\.syncedAt\) > 0/.test(libSrc),
+      { trashCalls: (libSrc.match(/listTrash\(\)/g) ?? []).length }
+    )
+    expect(
+      'the sync reconciles before writing and returns the reconciled list',
+      (libSrc.match(/reconcileSyncWrite\(/g) ?? []).length === 1 &&
+        fromSyncCalls(libSrc) === 1 &&
+        !libSrc.includes('saveLibrary(docs, folders)') &&
+        libSrc.includes('return { docs: finalDocs, folders }'),
+      { reconcile: (libSrc.match(/reconcileSyncWrite\(/g) ?? []).length }
+    )
+    expect(
+      'local writes keep the watermark and only a real sync advances it',
+      /prev\?\.syncedAt \?\? new Date\(0\)\.toISOString\(\)/.test(storeSrc) &&
+        (storeSrc.match(/export function saveLibraryFromSync/g) ?? []).length === 1 &&
+        storeSrc.includes('writeLibrary(docs, folders, new Date().toISOString())'),
+      { bytes: storeSrc.length }
     )
   }
 

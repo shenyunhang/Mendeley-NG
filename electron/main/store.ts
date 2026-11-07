@@ -59,16 +59,32 @@ export function loadLibrary(): Library | null {
   }
 }
 
-export function saveLibrary(docs: Doc[], folders: Folder[]) {
+function writeLibrary(docs: Doc[], folders: Folder[], syncedAt: string) {
   // write-then-rename so an interrupted write cannot leave a half file behind
   const tmp = libFile() + '.tmp'
-  const lib: Library = {
-    docs,
-    folders,
-    syncedAt: new Date().toISOString()
-  }
+  const lib: Library = { docs, folders, syncedAt }
   fs.writeFileSync(tmp, JSON.stringify(lib), 'utf-8')
   fs.renameSync(tmp, libFile())
+}
+
+/**
+ * A local edit, not a sync.
+ *
+ * `syncedAt` is the watermark the next incremental pull starts from. Every
+ * local write used to stamp it with "now", so trashing a paper, editing a
+ * field or dropping a PDF silently told the next pull "everything before
+ * this moment is already known" — the 60 s overlap was the only thing left
+ * covering changes made on another machine. A cache with no real sync yet
+ * gets the epoch, which `sync()` reads as "do a full pull".
+ */
+export function saveLibrary(docs: Doc[], folders: Folder[]) {
+  const prev = loadLibrary()
+  writeLibrary(docs, folders, prev?.syncedAt ?? new Date(0).toISOString())
+}
+
+/** Only a completed pull is allowed to advance the incremental watermark. */
+export function saveLibraryFromSync(docs: Doc[], folders: Folder[]) {
+  writeLibrary(docs, folders, new Date().toISOString())
 }
 
 export function loadAnnotations(): Annotation[] {
