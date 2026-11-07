@@ -1,4 +1,5 @@
 import type { Author, Doc } from '../../shared/types'
+import { citationKeyStem } from './citeKey'
 import { toBibtex } from './export'
 
 /**
@@ -86,12 +87,10 @@ const allAuthors = (d: Doc): string =>
   (d.authors ?? []).map(fullName).filter(Boolean).join(', ') || 'Anon'
 
 /** A key to fall back on when the document has no citation_key of its own.
- *  Mirrors what the BibTeX export synthesises, so the two agree. */
-const syntheticKey = (d: Doc): string => {
-  const a = (d.authors ?? [])[0]
-  const last = (surname(a ?? {}) || 'anon').replace(/[^A-Za-z\u3400-\u9fff]/g, '') || 'anon'
-  return (last.toLowerCase() + (d.year ?? '')) || 'anon'
-}
+ *  The stem is shared with the BibTeX export, so the two really do agree;
+ *  only the way the surname is picked belongs to this side. */
+const syntheticKey = (d: Doc): string =>
+  citationKeyStem(surname((d.authors ?? [])[0] ?? {}), d.year)
 
 const one = (d: Doc, style: CiteStyle): string => {
   switch (style) {

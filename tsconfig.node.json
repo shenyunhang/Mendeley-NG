@@ -18,6 +18,8 @@
     "electron.vite.config.ts",
     "src/lib/bitmapPixelSize.ts",
     "src/lib/cardSpot.ts",
+    "src/lib/cite.ts",
+    "src/lib/citeKey.ts",
     "src/lib/documentScope.ts",
     "src/lib/export.ts",
     "src/lib/findScan.ts",

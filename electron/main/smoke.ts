@@ -57,9 +57,18 @@ import { PrefetchCache, StaleFlight } from '../../src/lib/pdfcache'
 import {
   humanBytes,
   toAnnotationsMarkdown,
+  toBibtex,
+  toEndnoteXml,
   toExitReadme,
   toNotesMarkdown
 } from '../../src/lib/export'
+// A copied \cite{...} and an exported BibTeX key are supposed to name the
+// same paper, and they did not for a Chinese surname: one rule kept CJK
+// letters, the other stripped them to `anon`. The stem is shared now; the
+// disambiguation letter and the way the surname is picked stay with their
+// callers (175).
+import { formatCitation } from '../../src/lib/cite'
+import { citationKeyStem } from '../../src/lib/citeKey'
 import { describeSyncFailure } from '../../src/lib/offline'
 // One short-lived message and one pending clear, checked with a clock that
 // is advanced by hand: a timeout that outlives the message that asked for it
@@ -4126,6 +4135,145 @@ export async function runSmoke() {
         saving: (panelSrc.match(/setSaving\(false\)/g) ?? []).length,
         dirty: (panelSrc.match(/noteDirty\.current = false/g) ?? []).length
       }
+    )
+  }
+
+  // A \cite{...} pasted into a manuscript and the key of a BibTeX entry
+  // exported from the same paper used to be built by two different rules:
+  // cite.ts kept CJK letters, export.ts kept ASCII only. A Chinese surname
+  // therefore produced 张三2023 in one place and anon2023a in the other.
+  // Only the stem is shared now — the disambiguation letter belongs to a
+  // whole-file export, and the way the surname is picked belongs to the
+  // caller (175).
+  {
+    const doc = (id: string, last: string | undefined, year: Doc['year']): Doc => ({
+      id,
+      title: 'A paper',
+      authors: last === undefined ? [] : [{ last_name: last }],
+      year
+    })
+    const zh = doc('zh', '张三', 2023)
+    const smith = doc('smith', 'Smith', 2023)
+
+    // The two pre-fix rules, copied verbatim. Name parsing is not copied:
+    // each caller hands the stem the string it chose, so this comparison is
+    // about the stem rule and nothing else.
+    const legacyCiteStem = (last: string, year: Doc['year']) =>
+      ((last || 'anon').replace(/[^A-Za-z\u3400-\u9fff]/g, '') || 'anon').toLowerCase() +
+      (year ?? '')
+    const legacyExportKey = (last: string, year: Doc['year'], i: number) =>
+      ((last || '').replace(/[^A-Za-z]/g, '') || 'anon').toLowerCase() +
+      (year ?? '') + String.fromCharCode(97 + (i % 26))
+
+    expect(
+      'the two old rules really disagree about a Chinese surname',
+      legacyCiteStem('张三', 2023) === '张三2023' &&
+        legacyExportKey('张三', 2023, 0) === 'anon2023a' &&
+        citationKeyStem('张三', 2023) === '张三2023',
+      {
+        copied: legacyCiteStem('张三', 2023),
+        exported: legacyExportKey('张三', 2023, 0),
+        shared: citationKeyStem('张三', 2023)
+      }
+    )
+
+    const lasts = [
+      '', 'anon', 'Smith', "O'Brien", 'Van der Berg', '张三', '王-小明',
+      '李 四', 'Ångström', '123', 'a!b@c', '中文Mixed2023'
+    ]
+    const years: (number | null | undefined)[] = [undefined, null, 0, 1, 1999, 2023, -5, 3.5]
+    let checked = 0
+    let cjkChecked = 0
+    let cjkChanged = 0
+    const citeDrift: string[] = []
+    const asciiDrift: string[] = []
+    for (const last of lasts) {
+      for (const year of years) {
+        const stem = citationKeyStem(last, year)
+        const oldCite = legacyCiteStem(last, year)
+        const oldExport = legacyExportKey(last, year, 0).slice(0, -1)
+        checked++
+        if (!Object.is(stem, oldCite)) citeDrift.push(last + ':' + String(year))
+        if (/[\u3400-\u9fff]/.test(last)) {
+          cjkChecked++
+          if (stem !== oldExport) cjkChanged++
+        } else if (stem !== oldExport) {
+          asciiDrift.push(last + ':' + String(year))
+        }
+      }
+    }
+    expect(
+      'the shared stem answers the old citation rule for every sampled input',
+      checked === lasts.length * years.length && citeDrift.length === 0,
+      { checked, drift: citeDrift.slice(0, 6) }
+    )
+    expect(
+      'ASCII surnames are exported exactly as before',
+      asciiDrift.length === 0,
+      { drift: asciiDrift.slice(0, 6) }
+    )
+    expect(
+      'CJK surnames are the only ones whose exported key changed',
+      cjkChecked > 0 && cjkChanged === cjkChecked,
+      { cjkChecked, cjkChanged }
+    )
+
+    const keyPaste = formatCitation([zh], 'key')
+    const bib = toBibtex([zh])
+    const endnote = toEndnoteXml([zh])
+    const bibKey = (bib.match(/^@\w+\{([^,]+),/m) ?? [])[1] ?? ''
+    const refId = (endnote.match(/<ref-id>([^<]*)<\/ref-id>/) ?? [])[1] ?? ''
+    expect(
+      'a copied key and an exported BibTeX key now name the same paper',
+      keyPaste === '\\cite{张三2023}' && bibKey === '张三2023a',
+      { keyPaste, bibKey }
+    )
+    expect('EndNote ref-id follows the same stem', refId === '张三2023a', { refId })
+
+    const twoKeys = toBibtex([smith, doc('smith2', 'Smith', 2023)])
+    expect(
+      'two papers with the same stem still get different export keys',
+      twoKeys.includes('smith2023a') &&
+        twoKeys.includes('smith2023b') &&
+        formatCitation([smith], 'key') === '\\cite{smith2023}',
+      { pasted: formatCitation([smith], 'key'), twoKeys: twoKeys.slice(0, 60) }
+    )
+
+    const keyRoot = path.join(__dirname, '../..')
+    const citeSrc = fs.readFileSync(path.join(keyRoot, 'src/lib/cite.ts'), 'utf8')
+    const exportSrc = fs.readFileSync(path.join(keyRoot, 'src/lib/export.ts'), 'utf8')
+    const sharedSrc = fs.readFileSync(path.join(keyRoot, 'src/lib/citeKey.ts'), 'utf8')
+    const stemCalls = (t: string) => (t.match(/citationKeyStem\(/g) ?? []).length
+    const oldExportLine =
+      "const last = (a?.last_name ?? '').replace(/[^A-Za-z]/g, '') || 'anon'"
+    const asciiOnly = (t: string) => /\.replace\(\/\[\^A-Za-z\]\/g, ''\)/.test(t)
+    expect(
+      'the leftover detector really catches the old ASCII-only filter',
+      asciiOnly(oldExportLine) && !asciiOnly(exportSrc) && !asciiOnly(citeSrc),
+      { onOld: asciiOnly(oldExportLine), onExport: asciiOnly(exportSrc) }
+    )
+    expect(
+      'both callers use the shared stem once and keep their own decisions',
+      stemCalls(citeSrc) === 1 &&
+        stemCalls(exportSrc) === 1 &&
+        /from '[^']*citeKey'/.test(citeSrc) &&
+        /from '[^']*citeKey'/.test(exportSrc) &&
+        exportSrc.includes('String.fromCharCode(97 + (i % 26))') &&
+        // count call sites, not the declaration: `function surnameKey(`
+        // would otherwise be a third hit (169)
+        (exportSrc.match(/\|\| surnameKey\(/g) ?? []).length === 2,
+      {
+        citeCalls: stemCalls(citeSrc),
+        exportCalls: stemCalls(exportSrc),
+        surnameKeyCalls: (exportSrc.match(/\|\| surnameKey\(/g) ?? []).length
+      }
+    )
+    expect(
+      'the shared module owns neither the suffix nor the name choice',
+      !sharedSrc.includes('String.fromCharCode') &&
+        !sharedSrc.includes('surname(') &&
+        sharedSrc.includes('\\u3400-\\u9fff'),
+      { present: sharedSrc.length > 0 }
     )
   }
 

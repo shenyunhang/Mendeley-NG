@@ -1,4 +1,5 @@
 import type { Annotation, Doc } from '../../shared/types'
+import { citationKeyStem } from './citeKey'
 
 /** EndNote ref-type name and its numeric code, which the desktop importer
  *  still relies on.  The names are the ones import.ts maps back from, so a
@@ -27,10 +28,14 @@ const el = (name: string, v?: string | number | null): string =>
     ? ''
     : `<${name}>${esc(String(v))}</${name}>`
 
+/** BibTeX and EndNote both need a key when the paper has no citation_key.
+ *  The stem is shared with the `\cite{...}` a reader copies; only the
+ *  disambiguation letter belongs to a whole-file export. */
 function surnameKey(d: Doc, i: number): string {
-  const a = d.authors?.[0]
-  const last = (a?.last_name ?? '').replace(/[^A-Za-z]/g, '') || 'anon'
-  return last.toLowerCase() + (d.year ?? '') + String.fromCharCode(97 + (i % 26))
+  return (
+    citationKeyStem(d.authors?.[0]?.last_name ?? '', d.year) +
+    String.fromCharCode(97 + (i % 26))
+  )
 }
 
 function authorsFlat(d: Doc): string {
