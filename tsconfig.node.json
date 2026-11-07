@@ -25,6 +25,7 @@
     "src/lib/export.ts",
     "src/lib/findScan.ts",
     "src/lib/flash.ts",
+    "src/lib/folderForDoc.ts",
     "src/lib/lazyPages.ts",
     "src/lib/latestSearch.ts",
     "src/lib/listBlank.ts",

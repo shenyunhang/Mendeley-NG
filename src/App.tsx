@@ -10,6 +10,7 @@ import type {
 } from '../shared/types'
 import { DEFAULT_PDF_TEMPLATE } from '../shared/types'
 import { clampFullTextPages } from '../shared/fullTextPages'
+import { folderForOpenedDoc } from './lib/folderForDoc'
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
 import TrashedDocPanel from './components/TrashedDocPanel'
@@ -1687,6 +1688,13 @@ export default function App() {
       onOpenDoc={(id) => {
         setSelId(id)
         setRightTab('pdf')
+        // A reference that is already on the shelf opens in place. Bring the
+        // folder tree with it: otherwise the tree keeps pointing at a folder
+        // that may not even contain the paper now on screen. `folderId` is
+        // both the highlight and the list filter, so moving it keeps what is
+        // shown and what is selected the same thing (171).
+        setFolderId(folderForOpenedDoc(docs.find((d) => d.id === id), folderId, folders))
+        setActiveSearch(null)
       }}
     />
   ) : null

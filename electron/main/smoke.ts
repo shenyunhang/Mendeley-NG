@@ -83,6 +83,10 @@ import { citationKeyStem } from '../../src/lib/citeKey'
 // decision "was this click on a row?" has to be made on the target. The rule
 // is shared and takes the row class as a parameter (177).
 import { isListBlank } from '../../src/lib/listBlank'
+// Opening a reference that is already in the library has to bring the folder
+// tree with it. Which folder is chosen is a pure rule, checked here with
+// fixed documents and folders (178).
+import { folderForOpenedDoc } from '../../src/lib/folderForDoc'
 import { describeSyncFailure } from '../../src/lib/offline'
 // One short-lived message and one pending clear, checked with a clock that
 // is advanced by hand: a timeout that outlives the message that asked for it
@@ -4544,6 +4548,118 @@ export async function runSmoke() {
         inCards: blankCalls(cardsSrc),
         wired: (appSrc.match(/onClearSelection=\{clearSelection\}/g) ?? []).length
       }
+    )
+  }
+
+  // Opening a paper from a citation popover or an in-PDF link used to leave
+  // the folder tree pointing at whatever folder was selected before — which
+  // may not contain the paper now on screen. `folderId` is both the highlight
+  // and the list filter, so moving it keeps the two in step (178).
+  {
+    const folders = [
+      { id: 'f1', name: 'One' },
+      { id: 'f2', name: 'Two' }
+    ]
+    const doc = (ids?: string[]): Doc => ({ id: 'd', ...(ids ? { folder_uuids: ids } : {}) })
+    expect(
+      'a paper in no folder clears the folder instead of leaving a wrong one',
+      folderForOpenedDoc(doc(), 'f1', folders) === null &&
+        folderForOpenedDoc(undefined, 'f1', folders) === null,
+      { withEmpty: folderForOpenedDoc(doc(), 'f1', folders) }
+    )
+    expect(
+      'a paper already inside the folder on screen leaves that folder alone',
+      folderForOpenedDoc(doc(['f1', 'f2']), 'f2', folders) === 'f2',
+      { kept: folderForOpenedDoc(doc(['f1', 'f2']), 'f2', folders) }
+    )
+    expect(
+      'otherwise the first folder that still exists wins',
+      folderForOpenedDoc(doc(['f1', 'f2']), null, folders) === 'f1' &&
+        folderForOpenedDoc(doc(['gone', 'f2']), null, folders) === 'f2',
+      { multiple: folderForOpenedDoc(doc(['f1', 'f2']), null, folders) }
+    )
+    expect(
+      'a folder that was deleted cannot be selected',
+      folderForOpenedDoc(doc(['gone', 'also-gone']), 'f1', folders) === null,
+      { gone: folderForOpenedDoc(doc(['gone']), 'f1', folders) }
+    )
+    expect(
+      'the rule does not mutate the document or the folder list',
+      (() => {
+        const d = doc(['f1'])
+        const f = folders.slice()
+        const out = folderForOpenedDoc(d, 'f2', f)
+        return out === 'f1' && JSON.stringify(d.folder_uuids) === '["f1"]' && f.length === 2
+      })(),
+      {}
+    )
+
+    const folderRoot = path.join(__dirname, '../..')
+    const appText = fs.readFileSync(path.join(folderRoot, 'src/App.tsx'), 'utf8')
+    const treeText = fs.readFileSync(path.join(folderRoot, 'src/components/FolderTree.tsx'), 'utf8')
+    const locateCalls = (t: string) => (t.match(/folderForOpenedDoc\(/g) ?? []).length
+    const oldOpen = "onOpenDoc={(id) => {setSelId(id);setRightTab('pdf')}}"
+    const wiredOpen = 'setFolderId(folderForOpenedDoc('
+    expect(
+      'the wiring detector can really see the folder lookup',
+      locateCalls(oldOpen) === 0 && locateCalls(wiredOpen) === 1,
+      { old: locateCalls(oldOpen), wired: locateCalls(wiredOpen) }
+    )
+    expect(
+      'the app calls the folder lookup exactly once',
+      locateCalls(appText) === 1,
+      { lookups: locateCalls(appText) }
+    )
+    const openBlock = (appText.match(/onOpenDoc=\{\(id\) => \{[\s\S]*?\n      \}\}/) ?? [])[0] ?? ''
+    expect(
+      'the citation-open handler itself moves the folder and clears a saved search',
+      openBlock.includes('folderForOpenedDoc(') &&
+        openBlock.includes('setFolderId(') &&
+        openBlock.includes('setActiveSearch(null)'),
+      { block: openBlock.slice(0, 180) }
+    )
+    expect(
+      'the tree highlight and the list filter are still the same state',
+      (appText.match(/selected=\{folderId\}/g) ?? []).length === 1 &&
+        treeText.includes('selected === f.id'),
+      { tree: treeText.includes('selected === f.id') }
+    )
+
+    // The other half of the chain: moving folderId really does highlight a
+    // row in the tree. Put the previous folder back afterwards, so the rest
+    // of the run starts from where it was.
+    const folderUi = JSON.parse(
+      await w.webContents.executeJavaScript(
+        '(async()=>{'
+        + 'const wait=(m)=>new Promise(r=>setTimeout(r,m));'
+        + 'const rows=()=>[...document.querySelectorAll(".folder-row")];'
+        + 'if(rows().length<2)return JSON.stringify({error:"too few folders",n:rows().length});'
+        + 'const nameOf=(r)=>((r.querySelector(".name")||{}).textContent||"").trim();'
+        + 'const before=document.querySelector(".folder-row.sel");'
+        + 'const beforeName=before?nameOf(before):"";'
+        + 'const pick=rows().slice(1).find(r=>!r.classList.contains("sel"));'
+        + 'if(!pick)return JSON.stringify({error:"no other folder"});'
+        + 'pick.click();await wait(400);'
+        + 'const after=document.querySelectorAll(".folder-row.sel").length;'
+        + 'const picked=(document.querySelector(".folder-row.sel")||{});'
+        + 'const pickedName=picked?nameOf(picked):"";'
+        + 'const back=rows().find(r=>nameOf(r)===beforeName);'
+        + 'if(back)back.click();await wait(400);'
+        + 'return JSON.stringify({n:rows().length,beforeName,after,pickedName,'
+        + 'restored:((document.querySelector(".folder-row.sel")||{}).textContent||"")'
+        + '.includes(beforeName)})})()'
+      )
+    )
+    log('folder tree highlight', folderUi)
+    expect(
+      'picking a folder highlights exactly that row and can be put back',
+      folderUi.error === undefined &&
+        typeof folderUi.beforeName === 'string' && folderUi.beforeName.length > 0 &&
+        folderUi.after === 1 &&
+        typeof folderUi.pickedName === 'string' && folderUi.pickedName.length > 0 &&
+        folderUi.pickedName !== folderUi.beforeName &&
+        folderUi.restored === true,
+      folderUi
     )
   }
 
