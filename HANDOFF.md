@@ -8,8 +8,8 @@
 
 ## 0. 一页速览
 
-**还没做的：无已坐实的缺陷，也没有在飞的排期。** §9.12 的同步与删除竞态
-已由 181（v0.1.108）修掉。第 9.1 的待办已经清空，
+**还没做的：§9.13 第五轮体检排了 15 项，其中 10 项是已坐实的用户可见缺陷，
+按 184 起按序落地。** 第 9.1 的待办已经清空，
 第 9 节剩下的是竞品对照快照（9.2）、"差距可以接受，先不做"（9.3）、"明确不做"（9.4）；
 9.7 的代码审查按序推进清单已由 161–166 全部清完，只剩一个论证过的否决项（⑤）；
 9.8 的三项已由 167 / 168 / 169 清完；9.9 的两项已由 171（v0.1.98）/ 172（v0.1.99）清完；
@@ -59,7 +59,7 @@
 | 6 | Mendeley API 的怪癖（改这块之前必读） |
 | 7 | 环境与打包的坑 |
 | 8 | 功能对照：1.19.8 有什么，NG 现在有什么 |
-| 9 | **还没做的**：待办四条 · 竞品仍缺 · 可接受的差距 · 明确不做 · 代码审查排期（9.7，已清空）· 新一轮体检（9.8，已清空）· 第三轮体检（9.9，已清空）· 第四轮体检（9.10，已清空）· 启动时同步标注（9.11，已落地）· 同步与删除竞态（9.12，已落地） |
+| 9 | **还没做的**：待办四条 · 竞品仍缺 · 可接受的差距 · 明确不做 · 代码审查排期（9.7，已清空）· 新一轮体检（9.8，已清空）· 第三轮体检（9.9，已清空）· 第四轮体检（9.10，已清空）· 启动时同步标注（9.11，已落地）· 同步与删除竞态（9.12，已落地）· 第五轮体检（9.13，15 项在飞） |
 | 10 | 已落地：基础能力 1–18 · 19–94 · 95–172 |
 | 11 | 主题要点：索引 · 阅读器 · 列表与列 · 键盘焦点浮层 · 图标 · 窗口更新打包 · 确认 · 引导 · 文件夹 · 性能 · 通用 |
 
@@ -851,6 +851,42 @@ trashedIds)`——写盘前重读磁盘，剔除「同步开始时有、现在�
 从未真同步过的缓存用 epoch 0，`sync()` 读成「该走全量」。
 代价：每次同步多一次 `/trash` 分页（实测 599 条约 6 页请求）。
 验收与数据见 10.3 的 181。
+
+### 9.13 第五轮体检排期（2026-11-07，183 之后）
+
+用户「继续分析还有哪些 bug」。三路只读体检（异步与状态一致性 / 边界与数据正确性 /
+用户可见交互），再逐条回源码复核；几个推演用 Node 只加载产品源码实跑确认。
+**这一节只做诊断，仓库一行代码没改。** 按「已坐实 + 用户触达」排序，有意设计与
+仅怀疑的单列在末尾。动手前仍要按 163 / 164 / 168 / 169 的纪律再复核一次。
+
+实跑证据：`(1 << 32) - 1 === 0`、`1 << 31 === -2147483648`（32 词查询）；
+`journal → @misc` / `TY - GEN`，只有 `book` 幸存；`KEY('深度学习') === ''`。
+
+| 序 | 发现（带行号） | 判断与排期理由 |
+| --- | --- | --- |
+| ① 在飞 | `electron/main/library.ts:31-131` 与 `ipc/library.ts:35-44` 的 `library:sync` **无互斥**，`useLibrary.ts:47-71` 的手动同步与 `:90-113` 的启动同步各自独立；`startedSync` 只防启动同步自己重复 | **已坐实，最高优先**。两次同步从同一份 `prev` 起算、各自整文件写盘并推进水印：较晚完成的旧请求会把较晚发起的请求刚拉到的新论文覆盖掉，并把 `syncedAt` 推到更晚，下次增量再也拉不回；`setBusy(false)` 提前复位让按钮显示空闲，可再点出第三次并发；进度状态在两次 `status()` 之间来回跳。181 的 `reconcileSyncWrite` 只处理「一次同步 vs 本地编辑」，不处理「两次同步」。修法：主进程一次只允许一个 sync（排队或代次作废），旧代次不得落盘或推进水印；配「固定两次 Deferred 交错」的行为断言，不能只做源码文本断言 |
+| ② 在飞 | `useLibrary.ts:61` 的 `setLib({ docs: r.docs, ... })` 用 IPC 结果整体替换渲染层 state；`shared/libraryReconcile.ts:47-61` 只判断整条增删，`library.ts:108-115` 重读的 `current` 里已有文档的**字段级改动完全没有参与合并** | **已坐实**。同步 await 期间打星标、改文件夹、下载 PDF、从回收站恢复，`r.docs` 一概不知：星标回退、`localPdf` 回退（`library.ts:92-101` 还主动保留旧路径）；`trash:restore` 不写盘，恢复的论文在 `setLib` 后再次消失。181 只回答「这条记录该不该存在」，没回答「字段以谁为准」。修法：把 `current` 的本地字段按 id 合并进 `kept`，渲染层改成「以当前 state 为底、按 id 更新」；配「同步挂起期间做一次本地编辑、放行后断言字段仍在」的确定性用例 |
+| ③ 在飞 | `src/lib/export.ts:54,70` 与 `:271-278` 用 **BibTeX 类型名**去判断 Mendeley 的 `Doc.type`；`:61` 的 `journal/booktitle` 分支同样错 | **已坐实，日常导出必现**。`journal` / `conference_proceedings` / `thesis` / `report` 全部退化成 `@misc` 与 `TY - GEN`，只有恰好同名的 `book` 幸存；再导入回本应用变成 `generic`。期刊名永远写进 `booktitle`。对照 `toEndnoteXml` 的 `EN_TYPE[d.type]` 用的是正确命名空间。修法：一份 `Mendeley type → BibTeX/RIS 类型`映射表，两处共用；配 round-trip 断言（当前 smoke 完全没有 `toRis` / `parseBibtex` / `parseRis` 覆盖） |
+| ④ 在飞 | `src/lib/export.ts:56,73,282-297` 的 BibTeX / RIS 字段值**零转义**，`esc()` 只用于 EndNote XML | **已坐实**。标题含不对称 `}` 时 `parseBibtex` 的花括号深度提前归零，整条记录只剩半个标题，作者 / 年份 / DOI 全丢；标题含换行时 RIS 第二行不匹配 `^([A-Z][A-Z0-9])` 被直接跳过。即使平衡，`untex` 还会吃掉花括号。修法：导出侧转义 + 换行折成空格；配「特殊字符标题往返后逐字段相等」 |
+| ⑤ 在飞 | `electron/main/pdfindex.ts:11-15` 的 `KEY` 只保留 `[a-z0-9]`，`:59/:71` 对空键 `continue` | **已坐实、对本用户高频**：中文标题论文永远无法把本地 PDF 挂到记录上，`KEY('深度学习') === ''`。与 175 修的 `citeKey` 中文姓是不同文件、不同规则。修法：键保留 CJK（同 175 的字符类）；配中文标题的匹配断言 |
+| ⑥ 在飞 | `electron/main/fulltext.ts:896,899,904` 的 `1 << w` 与 `(1 << tokens.length) - 1` 是 32 位有符号位移 | **已坐实**。查询词 ≥ 32 个时 `want === 0`，所有文档被 `rec.mask !== want` 过滤，`ftSearch` 恒返回空却显示「没找到」。修法：位图换成 `BigInt` 或按词分段的计数表；配 32 / 33 词查询断言 |
+| ⑦ 在飞 | `src/App.tsx:643-683` 的 `saveSearch` 把全部筛选标签写进**名字**，但 `addSearch` 只存 `starred: filters.includes('star')`；`shared/types.ts:136-142` 的 `SavedSearch` 根本没有 `filters` 字段；`:820-836` 的 `savedCounts` 也只算星标 | **已坐实**。勾「未读」保存后再点开，侧栏名字写着「未读」、篇数是无筛选的数字、筛选菜单里「未读」未勾选，名字 / 计数 / 列表三个显示值互相矛盾（171 同族）。修法：`SavedSearch` 加 `filters` 并纳入计数。smoke 只在 `:970` 点开保存对话框后立刻取消，从未真正保存并重新应用 |
+| ⑧ 在飞 | `src/lib/hooks/useContinuousPages.ts:184-195` 的 `scrollToPage` 在 `sizesRef` 未填满时 `return` 且不重试；`PdfViewer.tsx:212-250` 换文档时清空 sizes，`:291-292` 只在 `requestAnimationFrame` 里调一次 | **已坐实**。恢复阅读位置 / 全文命中跳到第 20 页，页码框显示 20，`.pdf-cont` 的 `scrollTop` 仍是 0；用户一滚 `onScroll` 又把页码改回 1。修法：sizes 就绪后按待跳转目标重试（带代次，换论文后作废）。smoke 的 `'the reader reopens where it was left'` 只测单页模式的页码字符串。 |
+| ⑨ 在飞 | `src/App.tsx:1098-1105` 的 `pickDir` 用 `await doSync()`（增量）；`library.ts:68-77` 的 `attachPdfs` 被 `if (!since \|\| changed.length)` 短路，`:92-101` 还把旧 `localPdf` 写回 | **已坐实**。换 PDF 目录时云端通常恰好无改动（`changed.length === 0`），于是根本不按新目录重挂载：设置里路径已变、列表圆点与阅读器仍指向旧目录（甚至仍显示无 PDF），注释宣称「Changing it resyncs」与实现不符。修法：改目录强制走一次「只重挂载」路径，或让 `attachPdfs` 不受 `changed.length` 短路。 |
+| ⑩ 在飞 | `src/components/PdfViewer.tsx:108` 的 `note` state 只在 `:809` / `:1326` 两处随选中标注复位；`usePdfAnnotations.ts:187` 的 `commitHighlight` 只 `setSel(a.id)`，`:198,:293` 的 `setSel(null)` 也不碰 `note`；笔记框 `:1292` 的 `saveNote(selected.id, note)` 用当前选中 id | **已坐实**。点带笔记的 A → 拖选新建 B → 笔记框仍显示 A 的文字，按 Enter / 失焦就把 A 的笔记写到 B 上。与 ③ ② 同属「显示值与生效值分家」。修法：`note` 由 `selected` 派生，或所有 `setSel` 调用点统一复位。 |
+| ⑪ 在飞 | `electron/main/fulltext.ts:88-95` 的 `setFullTextPages` 把模块级 `meta` 置 `null`；`:287-290` 的 `saveMeta()` 读模块级 `meta`，`:520-524` 的 `fresh = meta!` 抓住旧对象，`:683` 的 finally 仍调 `saveMeta()`；`:798-812` 的 `ftClear()` 无条件替换 `meta` | **已坐实（机制）**。建索引几分钟途中改页数预算或点「清空索引」，build 的 `fresh` 与模块 `meta` 脱钩，所有 `saveMeta()` 静默跳过或写空表，而 `.dat` 仍在写文本：进度走满、磁盘躺着几十 MB，面板却显示「还没有索引」。与 §11 第 60 条讲的 `.dat` 偏移冲突相邻但不同。修法：build 期间拒绝/排队 pages 变更与 clear，或让 build 持有自己的 meta 引用并在写盘时用同一对象；配「build 未 settle 时改 pages / clear」的并发断言（当前 smoke 的 `ftClear` 全在 `await` 之后）。 |
+| ⑫ 在飞 | `electron/main/mendeley.ts:159-166`（`/documents`）、`:173-180`（`/folders`）、`:297-306`（`/annotations`）、`:353-360`（`/trash`）四个分页循环都只有 `batch.length < limit` 与 `marker = 末行.id`；182 修的 `shared/filePages.ts` 四道保护（seen / fresh===0 / next===marker / !next）一处都没用到 | **已坐实（缺口），触发依赖服务端异常**。API 忽略 marker 或末行缺 id 时，`allFolders` 会攒出 4000 个重复文件夹并原样写进 `library.json`；无效 marker 变成字符串 `"undefined"`。修法：把 `/files` 那份规则推广到四个循环，或抽一份通用分页控制器；配「恒返回同一页」的注入断言。 |
+| ⑬ 在飞 | `electron/main/store.ts:51-60` 的 `loadLibrary` 只校验 `docs` 是数组；`:47-49` 的 `saveConfig` 是裸 `writeFileSync`（其它写盘都是 tmp+rename） | **已坐实**。`folders:null` 时返回非 null，下游 `lib.folders.map/filter` 抛 TypeError 且坏值被写回自持；配置写入中途被杀留下半截 JSON，`loadConfig` 静默回退默认值、用户设置全丢。修法：补字段类型校验、config 改原子写。 |
+| ⑭ 在飞 | `src/App.tsx:284` 的 `openTrash` 与 `:1407` 的 `openNotes` 用值形式 `setView(...)`，无代次 / 无取消 | **已坐实**。`listTrash` 走网络期间用户切到 reader 或全文视图，响应一回来就把中间区域强行拽回回收站 / 笔记视图。同文件 `:291-293` 的 `restoreTrashed` 已经写对了 `setView((v) => v.kind === 'trash' ? ... : v)`，这两处没跟上。 |
+| ⑮ 在飞 | `src/App.tsx:1278-1332` 的 `batchDownload` 无「已有下载在跑」检查，`dlStop` 是共享 ref | **已坐实**。默认开启「同步时下载 PDF」后连点两次同步，两次 `need` 是同一批、同一 `docId` 被下载两次，生成 `xxx (2).pdf`、`dlRun` 进度互相覆盖、两个 `reportBatch` 给出矛盾数字。修法：一次只允许一个下载批次（或按 docId 去重），配计数桩断言。 |
+
+复核后**明确排除 / 标为仅怀疑**，避免下一轮照着去修不存在的东西：
+
+- **排除（有意设计）**：`App.tsx:576-601` 的 `filterCounts` 用「不含 filters 的 base」数每个开关，注释写明是「按下之前判断」；多开关下数字偏大是设计取舍，不是 bug。`ipc/library.ts:52-53` 的 `config:set` 与 `library.ts:121` 的 sync 都在写前重读 config，`config:set` 与 sync 同时写不会丢（两个 agent 都推演过，结论一致）。`docs.ts` / `files.ts` 的 12 处 `saveLibrary` 都是「网络 await 在前、`load → save` 之间无 yield」，不构成 181 那种覆盖；`smoke.ts:4968` 的 `oldWrite` 是刻意保留的对照字符串，不是产品代码。
+- **仅怀疑，待实机确认**：`App.tsx` 的 `query` / `folderId` / `view.kind` 变化都不清 `multi`，批量栏可能显示「已选 5000 条」而列表只有 3 行；也可能是有意保留跨筛选批量。阅读器下打开列 / 筛选浮层按 Esc 是否误退阅读器；`setFlagsFor` 半成功只报总数不报失败数；保存的搜索高亮在用户手改查询词后不撤销；`pdfgeom.ts:58` 的 `clampScale(NaN)` 与 `posToRect` 除零、`pdfsel.ts:45-48` 的 `rectsInLayer` 除零（这几处文件在 smoke.ts 里 0 覆盖）。另有 `docs.ts:189-190` 同名 PDF 静默覆盖、`pdfname.ts:40-42` 的连字符改写 / Windows 保留名 / `.pdf.pdf`、导入同名 PDF 生成 `(2).pdf`；`fulltext.ts:254` 的 `loadMeta` 无字段校验、`:289` 的 `saveMeta` 非原子。
+- **顺带发现**：`src/App.tsx:379,682,876,1513,2280` 是 `setMulti([])` 的全部 5 个调用点，没有一个挂在筛选 / 搜索 / 视图变化上；`src/components/PdfViewer.tsx:809,1326` 是 `setNote` 的全部 2 个调用点。这与 ⑩ 的「穷举调用点」结论一致，可作为下一轮接线断言的静态基线。
+
+**排序修复建议**（按「数据正确性 > 日常高频 > 边界」）：① + ② + ⑮ 是同一族「同步 / 下载期间用户做的任何事会不会在结束瞬间消失」，应一起修并共用一次并发断言；③ ④ ⑤ ⑥ 是纯函数 / 纯映射，改动小、收益大，适合各占一轮；⑦ ⑧ ⑨ ⑩ ⑭ 是明确的用户可见分家，各一轮；⑪ ⑫ ⑬ 属健壮性，按有没有真实用户撞上再排。所有候选项在 smoke.ts 里**都没有行为断言**（最多只有源码文本断言），这正是下一轮最该补的部分。
 
 ## 10. 已落地
 
