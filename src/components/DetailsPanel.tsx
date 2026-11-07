@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Doc, Folder, MetaCandidate } from '../../shared/types'
+import { shortDate } from '../../shared/shortDate'
 import {
   createDocumentScope,
   valueForDocument,
@@ -330,6 +331,18 @@ export default function DetailsPanel({
             <input
               value={form.source}
               onChange={(e) => setForm({ ...form, source: e.target.value })}
+            />
+          </div>
+          {/* Read-only: `created` belongs to Mendeley, not to the editable
+              metadata. The day is the same value the list column shows; the
+              exact moment is one hover away. It is not part of `form`, so it
+              cannot make the save button light up. */}
+          <div className="field" style={{ flex: '0 0 108px' }}>
+            <label>加入时间</label>
+            <input
+              value={shortDate(doc.created) || '未知'}
+              readOnly
+              title={doc.created ?? ''}
             />
           </div>
         </div>

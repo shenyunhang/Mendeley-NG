@@ -88,6 +88,9 @@ import { isListBlank } from '../../src/lib/listBlank'
 // tree with it. Which folder is chosen is a pure rule, checked here with
 // fixed documents and folders (178).
 import { folderForOpenedDoc } from '../../src/lib/folderForDoc'
+// The list column and the details pane both answer "when did this join the
+// library?" with the same day, extracted from Mendeley's `created` (180).
+import { shortDate } from '../../shared/shortDate'
 import { describeSyncFailure } from '../../src/lib/offline'
 // One short-lived message and one pending clear, checked with a clock that
 // is advanced by hand: a timeout that outlives the message that asked for it
@@ -4742,6 +4745,57 @@ export async function runSmoke() {
     )
   }
 
+  // `created` has been in the library cache all along and is already a
+  // default column, but the details pane never showed it. Trimming the ISO
+  // timestamp must stay one rule shared by both places (180).
+  {
+    const oldShortDate = (s?: string) => (s ? s.slice(0, 10) : '')
+    const samples = [
+      undefined,
+      null,
+      '',
+      '2022-04-23T09:56:01.818Z',
+      '2026-11-07T04:57:38.829Z',
+      '2022-04-23',
+      'abc',
+      'x'.repeat(40)
+    ]
+    const drift = samples.filter((s) => shortDate(s) !== oldShortDate(s ?? undefined))
+    expect(
+      'the shared day rule answers the old column rule for every input',
+      drift.length === 0 && shortDate('2022-04-23T09:56:01.818Z') === '2022-04-23',
+      { drift, samples: samples.length }
+    )
+    expect(
+      'an absent or empty created stays empty',
+      shortDate(undefined) === '' && shortDate(null) === '' && shortDate('') === '',
+      {}
+    )
+    const dateRoot = path.join(__dirname, '../..')
+    const colSrc = fs.readFileSync(path.join(dateRoot, 'src/lib/columns.ts'), 'utf8')
+    const panelSrc = fs.readFileSync(
+      path.join(dateRoot, 'src/components/DetailsPanel.tsx'),
+      'utf8'
+    )
+    const sharedSrc = fs.readFileSync(path.join(dateRoot, 'shared/shortDate.ts'), 'utf8')
+    expect(
+      'both callers import the same day rule instead of keeping a copy',
+      /from '[^']*shared\/shortDate'/.test(colSrc) &&
+        /from '[^']*shared\/shortDate'/.test(panelSrc) &&
+        !colSrc.includes('const shortDate =') &&
+        sharedSrc.includes('export function shortDate('),
+      { shared: sharedSrc.length > 0 }
+    )
+    expect(
+      'the details pane shows it read-only with the exact moment on hover',
+      /<label>加入时间<\/label>/.test(panelSrc) &&
+        /shortDate\(doc\.created\) \|\| '未知'/.test(panelSrc) &&
+        /readOnly/.test(panelSrc) &&
+        /title=\{doc\.created \?\? ''\}/.test(panelSrc),
+      { panel: panelSrc.length > 0 }
+    )
+  }
+
   // Links and citation markers each walked every page of a continuous PDF
   // with their own copy of the same loop, including a literal batch size of
   // 8. Pulling it into a pure controller is only safe if the event sequence
@@ -8140,6 +8194,31 @@ export async function runSmoke() {
       detFields.keywords &&
       detFields.url,
     detFields
+  )
+  // The day has to be on screen, not only wired in the source. `title` is
+  // the exact ISO moment from the library cache, so the short value can be
+  // checked against a real record rather than against a made-up date (180).
+  const addedAt = JSON.parse(
+    await w.webContents.executeJavaScript(
+      `(()=>{const fs=[...document.querySelectorAll('.details .field')];`
+      + `const f=fs.find(x=>((x.querySelector('label')||{}).textContent||'').trim()==='加入时间');`
+      + `if(!f)return JSON.stringify({found:0});`
+      + `const i=f.querySelector('input');`
+      + `return JSON.stringify({found:1,value:i?i.value:'',title:i?i.title:'',`
+      + `readOnly:i?i.readOnly:null})})()`
+    )
+  )
+  const createdSet = new Set(
+    (loadLibrary()?.docs ?? []).map((d) => d.created).filter((s): s is string => !!s)
+  )
+  log('details added-at', addedAt)
+  expect(
+    'the details pane names the day the paper joined the library',
+    addedAt.found === 1 &&
+      addedAt.readOnly === true &&
+      (addedAt.value === '未知' || /^\d{4}-\d{2}-\d{2}$/.test(addedAt.value)) &&
+      (addedAt.title === '' || createdSet.has(addedAt.title)),
+    { ...addedAt, knownMoments: createdSet.size }
   )
   expect(
     'the type is chosen from the vocabulary the API accepts',

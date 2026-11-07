@@ -1,4 +1,5 @@
 import { clampToRange } from '../../shared/clamp'
+import { shortDate } from '../../shared/shortDate'
 import type { Doc } from '../../shared/types'
 
 /** The columns the document table can show, in the order they are offered. */
@@ -160,8 +161,6 @@ const firstAuthor = (d: Doc) => {
   if (!a) return ''
   return [a.last_name, a.first_name].filter(Boolean).join(' ')
 }
-
-const shortDate = (s?: string) => (s ? s.slice(0, 10) : '')
 
 export const COLUMNS: ColumnDef[] = [
   { key: 'star', label: '★', track: '24px', min: 24, sort: 'starred', text: (d) => (d.starred ? '★' : ''), kind: 'star' },
