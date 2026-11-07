@@ -187,6 +187,12 @@ export interface AppConfig {
    *  stale by whatever was done on the other machine.  Failures stay quiet —
    *  the cached library is on screen either way. */
   syncOnStart?: boolean
+  /** After a pull the reader asked for, bring down the PDFs the cloud has
+   *  and this disk does not. On by default: a sync that only refreshed the
+   *  metadata was read as "it did not sync the PDFs". The quiet start-up pull
+   *  is deliberately not one of those requests, so opening the app does not
+   *  start a hundred downloads. */
+  syncPdfsOnSync?: boolean
   /** Duplicate groups the reader has said are not duplicates, as the ids of
    *  the papers in each.  Groups are remembered by their papers rather than
    *  by the key the grouping used, because the key is derived: a DOI added

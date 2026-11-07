@@ -55,6 +55,7 @@ export function useConfig() {
   const [citeStyle, setCiteStyle] = useState<CiteStyle>(DEFAULT_CITE_STYLE)
   const [dupeIgnores, setDupeIgnores] = useState<string[][]>([])
   const [syncOnStart, setSyncOnStart] = useState(true)
+  const [syncPdfsOnSync, setSyncPdfsOnSync] = useState(true)
   const [ftPages, setFtPages] = useState(DEFAULT_FT_PAGES)
   /**
    * Pane widths.  The folder tree is a fixed width, because a tree does not
@@ -94,6 +95,7 @@ export function useConfig() {
       // somebody remembers to press the button is a library that is stale by
       // whatever was done on the other machine
       setSyncOnStart(c.syncOnStart !== false)
+      setSyncPdfsOnSync(c.syncPdfsOnSync !== false)
       // The guard stays: a malformed value should not even schedule a state
       // write (152). A positive one goes through the same rule the index
       // builder uses, so a hand-edited file cannot put a number in this panel
@@ -150,6 +152,8 @@ export function useConfig() {
     setDupeIgnores,
     syncOnStart,
     setSyncOnStart,
+    syncPdfsOnSync,
+    setSyncPdfsOnSync,
     ftPages,
     setFtPages,
     leftW,

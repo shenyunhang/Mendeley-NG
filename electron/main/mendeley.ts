@@ -2,6 +2,7 @@ import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { CloudAnnotation, Doc, Folder } from '../../shared/types'
+import { collectFileDocumentIds, type FilePageRow } from '../../shared/filePages'
 
 const BASE = 'https://api.mendeley.com'
 const TOKEN_URL = BASE + '/oauth/token'
@@ -180,23 +181,15 @@ export class Mendeley {
   }
 
   /** Document ids that actually carry a file.  file_attached lies often
-   *  enough to be worth cross-checking against this. */
+   *  enough to be worth cross-checking against this. The paging rule lives in
+   *  shared/filePages.ts: the marker is the file id, and a duplicate page ends
+   *  the walk instead of being requested two hundred times. */
   async fileDocumentIds(): Promise<Set<string>> {
-    const ids = new Set<string>()
-    const params: Record<string, string> = { limit: '200' }
-    for (let guard = 0; guard < 200; guard++) {
-      const batch = await this.request<{ document_id?: string }[]>(
-        'GET',
-        '/files',
-        { params }
-      )
-      if (!batch || batch.length === 0) break
-      for (const f of batch) if (f.document_id) ids.add(f.document_id)
-      if (batch.length < 200) break
-      params.marker = batch[batch.length - 1].document_id ?? ''
-      if (!params.marker) break
-    }
-    return ids
+    return collectFileDocumentIds((marker) =>
+      this.request<FilePageRow[]>('GET', '/files', {
+        params: marker ? { limit: '200', marker } : { limit: '200' }
+      })
+    )
   }
 
   /** Metadata of the file attached to a document, or null when there is none. */

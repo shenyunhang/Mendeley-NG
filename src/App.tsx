@@ -145,6 +145,8 @@ export default function App() {
     setDupeIgnores,
     syncOnStart,
     setSyncOnStart,
+    syncPdfsOnSync,
+    setSyncPdfsOnSync,
     ftPages,
     setFtPages,
     leftW,
@@ -1329,6 +1331,27 @@ export default function App() {
     reportBatch('已下载', okN, failed)
   }
 
+  /**
+   * A pull the reader asked for is also a request to bring the library's
+   * files down. Metadata alone made "云端有 PDF" look like a promise the sync
+   * button never kept.
+   *
+   * The quiet start-up pull goes straight to `window.api.sync` inside
+   * `useLibrary` and never comes through here, so opening the app does not
+   * start a hundred downloads. The list comes from the file the sync just
+   * wrote rather than from React state, which has not necessarily committed
+   * by the time this runs. `batchDownload` already owns the three lanes, the
+   * progress bar, the stop button and the failure-is-local policy.
+   */
+  const syncAndFetchPdfs = async (full = false) => {
+    const r = await doSync(full)
+    if (!syncPdfsOnSync || !r || 'error' in r) return
+    const fresh = await window.api.loadLibrary()
+    const docs = fresh && !('error' in fresh) ? fresh.docs : []
+    const need = needsPdf(docs)
+    if (need.length) await batchDownload(need)
+  }
+
   /** Starred / read / tags.  These are per-user flags rather than metadata,
    *  so they are patched straight away instead of waiting for a save button. */
   const setFlags = useCallback(async (d: Doc, patch: Partial<Doc>) => {
@@ -1722,7 +1745,7 @@ export default function App() {
       <Toolbar
         searchRef={searchRef}
         busy={busy}
-        onSync={doSync}
+        onSync={syncAndFetchPdfs}
         status={status}
         upd={upd}
         onSettings={() => setSettings(true)}
@@ -2128,7 +2151,7 @@ export default function App() {
                 await doSync()
               } else if (r) setErr('导入 token 失败：' + (r.error ?? '未选择文件'))
             }}
-            onSync={() => void doSync(false)}
+            onSync={() => void syncAndFetchPdfs(false)}
             onDismiss={() => setSetupDone(true)}
           />
         ) : view.kind === 'trash' ? (
@@ -2439,6 +2462,7 @@ export default function App() {
           nameTemplate={nameTemplate}
           citeStyle={citeStyle}
           syncOnStart={syncOnStart}
+          syncPdfsOnSync={syncPdfsOnSync}
           ft={ftStat}
           ftPages={ftPages}
           version={version}
@@ -2469,6 +2493,10 @@ export default function App() {
           onSyncOnStart={(v) => {
             setSyncOnStart(v)
             void window.api.setConfig({ syncOnStart: v })
+          }}
+          onSyncPdfsOnSync={(v) => {
+            setSyncPdfsOnSync(v)
+            void window.api.setConfig({ syncPdfsOnSync: v })
           }}
           onFtPages={(n) => void changeFtPages(n)}
         />

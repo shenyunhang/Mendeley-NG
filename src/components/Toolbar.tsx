@@ -283,7 +283,7 @@ export default function Toolbar(p: Props) {
       <button
         onClick={() => p.onSync(true)}
         disabled={p.busy}
-        title="忽略上次同步时间，重新拉全库；也是发现云端删除的唯一办法"
+        title="忽略上次同步时间，重新拉全库；每次同步都会对账云端回收站"
       >
         全量
       </button>

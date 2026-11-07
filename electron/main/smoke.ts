@@ -95,6 +95,10 @@ import { shortDate } from '../../shared/shortDate'
 // resurrecting papers trashed while it was in flight. The write is a
 // three-way decision now, checked here with fixed arrays (181).
 import { reconcileSyncWrite } from '../../shared/libraryReconcile'
+// GET /files is paged by the file's own id. Using document_id as the marker
+// made the server answer with page one again, so a 5399-file library looked
+// like 200 documents with attachments (182).
+import { collectFileDocumentIds } from '../../shared/filePages'
 import { describeSyncFailure } from '../../src/lib/offline'
 // One short-lived message and one pending clear, checked with a clock that
 // is advanced by hand: a timeout that outlives the message that asked for it
@@ -247,6 +251,7 @@ export function restoreSmokeConfig() {
     'citeStyle',
     'pdfNameTemplate',
     'pdfContinuous',
+    'syncPdfsOnSync',
     'ftPages',
     'dupeIgnores',
     'paneLeft',
@@ -4926,6 +4931,124 @@ export async function runSmoke() {
     )
   }
 
+  // The cloud had 5399 attached files and sync reported exactly 200. The
+  // old loop below is copied verbatim; the fake server answers with page one
+  // again whenever the marker is a document id, which is what the real API
+  // did (182).
+  {
+    type Row = { id?: string; document_id?: string }
+    const page = (n: number, count: number): Row[] =>
+      Array.from({ length: count }, (_, i) => ({
+        id: `f-${n}-${i}`,
+        document_id: `d-${n}-${i}`
+      }))
+    const legacyIds = async (
+      fetch: (marker?: string) => Promise<Row[]>
+    ): Promise<Set<string>> => {
+      const ids = new Set<string>()
+      let marker = ''
+      for (let guard = 0; guard < 200; guard++) {
+        const batch = await fetch(marker || undefined)
+        if (!batch.length) break
+        for (const f of batch) if (f.document_id) ids.add(f.document_id)
+        if (batch.length < 200) break
+        marker = batch[batch.length - 1].document_id ?? ''
+        if (!marker) break
+      }
+      return ids
+    }
+    const pages = [page(1, 200), page(2, 200), page(3, 199)]
+    const byMarker = (marker?: string): Row[] => {
+      if (!marker) return pages[0]
+      if (marker.startsWith('f-')) {
+        const i = pages.findIndex((p) => p.some((r) => r.id === marker))
+        return pages[i + 1] ?? []
+      }
+      return pages[0]
+    }
+    const legacy = await legacyIds(async (m) => byMarker(m))
+    const fixed = await collectFileDocumentIds(async (m) => byMarker(m))
+    expect(
+      'the old /files walk really stops at the first 200 ids',
+      legacy.size === 200 && fixed.size === 599,
+      { legacy: legacy.size, fixed: fixed.size }
+    )
+    let repeatedCalls = 0
+    const stale = await collectFileDocumentIds(async () => {
+      repeatedCalls++
+      return pages[0]
+    })
+    expect(
+      'a page of already-seen file ids ends the walk instead of looping',
+      repeatedCalls <= 2 && stale.size === 200,
+      { calls: repeatedCalls, ids: stale.size }
+    )
+    expect(
+      'an empty page, a short page and rows without ids are all safe',
+      (await collectFileDocumentIds(async () => [])).size === 0 &&
+        (await collectFileDocumentIds(async () => page(9, 3))).size === 3 &&
+        (await collectFileDocumentIds(async () => [{ document_id: 'x' }])).size === 1,
+      {}
+    )
+
+    // The real cache after this run's sync: the old client wrote exactly 200
+    // file_attached flags, a correct one writes thousands. No extra API call
+    // is needed — sync has already done the cross-check and saved the result.
+    const cache = loadLibrary()
+    const attached = (cache?.docs ?? []).filter((d) => d.file_attached).length
+    expect(
+      'a sync cross-checks the whole cloud file list, not just its first page',
+      attached > 200,
+      { attached, docs: cache?.docs.length ?? 0 }
+    )
+
+    const filesRoot = path.join(__dirname, '../..')
+    const clientSrc = fs.readFileSync(
+      path.join(filesRoot, 'electron/main/mendeley.ts'),
+      'utf8'
+    )
+    const appSrc = fs.readFileSync(path.join(filesRoot, 'src/App.tsx'), 'utf8')
+    const settingsSrc = fs.readFileSync(
+      path.join(filesRoot, 'src/components/Settings.tsx'),
+      'utf8'
+    )
+    const configSrc = fs.readFileSync(
+      path.join(filesRoot, 'src/lib/hooks/useConfig.ts'),
+      'utf8'
+    )
+    const typesSrc = fs.readFileSync(path.join(filesRoot, 'shared/types.ts'), 'utf8')
+    const oldMarker = "params.marker = batch[batch.length - 1].document_id ?? ''"
+    const wiredMarker = 'collectFileDocumentIds((marker) =>'
+    const collector = (t: string) => (t.match(/collectFileDocumentIds\(/g) ?? []).length
+    expect(
+      'the wiring detector can tell the old marker from the shared collector',
+      collector(oldMarker) === 0 && collector(wiredMarker) === 1,
+      { old: collector(oldMarker), wired: collector(wiredMarker) }
+    )
+    expect(
+      'the client uses the shared paging rule and no longer marks by document id',
+      collector(clientSrc) === 1 && !clientSrc.includes(oldMarker),
+      { collector: collector(clientSrc) }
+    )
+    expect(
+      'a manual sync also brings down the PDFs the disk is missing',
+      /const syncAndFetchPdfs = async \(full = false\)/.test(appSrc) &&
+        appSrc.includes('onSync={syncAndFetchPdfs}') &&
+        appSrc.includes('await batchDownload(need)') &&
+        appSrc.includes('needsPdf(docs)') &&
+        appSrc.includes("'error' in r)"),
+      {}
+    )
+    expect(
+      'the download-on-sync switch is present in config, settings and types',
+      typesSrc.includes('syncPdfsOnSync?: boolean') &&
+        (configSrc.match(/syncPdfsOnSync/g) ?? []).length >= 3 &&
+        /checked=\{syncPdfsOnSync\}/.test(settingsSrc) &&
+        /onSyncPdfsOnSync=\{/.test(appSrc),
+      {}
+    )
+  }
+
   // Links and citation markers each walked every page of a continuous PDF
   // with their own copy of the same loop, including a literal batch size of
   // 8. Pulling it into a pure controller is only safe if the event sequence
@@ -6363,7 +6486,7 @@ export async function runSmoke() {
   // click the first row and give pdf.js time to paint, so the run also proves
   // the reader works and that the canvas is backed at device resolution
   const clicked = await w.webContents.executeJavaScript(
-    '(()=>{const r=[...document.querySelectorAll("div.row")].filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+    '(()=>{const r=[...document.querySelectorAll("div.row")].filter(e=>e.querySelector(".pdf-dot:not(.no-pdf):not(.cloud)"));'
     + 'if(!r.length)return "no row with pdf";r[0].click();return r[0].innerText.replace(/\\n/g," | ").slice(0,80)})()'
   )
   log('clicked row:', clicked)
@@ -6405,7 +6528,7 @@ export async function runSmoke() {
   // has somewhere to move to and staying put means something
   await w.webContents.executeJavaScript(
     '(()=>{const r=[...document.querySelectorAll("div.row")]'
-    + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+    + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf):not(.cloud)"));'
     + 'if(!r.length)return 0;r[Math.min(r.length-1,Math.floor(r.length/2))].click();return 1})()'
   )
   await new Promise((r) => setTimeout(r, 5000))
@@ -6465,7 +6588,7 @@ export async function runSmoke() {
   await w.webContents.executeJavaScript(
     '(()=>{const s=document.querySelector(".table-wrap");if(s)s.scrollTop=0;'
     + 'const r=[...document.querySelectorAll("div.row")]'
-    + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));if(r.length)r[0].click();return 1})()'
+    + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf):not(.cloud)"));if(r.length)r[0].click();return 1})()'
   )
   await new Promise((r) => setTimeout(r, 1500))
 
@@ -6715,7 +6838,7 @@ export async function runSmoke() {
     await w.webContents.executeJavaScript(
       '(()=>{const s=document.querySelector(".table-wrap");if(s)s.scrollTop=0;'
       + 'const r=[...document.querySelectorAll("div.row")]'
-      + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));if(r.length)r[0].click();return 1})()'
+      + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf):not(.cloud)"));if(r.length)r[0].click();return 1})()'
     )
     await new Promise((r) => setTimeout(r, 1500))
   }
@@ -7104,7 +7227,7 @@ export async function runSmoke() {
     await w.webContents.executeJavaScript(
       '(()=>{const s=document.querySelector(".table-wrap");if(s)s.scrollTop=0;'
         + 'const r=[...document.querySelectorAll("div.row")]'
-        + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+        + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf):not(.cloud)"));'
         + `if(r.length<=${i})return 0;r[${i}].click();return 1})()`
     )
     await new Promise((r) => setTimeout(r, 1800))
@@ -7367,17 +7490,23 @@ export async function runSmoke() {
   const readPos = JSON.parse(
     await w.webContents.executeJavaScript(
       '(async()=>{'
+      // A cloud-only dot opens the details pane, not the reader. With the
+      // /files paging fixed there are thousands of those rows, and picking
+      // one made ".pdf-bar input" null and crashed the whole run. Only rows
+      // with a PDF on this disk can answer a question about reading position.
       + 'const rows=[...document.querySelectorAll("div.row")]'
-      + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
-      + 'if(rows.length<2)return JSON.stringify({skip:"need two rows with a pdf"});'
+      + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf):not(.cloud):not(.cloud)"));'
+      + 'if(rows.length<2)return JSON.stringify({error:"need two rows with a local pdf"});'
       + 'const wait=(ms)=>new Promise(r=>setTimeout(r,ms));'
-      + 'const setP=(n)=>{const i=document.querySelector(".pdf-bar input");if(!i)return;'
+      + 'const barEl=()=>document.querySelector(".pdf-bar input");'
+      + 'const setP=(n)=>{const i=barEl();if(!i)return;'
       + 'const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'
       + 's.call(i,String(n));i.dispatchEvent(new Event("input",{bubbles:true}));};'
       + 'rows[0].click();await wait(3000);'
+      + 'if(!barEl())return JSON.stringify({error:"reader did not open on a local-PDF row"});'
       + 'setP(3);await wait(1500);'
-      + 'const at=document.querySelector(".pdf-bar input").value;'
-      + 'const bar=()=>document.querySelector(".pdf-bar input").value;'
+      + 'const at=barEl().value;'
+      + 'const bar=()=>{const i=barEl();return i?i.value:""};'
       + 'rows[1].click();await wait(3500);'
       + 'const other=bar();'
       + 'rows[0].click();await wait(4500);'
@@ -7388,7 +7517,7 @@ export async function runSmoke() {
   log('reading position', readPos)
   expect(
     'the reader reopens where it was left',
-    readPos.at !== '1' && readPos.back === readPos.at,
+    readPos.error === undefined && readPos.at !== '1' && readPos.back === readPos.at,
     readPos
   )
   expect('reopening says why it is not on page one', /上次读到/.test(readPos.msg ?? ''), readPos)
@@ -7496,7 +7625,7 @@ export async function runSmoke() {
   }
   await w.webContents.executeJavaScript(
     '(()=>{const r=[...document.querySelectorAll("div.row")]'
-      + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"))'
+      + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf):not(.cloud)"))'
       // A row the reader cannot see is not one they can right click.  The
       // virtual list keeps a few rows past the fold, so the first row in the
       // document is not always the first one on the screen: asked for above
@@ -7576,7 +7705,7 @@ export async function runSmoke() {
   )
   await new Promise((r) => setTimeout(r, 300))
   await w.webContents.executeJavaScript(
-    '(()=>{const r=[...document.querySelectorAll("div.row")].filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+    '(()=>{const r=[...document.querySelectorAll("div.row")].filter(e=>e.querySelector(".pdf-dot:not(.no-pdf):not(.cloud)"));'
     + 'if(!r.length)return 0;const b=r[0].getBoundingClientRect();'
     + 'r[0].dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,'
     + 'clientX:Math.round(b.left+40),clientY:Math.round(b.top+8)}));return 1})()'
@@ -7592,7 +7721,7 @@ export async function runSmoke() {
   // painting.  Waited for, because the same load decides how long it takes.
   await w.webContents.executeJavaScript(
     '(()=>{const r=[...document.querySelectorAll("div.row")]'
-    + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));'
+    + '.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf):not(.cloud)"));'
     + 'if(!r.length)return 0;const b=r[0].getBoundingClientRect();'
     + 'r[0].dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,'
     + 'clientX:Math.round(b.left+40),clientY:Math.round(b.top+8)}));return 1})()'
@@ -7665,6 +7794,16 @@ export async function runSmoke() {
   await w.webContents.executeJavaScript(
     '(()=>{const i=document.querySelector(\'input[placeholder^="搜索"]\');if(i)i.blur();return 1})()'
   )
+  // Everything below measures a real PDF. Arrow navigation can leave the
+  // pane on a paper with no local file, where .pdf-scroll and canvas do not
+  // exist at all; pick a row that has one before measuring, rather than
+  // letting a null getBoundingClientRect stop the whole run.
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")]'
+    + '.find(e=>e.querySelector(".pdf-dot:not(.no-pdf):not(.cloud):not(.cloud)"));'
+    + 'if(r)r.click();return 1})()'
+  )
+  await new Promise((r) => setTimeout(r, 900))
 
   // Continuous scrolling is a remembered setting, not a per-document one, so
   // it lives in the config.  A run interrupted part-way leaves it switched
@@ -7685,6 +7824,7 @@ export async function runSmoke() {
   const measure = () =>
     w.webContents.executeJavaScript(
       '(()=>{const sc=document.querySelector(".pdf-scroll"),c=document.querySelector("canvas");'
+      + 'if(!sc||!c)return JSON.stringify({error:"no pdf on screen"});'
       + 'const b=sc.getBoundingClientRect(),r=c.getBoundingClientRect();'
       + 'const pct=document.querySelector(".pdf-bar span[style*=\'min-width\']");'
       + 'return JSON.stringify({pane:Math.round(b.width)+"x"+Math.round(b.height),'
@@ -9130,7 +9270,7 @@ export async function runSmoke() {
   const openRowWithPdf = (which: number) =>
     w.webContents.executeJavaScript(
       `(()=>{const r=[...document.querySelectorAll("div.row")]`
-      + `.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf)"));`
+      + `.filter(e=>e.querySelector(".pdf-dot:not(.no-pdf):not(.cloud)"));`
       + `if(r.length<2)return "too few rows with a pdf";`
       + `const t=r[Math.min(${which},r.length-1)];t.click();`
       + `return t.innerText.replace(/\\n/g," | ").slice(0,60)})()`
@@ -9364,8 +9504,9 @@ export async function runSmoke() {
       + 'return JSON.stringify({btn:bs.length?bs[0].textContent.trim():null,'
       + 'disabled:bs.length?bs[0].disabled:null,'
       + 'selected:document.querySelectorAll("div.row.multi").length,'
-      + 'cloudOnly:[...document.querySelectorAll("div.row.multi .pdf-dot")]'
-      + '.filter(d=>(d.getAttribute("title")||"")==="云端有文件").length})})()'
+      // count the selected rows' own cloud-only dots by class, not by the
+      // button's arithmetic and not by a tooltip that was renamed long ago
+      + 'cloudOnly:document.querySelectorAll("div.row.multi .pdf-dot.cloud").length})})()'
     )
   )
   log('batch download offer', dlOffer)

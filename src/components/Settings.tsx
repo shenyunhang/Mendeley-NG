@@ -35,6 +35,8 @@ interface Props {
    *  同步云端 button, and saying so is the point: a switch whose other
    *  position nobody can describe is a switch nobody can decide about. */
   syncOnStart: boolean
+  /** Whether a manual pull also brings down the PDFs this disk is missing. */
+  syncPdfsOnSync: boolean
   /** Full-text index state, shown rather than described: whether the index
    *  exists is the one thing that decides whether the page budget matters. */
   ft: FtStatus | null
@@ -59,6 +61,7 @@ interface Props {
   onNameTemplate: () => void
   onCiteStyle: (s: string) => void
   onSyncOnStart: (v: boolean) => void
+  onSyncPdfsOnSync: (v: boolean) => void
   onFtPages: (n: number) => void
 }
 
@@ -77,6 +80,7 @@ export default function Settings({
   nameTemplate,
   citeStyle,
   syncOnStart,
+  syncPdfsOnSync,
   ft,
   ftPages,
   version,
@@ -92,6 +96,7 @@ export default function Settings({
   onNameTemplate,
   onCiteStyle,
   onSyncOnStart,
+  onSyncPdfsOnSync,
   onFtPages
 }: Props) {
   // the page budget is applied on blur rather than on every keystroke: each
@@ -198,6 +203,21 @@ export default function Settings({
         </div>
         <div className="set-note">
           只拉增量，失败不出声；关掉就只有点「同步云端」时才同步。
+        </div>
+        <div className="set-row">
+          <span className="set-key">同步时</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={syncPdfsOnSync}
+              onChange={(e) => onSyncPdfsOnSync(e.target.checked)}
+            />
+            把云端有、本地没有的 PDF 一起下载下来
+          </label>
+        </div>
+        <div className="set-note">
+          点「同步云端」或「全量」之后在后台三路并发下载，可随时停止；
+          启动时的静默同步不下载，免得每次开机都占带宽。
         </div>
 
         <div className="set-sec">全文检索</div>

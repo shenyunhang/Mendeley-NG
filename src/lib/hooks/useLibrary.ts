@@ -62,6 +62,10 @@ export function useLibrary(syncOnStart: boolean, onError: (message: string | nul
         setFolders(r.folders)
       }
       setBusy(false)
+      // handed back so a caller that wants to do something *after* a
+      // successful pull (bring down missing PDFs) can tell success from a
+      // failure without asking the API twice
+      return r
     },
     [onError, lib]
   )
