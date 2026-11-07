@@ -27,6 +27,7 @@
     "src/lib/flash.ts",
     "src/lib/lazyPages.ts",
     "src/lib/latestSearch.ts",
+    "src/lib/listBlank.ts",
     "src/lib/offline.ts",
     "src/lib/pageBudgetCommit.ts",
     "src/lib/pageWalk.ts",

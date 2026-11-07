@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Doc } from '../../shared/types'
+import { isListBlank } from '../lib/listBlank'
 import { matchDoc, type DocMatch, type Part } from '../lib/match'
 
 interface Props {
@@ -12,6 +13,8 @@ interface Props {
   noteMap: Record<string, string>
   selectedId: string | null
   onSelect: (d: Doc, index: number, mod: { shift: boolean; add: boolean }) => void
+  /** A click on the empty part of the result list. */
+  onClearSelection: () => void
   onContextMenu?: (d: Doc, e: React.MouseEvent) => void
   multi: string[]
   /** base UI font size; the card height follows it */
@@ -54,6 +57,7 @@ export default function SearchResults({
   noteMap,
   selectedId,
   onSelect,
+  onClearSelection,
   onContextMenu,
   multi,
   fontSize,
@@ -108,7 +112,13 @@ export default function SearchResults({
   }, [docs, q, noteMap])
 
   return (
-    <div className="res-wrap" ref={parentRef}>
+    <div
+      className="res-wrap"
+      ref={parentRef}
+      onClick={(e) => {
+        if (isListBlank(e.target, 'res-row')) onClearSelection()
+      }}
+    >
       {!docs.length ? (
         (empty ?? <div className="empty">没有匹配的文献</div>)
       ) : (

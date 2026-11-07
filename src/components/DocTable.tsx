@@ -9,6 +9,7 @@ import {
   type ColumnDef,
   type SortKey
 } from '../lib/columns'
+import { isListBlank } from '../lib/listBlank'
 import { useDragX } from '../lib/useDragX'
 
 interface Props {
@@ -19,6 +20,8 @@ interface Props {
   /** `index` is the position in the sorted, filtered list, which is what a
    *  shift-click range has to span. */
   onSelect: (d: Doc, index: number, mod: { shift: boolean; add: boolean }) => void
+  /** A click on the empty part of the list, below or beside the rows. */
+  onClearSelection: () => void
   onToggleStar: (d: Doc) => void
   /** Right click.  The raw event is passed through so the caller can put the
    *  menu where the pointer actually is. */
@@ -60,6 +63,7 @@ export default function DocTable({
   onSort,
   selectedId,
   onSelect,
+  onClearSelection,
   onToggleStar,
   onContextMenu,
   multi,
@@ -287,6 +291,11 @@ export default function DocTable({
       <div
         className="table-wrap"
         ref={parentRef}
+        onClick={(e) => {
+          // row clicks bubble up here, so ask the target which list it came
+          // from rather than treating every click on the container as blank
+          if (isListBlank(e.target, 'row')) onClearSelection()
+        }}
         onScroll={(e) => {
           const h = headRef.current
           if (h) h.scrollLeft = e.currentTarget.scrollLeft

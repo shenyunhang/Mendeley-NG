@@ -79,6 +79,10 @@ import {
 // callers (175).
 import { formatCitation } from '../../src/lib/cite'
 import { citationKeyStem } from '../../src/lib/citeKey'
+// Both virtualised lists bubble row clicks up to their container, so the
+// decision "was this click on a row?" has to be made on the target. The rule
+// is shared and takes the row class as a parameter (177).
+import { isListBlank } from '../../src/lib/listBlank'
 import { describeSyncFailure } from '../../src/lib/offline'
 // One short-lived message and one pending clear, checked with a clock that
 // is advanced by hand: a timeout that outlives the message that asked for it
@@ -4477,6 +4481,69 @@ export async function runSmoke() {
         // the 165 detector is looking for in product code
         !marksSrc.includes('catch' + '(() => {})'),
       { named: libSrc.includes('FAILURE.startupAnnotationSync') }
+    )
+  }
+
+  // A click on the empty part of a list is the reader saying "nothing is
+  // selected now". Esc and the batch bar only drop the multi-selection and
+  // keep the open paper; a blank click drops all of it. Row clicks bubble to
+  // the container, so the target decides (177).
+  {
+    const row = { closest: (s: string) => (s === '.row' ? {} : null) }
+    const card = { closest: (s: string) => (s === '.res-row' ? {} : null) }
+    const plain = { closest: () => null }
+    expect(
+      'a click outside every row is blank in both lists',
+      isListBlank(plain, 'row') &&
+        isListBlank(plain, 'res-row') &&
+        isListBlank(null, 'row') &&
+        isListBlank(undefined, 'row'),
+      { plain: isListBlank(plain, 'row') }
+    )
+    expect(
+      'a click on a row or a card is not blank in its own list',
+      !isListBlank(row, 'row') &&
+        !isListBlank(card, 'res-row') &&
+        isListBlank(row, 'res-row') &&
+        isListBlank(card, 'row'),
+      { rowInTable: isListBlank(row, 'row'), cardInCards: isListBlank(card, 'res-row') }
+    )
+    expect(
+      'a target without closest is blank, not a row',
+      isListBlank({}, 'row') && isListBlank({ closest: 1 }, 'row'),
+      {}
+    )
+
+    const blankRoot = path.join(__dirname, '../..')
+    const tableSrc = fs.readFileSync(
+      path.join(blankRoot, 'src/components/DocTable.tsx'),
+      'utf8'
+    )
+    const cardsSrc = fs.readFileSync(
+      path.join(blankRoot, 'src/components/SearchResults.tsx'),
+      'utf8'
+    )
+    const appSrc = fs.readFileSync(path.join(blankRoot, 'src/App.tsx'), 'utf8')
+    const blankCalls = (t: string) => (t.match(/isListBlank\(/g) ?? []).length
+    const oldWrap = '<div className="table-wrap" ref={parentRef}>'
+    const wiredWrap = "if (isListBlank(e.target, 'row')) onClearSelection()"
+    expect(
+      'the wiring detector can really see a blank-click guard',
+      blankCalls(oldWrap) === 0 && blankCalls(wiredWrap) === 1,
+      { old: blankCalls(oldWrap), wired: blankCalls(wiredWrap) }
+    )
+    expect(
+      'both lists share the rule and the app owns the clearing',
+      blankCalls(tableSrc) === 1 &&
+        blankCalls(cardsSrc) === 1 &&
+        (appSrc.match(/onClearSelection=\{clearSelection\}/g) ?? []).length === 2 &&
+        /if \(!selId && !pinned && multi\.length === 0\) return/.test(appSrc) &&
+        appSrc.includes('lastIdx.current = null'),
+      {
+        inTable: blankCalls(tableSrc),
+        inCards: blankCalls(cardsSrc),
+        wired: (appSrc.match(/onClearSelection=\{clearSelection\}/g) ?? []).length
+      }
     )
   }
 
@@ -9518,6 +9585,66 @@ export async function runSmoke() {
     'clearing the search hands the table back',
     backToTable.rows > 0 && backToTable.cards === 0 && backToTable.heads > 3,
     backToTable
+  )
+
+  // A blank click is the way out of a selection, and a row click must not be
+  // mistaken for one. Everything here is put back at the end so the settings
+  // checks that follow start from the row that was selected before (177).
+  const blankClick = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>{'
+      + 'const wait=(m)=>new Promise(r=>setTimeout(r,m));'
+      + 'const wrap=document.querySelector(".table-wrap");'
+      + 'if(!wrap)return JSON.stringify({error:"no table wrap"});'
+      + 'const rows=()=>[...document.querySelectorAll("div.row")];'
+      + 'const before=(document.querySelector("div.row.sel")||{}).dataset?.id||"";'
+      + 'if(!rows().length)return JSON.stringify({error:"no rows"});'
+      + 'rows()[0].click();await wait(400);'
+      + 'const picked={sel:document.querySelectorAll("div.row.sel").length,'
+      + 'bar:!!document.querySelector(".batch-bar")};'
+      + 'wrap.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true}));'
+      + 'await wait(400);'
+      + 'const blanked={sel:document.querySelectorAll("div.row.sel").length,'
+      + 'multi:document.querySelectorAll("div.row.multi").length,'
+      + 'bar:!!document.querySelector(".batch-bar"),'
+      + 'empty:(document.body.innerText.match(/选中左侧一条文献查看详情或 PDF/)||[])[0]||""};'
+      + 'rows()[0].click();await wait(400);'
+      + 'const onRow={sel:document.querySelectorAll("div.row.sel").length};'
+      + 'const second=rows()[1];'
+      + 'if(second)second.dispatchEvent(new MouseEvent("click",{bubbles:true,shiftKey:true}));'
+      + 'await wait(400);'
+      + 'const multiBefore=document.querySelectorAll("div.row.multi").length;'
+      + 'wrap.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true}));'
+      + 'await wait(400);'
+      + 'const blankedAfterMulti={sel:document.querySelectorAll("div.row.sel").length,'
+      + 'multi:document.querySelectorAll("div.row.multi").length};'
+      + 'const restore=(before?rows().find(r=>(r.dataset.id||"")===before):null)||rows()[0];'
+      + 'if(restore)restore.click();await wait(400);'
+      + 'return JSON.stringify({before,picked,blanked,onRow,multiBefore,'
+      + 'blankedAfterMulti,restored:!!restore})})()'
+    )
+  )
+  log('blank click in the table', blankClick)
+  expect(
+    'a click on blank space drops the single selection and empties the pane',
+    blankClick.error === undefined &&
+      blankClick.picked?.sel === 1 &&
+      blankClick.blanked?.sel === 0 &&
+      blankClick.blanked?.bar === false &&
+      /选中左侧一条文献查看详情或 PDF/.test(blankClick.blanked?.empty ?? ''),
+    blankClick
+  )
+  expect(
+    'a click on a row is not mistaken for blank space',
+    blankClick.onRow?.sel === 1,
+    { onRow: blankClick.onRow }
+  )
+  expect(
+    'a blank click also drops a multi-selection',
+    blankClick.multiBefore >= 2 &&
+      blankClick.blankedAfterMulti?.sel === 0 &&
+      blankClick.blankedAfterMulti?.multi === 0,
+    { multiBefore: blankClick.multiBefore, after: blankClick.blankedAfterMulti }
   )
 
   // Settings.  Everything the app remembers used to live in four corners of

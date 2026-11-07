@@ -858,6 +858,25 @@ export default function App() {
   }
 
   /**
+   * A click on the empty part of either list drops the selection, the way a
+   * file manager answers it. Esc and the batch bar only drop the *multi*
+   * selection and deliberately keep the paper that is open; a click on blank
+   * space is the reader saying "nothing is selected now", so the right pane
+   * goes back to its empty state too. The shift anchor is reset because the
+   * next shift-click must not span from a row that is no longer selected.
+   *
+   * Nothing happens when there is nothing to clear: an idle click should not
+   * re-render a virtualised list of thousands of rows.
+   */
+  const clearSelection = () => {
+    if (!selId && !pinned && multi.length === 0) return
+    setMulti([])
+    setSelId(null)
+    setPinned(null)
+    lastIdx.current = null
+  }
+
+  /**
    * Move the selection without opening anything, which is what an arrow key
    * has to do.  Deliberately not `onRowSelect`: that also switches the right
    * pane, and walking down the list with the arrows would then open a PDF per
@@ -2278,6 +2297,7 @@ export default function App() {
                 setMenu({ x: e.clientX, y: e.clientY, docId: d.id })
               }}
               onSelect={onRowSelect}
+              onClearSelection={clearSelection}
             />
           ) : (
             <DocTable
@@ -2302,6 +2322,7 @@ export default function App() {
                 )
               }}
               onSelect={onRowSelect}
+              onClearSelection={clearSelection}
             />
           )}
         </div>
