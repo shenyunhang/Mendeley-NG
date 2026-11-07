@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import zlib from 'node:zlib'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { findToken } from './mendeley'
 import {
@@ -413,6 +414,84 @@ export async function runSmoke() {
   })()
   log('icon', iconOk)
   expect('the app ships an icon', iconOk.ico && iconOk.png, iconOk)
+
+  // The mark is checked from its pixels, not by eye. The generator writes
+  // 8-bit RGBA with filter 0 on every row, so the icon can be read back with
+  // nothing but zlib: no tile behind the sheet, one cool colour family, and
+  // a vector source with no cut slips or cords (179).
+  {
+    const decodeIconPng = (buf: Buffer) => {
+      let off = 8
+      let n = 0
+      const parts: Buffer[] = []
+      while (off + 12 <= buf.length) {
+        const len = buf.readUInt32BE(off)
+        const type = buf.toString('ascii', off + 4, off + 8)
+        const data = buf.subarray(off + 8, off + 8 + len)
+        if (type === 'IHDR') n = data.readUInt32BE(0)
+        if (type === 'IDAT') parts.push(data)
+        off += 12 + len
+      }
+      const raw = zlib.inflateSync(Buffer.concat(parts))
+      const stride = n * 4
+      const rgba = new Uint8Array(stride * n)
+      for (let y = 0; y < n; y++) {
+        const at = y * (stride + 1)
+        if (raw[at] !== 0) throw new Error('unexpected PNG row filter')
+        for (let x = 0; x < stride; x++) rgba[y * stride + x] = raw[at + 1 + x]
+      }
+      return { n, rgba }
+    }
+    const iconDir = path.join(app.getAppPath(), 'assets')
+    const { n, rgba } = decodeIconPng(fs.readFileSync(path.join(iconDir, 'icon.png')))
+    const alphaAt = (x: number, y: number) => rgba[(y * n + x) * 4 + 3]
+    const corners = [
+      alphaAt(0, 0), alphaAt(n - 1, 0), alphaAt(0, n - 1), alphaAt(n - 1, n - 1)
+    ]
+    let opaque = 0
+    let warm = 0
+    for (let i = 0; i < rgba.length; i += 4) {
+      const r = rgba[i]
+      const b = rgba[i + 2]
+      if (rgba[i + 3] < 200) continue
+      opaque++
+      // red, orange and yellow all have a red channel well above blue; the
+      // new mark is violet -> blue -> cyan and has none of them
+      if (r > b + 40 && r > 140) warm++
+    }
+    expect(
+      'the icon has no tile behind it',
+      corners.every((a) => a === 0),
+      { corners, n }
+    )
+    expect(
+      'the icon stays in one cool colour family',
+      opaque > (n * n) / 20 && warm === 0,
+      { opaque, warm, n }
+    )
+    const svgText = fs.readFileSync(path.join(iconDir, 'logo.svg'), 'utf8')
+    expect(
+      'the vector source has no cut slips or cords',
+      !svgText.includes('<mask') &&
+        !svgText.includes('stroke-dasharray') &&
+        svgText.length < 4096,
+      { bytes: svgText.length }
+    )
+    const genText = fs.readFileSync(
+      path.join(app.getAppPath(), 'scripts', 'make-icon.mjs'),
+      'utf8'
+    )
+    expect(
+      'the generator draws one continuous sheet with two colour stops',
+      !genText.includes('const SLIP') &&
+        !genText.includes('const CORD') &&
+        !genText.includes('inGap(') &&
+        !genText.includes('onCord(') &&
+        (genText.match(/^  \[0\.0, \[/m) ?? []).length === 1 &&
+        (genText.match(/^  \[1\.0, \[/m) ?? []).length === 1,
+      { bytes: genText.length }
+    )
+  }
   const info = await w.webContents.executeJavaScript(
     // typeof, not a call: a real prompt would block the run
     'JSON.stringify({dpr: devicePixelRatio, rows: document.querySelectorAll("table,.row,[data-row]").length,'

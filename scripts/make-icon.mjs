@@ -25,109 +25,52 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 /**
  * A sheet of paper rolled up, with its free end still sticking out.
  *
- * The two marks before this were both a coloured rounded square with a white
- * shape on it, which is what nearly every program draws, and the second was
- * also a letter — which Zotero had already done.  This one is only itself:
- * there is no tile, so what is recognised at 16 px is the outline of the
- * thing rather than a container with something sitting in it.
+ * The mark before this cut the sheet into thirty-two bamboo slips, threaded
+ * two brown cords through them, and ran six colours along the run. At 16 px
+ * the gaps became noise and the coil read as a rainbow caterpillar. The idea
+ * was fine — paper wound up, one end loose — and everything layered on top of
+ * it was the problem. So this one keeps the coil and removes the rest: no
+ * tile, no slips, no cords, one cool gradient, one continuous thick band.
  *
- * It is a sheet being rolled rather than a document, a folder or a book,
- * because the coil is what paper does and nothing else does, and because the
- * free end is half of the meaning: without it the roll is a spring.
+ * There is still no rounded square behind it. What is recognised at a glance
+ * is the outline of the thing, not a container with something sitting in it.
  *
  * The colour runs *along* the sheet rather than across the canvas, so what
- * you see is the winding — violet in the tight core, the program's own blue
- * through the middle of the roll, teal as it opens out, amber on the end that
- * is still out in the light, and red on the last of it.  A gradient across
- * the canvas would light the coil like a rendering of a solid, and lose the
- * sense of one long thing wound up.  Red goes at the end rather than in the
- * core because the end is what the eye is already on, and because a warm end
- * on a cool coil is the one place a hot colour does not read as a warning.
+ * you see is the winding and not a solid lit from one side. Two stops are
+ * enough: a third hue family would start reading as a rainbow again.
  */
 const ROLL = {
-  /**
-   * How many times the sheet goes round.  Enough to read as a coil and not
-   * as a hook: the gap left between two turns is (rOut - rIn) / turns less
-   * the thickness of the sheet, and past about two turns that gap is gone by
-   * 32 px, where the coil would close up into a disc.
-   */
-  turns: 1.6,
-  rIn: 64,
-  rOut: 184,
-  /** Half the thickness of the sheet. */
-  half: 25,
+  /** Just over one turn: enough to read as a coil, open enough that the gap
+   *  between two turns is still visible when the whole icon is 16 px wide. */
+  turns: 1.15,
+  rIn: 70,
+  rOut: 168,
+  /** Half the thickness of the sheet. Thicker than before, so the small
+   *  sizes keep a solid shape instead of a hairline. */
+  half: 34,
   /** How far the free end runs on past the roll. */
-  tail: 138,
-  /** How far the free end turns away from the roll as it runs on.  Left at
-   *  zero it carries on along the tangent and hugs the outside of the coil,
-   *  which is what made the first attempt look like a hook rather than like
-   *  an end that has come loose. */
-  spread: 1.2,
-  /** Where the outer end sits, chosen so the free end leaves towards the
-   *  upper right, the one corner that leaves room for it, and so the mark
-   *  balances on the canvas. */
-  at: Math.PI * 0.39
+  tail: 122,
+  /** How far the free end turns away as it runs on: a loose end, not a hook. */
+  spread: 0.85,
+  /** Where the outer end sits, so the free end sweeps out to the lower left
+   *  while the coil itself sits a little high on the canvas. */
+  at: Math.PI * 0.42
 }
 
-/**
- * The colours along the sheet, from the tight core to the free end.
- *
- * The last stretch is warm all the way and ends red.  The free end is only a
- * tenth of the sheet, so a red placed anywhere but on it would be a smear;
- * here the whole of the end that is out of the roll is red, and the amber
- * before it is what keeps it from looking like a warning light.  One warm end
- * against a cool coil is also what stops six colours reading as a rainbow.
- */
+/** Two stops, one cool family. Nothing warm: that was what turned the old
+ *  mark into a rainbow and made the loose end look like a warning light. */
 const RAMP = [
-  [0.0, [0x7b, 0x3f, 0xf2]],
-  [0.28, [0x3f, 0x8c, 0xf0]],
-  [0.5, [0x16, 0xc8, 0xb8]],
-  [0.66, [0xff, 0xb0, 0x2e]],
-  [0.82, [0xfb, 0x5a, 0x1e]],
-  [1.0, [0xe8, 0x24, 0x3c]]
+  [0.0, [0x6d, 0x3b, 0xf5]],
+  [1.0, [0x1f, 0xd1, 0xe5]]
 ]
 
 /**
- * What makes the sheet a bamboo-slip scroll rather than a sheet.
- *
- * A 简 is a row of narrow slips held side by side by cords threaded across
- * them, and both of those are things the geometry here already knows: the
- * slips are gaps cut across the run of the sheet, which is what `t` measures,
- * and the cords are thin lines that follow the sheet at a fixed offset to one
- * side of its centre, which is what a signed distance gives.
- *
- * The gaps are only a fifth of the pitch.  At 16 px a gap is a third of a
- * pixel, so what is recognised there is still one coiled thing; the slips are
- * for the sizes where there is room to see them, which is also how a real
- * scroll reads from across a room.
+ * Deliberately no slips and no cords. The gaps used to be cut across the run
+ * of the sheet and the cords ran along it at a fixed offset; both were things
+ * this geometry could express, and both were exactly what made a 16 px icon
+ * look like a strip of teeth. A single continuous sheet is the whole point
+ * now, so the rasteriser has nothing to subtract.
  */
-const SLIP = {
-  /** How far along the sheet one slip runs, and how wide the gap after it. */
-  w: 36,
-  gap: 10
-}
-
-/**
- * The two cords, as a fraction of the half-thickness out from the centreline.
- *
- * Two, because a slip scroll is held by two and a single cord reads as a
- * crease.  Halfway out, so that what is left is a middle band as wide as the
- * two outer ones put together, which is where the cords of a real 简 sit.
- *
- * Six across a sheet fifty-four wide, which is a ninth of it each: wide
- * enough to still be there at a hundred and twenty-eight, where the sheet is
- * thirteen pixels across and the cord one and a half, and narrow enough that
- * the mark at sixteen -- where the whole sheet is under two pixels and the
- * cord a fifth of one -- keeps the brightness it had before there were cords.
- *
- * They run the length of the sheet including across the gaps, which is the
- * whole point of them: they are what the slips are strung on.
- */
-const CORD = {
-  at: 0.5,
-  w: 5,
-  col: [0x66, 0x43, 0x22]
-}
 
 /** Clear space kept around the mark on every side. */
 const MARGIN = 16
@@ -313,9 +256,6 @@ function nearest(x, y) {
   const cy = Math.min(GRID - 1, Math.max(0, Math.floor((y * GRID) / 512)))
   let best = Infinity
   let along = 0
-  // signed, so the two cords can be told apart: which side of the centreline
-  // a point is on is what puts one cord above it and the other below
-  let side = 0
   for (const s of CELLS[cy * GRID + cx]) {
     const g = SEG[s]
     const dx = g.bx - g.ax
@@ -331,28 +271,10 @@ function nearest(x, y) {
     if (d < best) {
       best = d
       along = g.at + g.len * t
-      side = dx * (y - g.ay) - dy * (x - g.ax)
     }
   }
   const d = Math.sqrt(best)
-  return { d, t: along / TOTAL, side: side >= 0 ? d : -d }
-}
-
-/**
- * Whether this point is on one of the cords.
- *
- * Asked before anything else, because the cords lie on top of the slips and
- * run across the gaps between them: a cord that stopped at every gap would be
- * a row of dashes rather than the thing holding the row together.
- */
-function onCord(side) {
-  return Math.abs(Math.abs(side) - CORD.at * HALF) < CORD.w / 2
-}
-
-/** Whether this point is in the gap between two slips. */
-function inGap(t) {
-  const u = (t * TOTAL) % (SLIP.w + SLIP.gap)
-  return u > SLIP.w
+  return { d, t: along / TOTAL }
 }
 
 const rampAt = (t) => {
@@ -384,10 +306,7 @@ function raster(n) {
       const o = (py * r + px) * 4
       const near = nearest(x, y)
       if (near.d > HALF) continue
-      // the cords lie on top of the slips and over the gaps alike, so they
-      // are asked about before the sheet is; a gap does not interrupt one
-      if (inGap(near.t) && !onCord(near.side)) continue
-      const c = onCord(near.side) ? CORD.col : rampAt(near.t)
+      const c = rampAt(near.t)
       big[o] = c[0]
       big[o + 1] = c[1]
       big[o + 2] = c[2]
@@ -545,38 +464,21 @@ const PIECES = (() => {
 })()
 
 /**
- * The whole centreline as one path, which the two masks below are cut from.
+ * The vector source is the same centreline, cut into short strokes and
+ * coloured at the same `t` the rasteriser uses. Butt caps meet exactly, so
+ * the pieces read as one continuous sheet with a gradient along the winding,
+ * not as a row of tiles. There are no masks now: nothing is cut out of the
+ * sheet and nothing is threaded through it.
  *
- * Both the gaps between the slips and the cords are things that repeat along
- * the sheet, and a dash pattern is measured along a path in exactly the way
- * `t` is here, so one copy of the centreline and four dashes say what a
- * hundred cut pieces would.  That is what keeps this file inside the four
- * kilobytes Vite inlines: the geometry is written once and referred to, not
- * written again for every slip.
- *
- * The cords are the band left when a narrower stroke of the same path is
- * taken back out of a wider one -- which is the same test `onCord` makes,
- * a distance from the centreline, and so needs no offset polyline of its
- * own.  Everything is drawn with butt caps here, so that the cords and the
- * dashes stop where the cut ends of the sheet do.
+ * One centreline per piece instead of a single dashed path is what lets the
+ * vector and the ten rasters agree on where each colour falls.
  */
-const D = pathD(PATH)
 const W_SHEET = (HALF * 2).toFixed(1)
-const W_CORD = (2 * (CORD.at * HALF + CORD.w / 2)).toFixed(1)
-const W_CORD_IN = (2 * (CORD.at * HALF - CORD.w / 2)).toFixed(1)
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Mendeley NG" fill="none" stroke-linejoin="round" stroke-linecap="butt">
   <!-- generated by scripts/make-icon.mjs; edit the shapes there, not here -->
-  <defs>
-    <path id="sheet" d="${D}"/>
-    <mask id="slips" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512"><use href="#sheet" stroke="#fff" stroke-width="${W_SHEET}" stroke-dasharray="${SLIP.w} ${SLIP.gap}"/></mask>
-    <mask id="cords" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512"><use href="#sheet" stroke="#fff" stroke-width="${W_CORD}"/><use href="#sheet" stroke="#000" stroke-width="${W_CORD_IN}"/></mask>
-  </defs>
   <g stroke-width="${W_SHEET}">
-    <g mask="url(#slips)" stroke-linecap="round">
 ${PIECES.map((p, i) => '  ' + stroke(p.pts, toHex(rampAt(p.t)), i === 0 || i === PIECES.length - 1 ? 'butt' : '')).join('\n')}
-    </g>
-    <g mask="url(#cords)"><use href="#sheet" stroke="${toHex(CORD.col)}" stroke-width="${W_CORD}"/></g>
   </g>
 </svg>
 `
