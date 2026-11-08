@@ -1,4 +1,5 @@
 import { clampToRange } from '../../../shared/clamp'
+import { writeConfig } from '../configWrite'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SavedSearch, SavedView } from '../../../shared/types'
 import { DEFAULT_FT_PAGES, DEFAULT_PDF_TEMPLATE } from '../../../shared/types'
@@ -72,6 +73,9 @@ export function useConfig() {
    * stepping from somewhere that is not a stale closure.
    */
   const fontRef = useRef(15)
+  /** False until the disk has answered.  Persistence hooks stay disabled
+   *  until then, or the hydrate itself would be written straight back. */
+  const [configHydrated, setConfigHydrated] = useState(false)
 
   useEffect(() => {
     window.api.getConfig().then((c) => {
@@ -109,7 +113,11 @@ export function useConfig() {
         fontRef.current = c.fontSize
         setFontSize(c.fontSize)
       }
-    })
+    }).catch(() => {
+      // The defaults in state are already a usable config.  A failed read is
+      // not a reason to leave persistence disabled forever, and it is not a
+      // banner on start-up either.
+    }).finally(() => setConfigHydrated(true))
   }, [])
 
   // one knob scales the whole UI, because every size in styles.css is in rem
@@ -128,7 +136,7 @@ export function useConfig() {
     const next = clampToRange(fontRef.current + d, MIN_FONT_SIZE, MAX_FONT_SIZE)
     fontRef.current = next
     setFontSize(next)
-    window.api.setConfig({ fontSize: next })
+    void writeConfig({ fontSize: next })
   }, [])
 
   return {
@@ -164,6 +172,7 @@ export function useConfig() {
     setTheme,
     fontSize,
     setFontSize,
-    bumpFont
+    bumpFont,
+    configHydrated
   }
 }

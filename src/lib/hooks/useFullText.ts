@@ -87,11 +87,17 @@ export function useFullText(active: boolean) {
     window.api.ftBuild(rebuild).then((s) => {
       setFtStat(s)
       wasBuilding.current = !!s.building
+    }).catch((_e: unknown) => {
+      // The progress subscription owns the index state and will answer with
+      // what the index is really doing.  What must not happen is an unhandled
+      // rejection from a button the reader pressed.
     })
   }, [])
 
   const cancel = useCallback(() => {
-    window.api.ftCancel().then(setFtStat)
+    window.api.ftCancel().then(setFtStat).catch((_e: unknown) => {
+      // As above: the next progress event is the authority on the index.
+    })
   }, [])
 
   /** The index goes, and the hits go with it: they are hits into text that is
@@ -101,6 +107,9 @@ export function useFullText(active: boolean) {
       setFtStat(s)
       search.current?.cancel()
       setAnswer(null)
+    }).catch((_e: unknown) => {
+      // The hits stay up until a progress event proves the index changed;
+      // a failed clear must not quietly blank a working search either.
     })
   }, [])
 

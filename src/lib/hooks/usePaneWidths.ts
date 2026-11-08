@@ -1,4 +1,5 @@
 import { useRef } from 'react'
+import { writeConfig } from '../configWrite'
 import { PANE_WIDTH_PERSIST_DEBOUNCE_MS } from '../timing'
 import { usePersistAfterMount } from './usePersistAfterMount'
 import {
@@ -29,12 +30,14 @@ export function usePaneWidths({
   leftW,
   rightPct,
   setLeftW,
-  setRightPct
+  setRightPct,
+  configHydrated
 }: {
   leftW: number
   rightPct: number
   setLeftW: (w: number) => void
   setRightPct: (p: number) => void
+  configHydrated: boolean
 }) {
   const bodyRef = useRef<HTMLDivElement>(null)
 
@@ -75,20 +78,21 @@ export function usePaneWidths({
   usePersistAfterMount(
     [leftW, rightPct],
     () => {
-      void window.api.setConfig({ paneLeft: leftW, paneRight: rightPct })
+      void writeConfig({ paneLeft: leftW, paneRight: rightPct })
     },
-    PANE_WIDTH_PERSIST_DEBOUNCE_MS
+    PANE_WIDTH_PERSIST_DEBOUNCE_MS,
+    configHydrated
   )
 
   const setLeft = (w: number) => {
     const next = clampLeft(w)
     setLeftW(next)
-    void window.api.setConfig({ paneLeft: next })
+    void writeConfig({ paneLeft: next })
   }
   const setRight = (p: number) => {
     const next = clampRight(p)
     setRightPct(next)
-    void window.api.setConfig({ paneRight: next })
+    void writeConfig({ paneRight: next })
   }
 
   return { bodyRef, dragLeft, dragRight, setLeft, setRight }

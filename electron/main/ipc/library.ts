@@ -4,6 +4,7 @@ import { sync } from '../library'
 import { loadConfig, loadLibrary, saveConfig } from '../store'
 import { setFullTextPages } from '../fulltext'
 import { status } from '../window'
+import { safeConfigPatch } from '../../../shared/pathPolicy'
 import type { AppConfig } from '../../../shared/types'
 
 /**
@@ -49,12 +50,17 @@ export function registerLibraryIpc() {
 
   ipcMain.handle('config:get', () => loadConfig())
   ipcMain.handle('config:set', (_e, c: Partial<AppConfig>) => {
+    // Types stop at the process boundary.  A merge of an unchecked object
+    // used to let any key, any value type and any length persist forever, and
+    // a hand-edited `pdfDir: 123` was enough to make path.join throw inside a
+    // handler.  Only declared keys with the shape they declare are merged.
+    const patch = safeConfigPatch(c)
     const cur = loadConfig()
-    saveConfig({ ...cur, ...c })
+    saveConfig({ ...cur, ...patch })
     // The full-text page budget lives in the index, not just in the config: it
     // has to take effect the moment it is written, or the index on disk keeps
     // describing a corpus nobody is asking about any more.
-    if (typeof c.ftPages === 'number') setFullTextPages(c.ftPages)
+    if (typeof patch.ftPages === 'number') setFullTextPages(patch.ftPages)
     return loadConfig()
   })
 }

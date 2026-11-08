@@ -13,8 +13,12 @@ import type {
   SyncStatus,
   UpdateState
 } from '../../shared/types'
+import type { Api } from '../../src/global'
 
-const api = {
+/** Every channel the renderer can call, checked against the one shared
+ *  contract.  `satisfies` would allow extra methods to appear here without
+ *  the renderer ever hearing about them, so the annotation is explicit. */
+const api: Api = {
   loadLibrary: () => ipcRenderer.invoke('library:load') as Promise<Library | { error: string } | null>,
   sync: (full = true) =>
     ipcRenderer.invoke('library:sync', full) as Promise<
@@ -125,7 +129,8 @@ const api = {
     ipcRenderer.invoke('annotations:deleteRemote', id) as Promise<{ ok: boolean }>,
   fileHash: (docId: string) =>
     ipcRenderer.invoke('annotations:fileHash', docId) as Promise<string | null>,
-  saveAnnotations: (list: Annotation[]) => ipcRenderer.invoke('annotations:save', list),
+  saveAnnotations: (list: Annotation[]) =>
+    ipcRenderer.invoke('annotations:save', list) as Promise<{ ok: boolean }>,
   syncAnnotationsAtStart: () =>
     ipcRenderer.invoke('annotations:syncAtStart') as Promise<{
       docs: number
@@ -186,7 +191,8 @@ const api = {
   /** PDFs are served over the custom mendeley:// scheme registered in main */
   pdfUrl: (absPath: string) =>
     'mendeley://pdf/' + encodeURIComponent(absPath),
-  openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  openExternal: (url: string) =>
+    ipcRenderer.invoke('shell:openExternal', url) as Promise<{ ok: boolean; error?: string }>,
   revealPdf: (p: string) =>
     ipcRenderer.invoke('pdf:reveal', p) as Promise<{ ok: boolean; error?: string }>,
   openPdfExternally: (p: string) =>
@@ -195,4 +201,6 @@ const api = {
 
 contextBridge.exposeInMainWorld('api', api)
 
-export type Api = typeof api
+/** The same interface, so anything importing the preload gets the contract
+ *  rather than a second, independently drifting type. */
+export type { Api }

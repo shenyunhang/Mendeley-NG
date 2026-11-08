@@ -74,6 +74,7 @@ import { useLibrary } from './lib/hooks/useLibrary'
 import { useSelection } from './lib/hooks/useSelection'
 import { usePaneWidths } from './lib/hooks/usePaneWidths'
 import { usePersistAfterMount } from './lib/hooks/usePersistAfterMount'
+import { setConfigWriteReporter, writeConfig } from './lib/configWrite'
 import { useExport } from './lib/hooks/useExport'
 import { useFlashMessage } from './lib/hooks/useFlashMessage'
 import { LIBRARY, type View } from './lib/view'
@@ -165,7 +166,8 @@ export default function App() {
     setTheme,
     fontSize,
     setFontSize,
-    bumpFont
+    bumpFont,
+    configHydrated
   } = useConfig()
   const {
     lib,
@@ -271,8 +273,12 @@ export default function App() {
   useEffect(() => {
     window.api.loadNotes().then((n) => setNoteMap(n ?? {})).catch((e) => ignoreFailure(FAILURE.notesOptional, e))
     window.api.loadAnnotations().then((a) => setAnns(a ?? [])).catch((e) => ignoreFailure(FAILURE.annotationCacheOptional, e))
+    // Every preference write routes through writeConfig, which cannot reach
+    // the error banner by itself.  Hand it the setter once, here.
+    setConfigWriteReporter(setErr)
     const offUpd = window.api.onUpdateState(setUpd)
     return () => {
+      setConfigWriteReporter(null)
       offUpd()
     }
   }, [])
@@ -326,7 +332,7 @@ export default function App() {
   const toggleTheme = () => {
     const next = theme === 'light' ? 'dark' : 'light'
     setTheme(next)
-    void window.api.setConfig({ theme: next })
+    void writeConfig({ theme: next })
   }
 
   // Look for an update without being asked.  Nothing did this before, so the
@@ -690,7 +696,7 @@ export default function App() {
     ]
     setSaved(next)
     setActiveSearch(next[next.length - 1].id)
-    window.api.setConfig({ savedSearches: next })
+    writeConfig({ savedSearches: next })
   }
 
   const applySearch = (s: SavedSearch) => {
@@ -718,7 +724,7 @@ export default function App() {
     const next = saved.filter((x) => x.id !== id)
     setSaved(next)
     if (activeSearch === id) setActiveSearch(null)
-    window.api.setConfig({ savedSearches: next })
+    writeConfig({ savedSearches: next })
   }
 
   /** A view is the column layout and nothing else: saving one must not quietly
@@ -726,7 +732,7 @@ export default function App() {
    *  filter into it would do. */
   const changeCols = (next: ColKey[]) => {
     setCols(next)
-    window.api.setConfig({ cols: next })
+    writeConfig({ cols: next })
   }
 
   /**
@@ -749,7 +755,7 @@ export default function App() {
         ? { key: k, dir: (sort.dir * -1) as 1 | -1 }
         : { key: k, dir: SORT_DEFAULT_DIR[k] }
     setSort(next)
-    window.api.setConfig({ sort: next })
+    writeConfig({ sort: next })
   }
 
   /**
@@ -800,9 +806,10 @@ export default function App() {
   usePersistAfterMount(
     [colWidths],
     () => {
-      void window.api.setConfig({ colWidths })
+      void writeConfig({ colWidths })
     },
-    COLUMN_WIDTH_PERSIST_DEBOUNCE_MS
+    COLUMN_WIDTH_PERSIST_DEBOUNCE_MS,
+    configHydrated
   )
 
   const saveView = () => {
@@ -817,7 +824,7 @@ export default function App() {
           { id: 'v' + Date.now().toString(36), name, cols: [...cols] }
         ]
         setViews(next)
-        window.api.setConfig({ views: next })
+        writeConfig({ views: next })
       }
     })
   }
@@ -834,7 +841,7 @@ export default function App() {
     if (!go) return
     const next = views.filter((x) => x.id !== id)
     setViews(next)
-    window.api.setConfig({ views: next })
+    writeConfig({ views: next })
   }
 
   const savedCounts = useMemo(() => {
@@ -1153,7 +1160,7 @@ export default function App() {
   const changeFtPages = async (n: number) => {
     const next = clampFullTextPages(n)
     setFtPages(next)
-    await window.api.setConfig({ ftPages: next })
+    await writeConfig({ ftPages: next })
     setFtStat(await window.api.ftStatus())
   }
 
@@ -1161,7 +1168,8 @@ export default function App() {
     leftW,
     rightPct,
     setLeftW,
-    setRightPct
+    setRightPct,
+    configHydrated
   })
 
   const askNameTemplate = () => {
@@ -1172,7 +1180,7 @@ export default function App() {
         setAsk(null)
         const next = v.trim() || DEFAULT_PDF_TEMPLATE
         setNameTemplate(next)
-        window.api.setConfig({ pdfNameTemplate: next })
+        writeConfig({ pdfNameTemplate: next })
         const plan = await window.api.renamePdfs(next, false)
         if (!plan.total) return
         const go = await askConfirm({
@@ -1828,7 +1836,7 @@ export default function App() {
         citeStyle={citeStyle}
         onCiteStyle={(s) => {
           setCiteStyle(s)
-          void window.api.setConfig({ citeStyle: s })
+          void writeConfig({ citeStyle: s })
         }}
         view={view}
         onView={setView}
@@ -2094,7 +2102,7 @@ export default function App() {
             onIgnore={(ids) => {
               const next = [...dupeIgnores, ids]
               setDupeIgnores(next)
-              window.api.setConfig({ dupeIgnores: next })
+              writeConfig({ dupeIgnores: next })
             }}
             onRestore={(ids) => {
               const next = dupeIgnores.filter((e) => {
@@ -2103,7 +2111,7 @@ export default function App() {
                 return a !== [...ids].sort().join(' ')
               })
               setDupeIgnores(next)
-              window.api.setConfig({ dupeIgnores: next })
+              writeConfig({ dupeIgnores: next })
             }}
             onClose={() => setView(LIBRARY)}
             onOpen={(d) => {
@@ -2548,7 +2556,7 @@ export default function App() {
           }}
           onTheme={(t) => {
             setTheme(t)
-            void window.api.setConfig({ theme: t })
+            void writeConfig({ theme: t })
           }}
           onFont={(n) => bumpFont(n - fontSize)}
           onPickPdfDir={() => void pickDir()}
@@ -2559,15 +2567,15 @@ export default function App() {
           onCiteStyle={(s) => {
             if (!isCiteStyle(s)) return
             setCiteStyle(s)
-            void window.api.setConfig({ citeStyle: s })
+            void writeConfig({ citeStyle: s })
           }}
           onSyncOnStart={(v) => {
             setSyncOnStart(v)
-            void window.api.setConfig({ syncOnStart: v })
+            void writeConfig({ syncOnStart: v })
           }}
           onSyncPdfsOnSync={(v) => {
             setSyncPdfsOnSync(v)
-            void window.api.setConfig({ syncPdfsOnSync: v })
+            void writeConfig({ syncPdfsOnSync: v })
           }}
           onFtPages={(n) => void changeFtPages(n)}
         />

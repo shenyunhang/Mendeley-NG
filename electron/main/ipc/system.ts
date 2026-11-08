@@ -6,6 +6,7 @@ import { authorize } from '../auth'
 import { resetClient } from '../library'
 import { DEFAULT_PDF_DIR, loadConfig, saveConfig } from '../store'
 import { getWin } from '../window'
+import { isSafeExternalUrl, resolveInside } from '../../../shared/pathPolicy'
 import type { LeaveProgress } from '../../../shared/types'
 
 export function registerSystemIpc() {
@@ -108,28 +109,42 @@ export function registerSystemIpc() {
     ) => {
       const say = (p: LeaveProgress) => getWin()?.webContents.send('leave:progress', p)
       try {
-        fs.mkdirSync(dir, { recursive: true })
-        say({ phase: 'files', done: 0, total: files.length, bytes: 0 })
-        for (const f of files) {
-          fs.writeFileSync(path.join(dir, f.name), f.text, 'utf8')
+        // Every name below is renderer-supplied.  Joining one straight onto
+        // the chosen folder lets `../` or an absolute path write outside it,
+        // so resolve every destination first and refuse the whole run if any
+        // single name is not inside the folder the reader picked.
+        const root = path.resolve(dir)
+        const safeFiles = files.map((f) => {
+          const abs = resolveInside(root, f?.name)
+          if (!abs || typeof f?.text !== 'string') throw new Error(`不安全的导出文件名: ${String(f?.name)}`)
+          return { name: f.name, text: f.text, abs }
+        })
+        const safeCopies = copies.map((c) => {
+          const abs = resolveInside(root, c?.to)
+          if (!abs || typeof c?.from !== 'string') throw new Error(`不安全的 PDF 目标名: ${String(c?.to)}`)
+          return { from: c.from, to: c.to, abs }
+        })
+        fs.mkdirSync(root, { recursive: true })
+        say({ phase: 'files', done: 0, total: safeFiles.length, bytes: 0 })
+        for (const f of safeFiles) {
+          fs.writeFileSync(f.abs, f.text, 'utf8')
         }
-        say({ phase: 'files', done: files.length, total: files.length, bytes: 0 })
+        say({ phase: 'files', done: safeFiles.length, total: safeFiles.length, bytes: 0 })
 
         const failed: { from: string; error: string }[] = []
         let bytes = 0
         let done = 0
-        if (copies.length) {
-          fs.mkdirSync(path.join(dir, 'pdf'), { recursive: true })
-          for (const c of copies) {
+        if (safeCopies.length) {
+          fs.mkdirSync(path.join(root, 'pdf'), { recursive: true })
+          for (const c of safeCopies) {
             try {
               // A second export to the same folder must not silently replace
               // the PDFs the first one put there.  COPYFILE_EXCL makes the
               // check atomic; on a clash take the next free suffix and use
               // that one path for both the copy and the size that follows.
-              const ext = path.extname(c.to)
-              const stem = c.to.slice(0, c.to.length - ext.length)
-              let rel = c.to
-              let to = path.join(dir, rel)
+              const ext = path.extname(c.abs)
+              const stem = c.abs.slice(0, c.abs.length - ext.length)
+              let to = c.abs
               let suffix = 1
               for (;;) {
                 try {
@@ -138,8 +153,7 @@ export function registerSystemIpc() {
                 } catch (err) {
                   if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
                   suffix++
-                  rel = `${stem}-${suffix}${ext}`
-                  to = path.join(dir, rel)
+                  to = `${stem}-${suffix}${ext}`
                 }
               }
               try {
@@ -153,13 +167,13 @@ export function registerSystemIpc() {
             done++
             // every fiftieth, plus the last: five thousand sends would cost
             // more than the copying, and nothing in between is worth seeing
-            if (done % 50 === 0 || done === copies.length) {
-              say({ phase: 'pdf', done, total: copies.length, bytes })
+            if (done % 50 === 0 || done === safeCopies.length) {
+              say({ phase: 'pdf', done, total: safeCopies.length, bytes })
             }
           }
         }
-        say({ phase: 'done', done, total: copies.length, bytes })
-        return { dir, files: files.map((f) => f.name), copied: done - failed.length, failed, bytes }
+        say({ phase: 'done', done, total: safeCopies.length, bytes })
+        return { dir, files: safeFiles.map((f) => f.name), copied: done - failed.length, failed, bytes }
       } catch (e) {
         return { error: String(e) }
       }
@@ -210,10 +224,15 @@ export function registerSystemIpc() {
     async (_e, name: string, text: string, kind: string, ext: string) => {
       if (!getWin()) return { canceled: true }
       const cfg = loadConfig()
+      // Both come from the renderer.  Neither is a path the dialog has to
+      // honour: keep only a filename for the starting point and an ordinary
+      // alphanumeric suffix for the filter.
+      const safeName = path.basename(String(name ?? '')) || 'export.txt'
+      const safeExt = /^[a-z0-9]{1,8}$/i.test(String(ext ?? '')) ? String(ext) : 'txt'
       const r = await dialog.showSaveDialog(getWin()!, {
         title: `导出为 ${kind}`,
-        defaultPath: path.join(cfg.exportDir || app.getPath('downloads'), name),
-        filters: [{ name: kind, extensions: [ext] }],
+        defaultPath: path.join(cfg.exportDir || app.getPath('downloads'), safeName),
+        filters: [{ name: kind, extensions: [safeExt] }],
         properties: ['showOverwriteConfirmation']
       })
       if (r.canceled || !r.filePath) return { canceled: true }
@@ -245,7 +264,11 @@ export function registerSystemIpc() {
   })
 
   ipcMain.handle('shell:openExternal', (_e, url: string) => {
-    shell.openExternal(url)
+    // Only a web address may reach the OS shell.  A renderer that asked for
+    // `file:`, `smb:` or a custom protocol handler must not be able to turn
+    // an IPC call into launching something off the local disk.
+    if (!isSafeExternalUrl(url)) return { ok: false, error: 'unsupported url scheme' }
+    void shell.openExternal(url)
     return { ok: true }
   })
 

@@ -19,28 +19,40 @@ export interface UndoEntry {
  * at mount would still be looking at the first render's empty list, and Ctrl+Z
  * would undo nothing.  What the stack holds belongs to no one view — every
  * panel in the app can put a step on it.
+ *
+ * The ref is the authority, not the state.  React batches state updates, so
+ * two Ctrl+Z presses inside one render used to read the same `undo` array,
+ * claim the same top entry twice and pop the stack twice.  Popping the ref
+ * synchronously before the first `await` makes the second press see the new
+ * top, which is what "undo twice" is supposed to mean.
  */
 export function useUndo(onError: (message: string) => void) {
   const [undo, setUndo] = useState<UndoEntry[]>([])
+  const stackRef = useRef<UndoEntry[]>([])
 
   /** Most recent last, capped: an undo stack that grows without bound is a
    *  memory leak dressed up as a feature. */
   const pushUndo = useCallback((label: string, run: () => Promise<void>) => {
-    setUndo((s) => [...s, { id: 'u' + Date.now().toString(36), label, run }].slice(-20))
+    stackRef.current = [
+      ...stackRef.current,
+      { id: 'u' + Date.now().toString(36), label, run }
+    ].slice(-20)
+    setUndo(stackRef.current)
   }, [])
 
-  const doUndo = async () => {
-    const top = undo[undo.length - 1]
+  const doUndo = useCallback(async () => {
+    const top = stackRef.current[stackRef.current.length - 1]
     if (!top) return
     // pop first, so a failure cannot leave the same step to be retried
     // forever against a cloud that has already moved on
-    setUndo((s) => s.slice(0, -1))
+    stackRef.current = stackRef.current.slice(0, -1)
+    setUndo(stackRef.current)
     try {
       await top.run()
     } catch (e) {
       onError('撤销失败：' + String(e))
     }
-  }
+  }, [onError])
 
   // read by the keydown listener, which is installed once and outlives every
   // render: it has to be handed the current stack, not the one at mount

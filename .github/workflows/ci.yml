@@ -39,5 +39,11 @@ jobs:
       - name: Check both TypeScript projects
         run: npm run typecheck
 
+      # Pure-Node unit tests, unlike the smoke suite, need no window and no
+      # real library.  They are the only automated check of the pure rules
+      # shared by the main process and the renderer.
+      - name: Run unit tests
+        run: npm test
+
       - name: Build main, preload and renderer
         run: npm run build

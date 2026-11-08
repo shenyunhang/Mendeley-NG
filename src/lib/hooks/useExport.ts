@@ -65,13 +65,17 @@ export function useExport({
    * changed their mind, nothing went wrong.
    */
   const exportAs = async (fmt: 'bib' | 'ris' | 'xml') => {
-    const kind = fmt === 'bib' ? 'BibTeX' : fmt === 'ris' ? 'RIS' : 'EndNote XML'
-    const text =
-      fmt === 'bib' ? toBibtex(target) : fmt === 'ris' ? toRis(target) : toEndnoteXml(target)
-    const r = await window.api.saveText(`library.${fmt}`, text, kind, fmt)
-    if (r.error) setErr(`导出失败：${r.error}`)
-    else if (r.path) {
-      flashBatch(`已导出 ${target.length} 条到 ${r.path}`, EXPORT_BIBLIOGRAPHY_MESSAGE_VISIBLE_MS)
+    try {
+      const kind = fmt === 'bib' ? 'BibTeX' : fmt === 'ris' ? 'RIS' : 'EndNote XML'
+      const text =
+        fmt === 'bib' ? toBibtex(target) : fmt === 'ris' ? toRis(target) : toEndnoteXml(target)
+      const r = await window.api.saveText(`library.${fmt}`, text, kind, fmt)
+      if (r.error) setErr(`导出失败：${r.error}`)
+      else if (r.path) {
+        flashBatch(`已导出 ${target.length} 条到 ${r.path}`, EXPORT_BIBLIOGRAPHY_MESSAGE_VISIBLE_MS)
+      }
+    } catch (e) {
+      setErr(`导出失败：${String(e)}`)
     }
   }
   const exportBib = () => void exportAs('bib')
@@ -88,17 +92,21 @@ export function useExport({
    * fetchable again and the reading is not.
    */
   const exportNotes = async () => {
-    const withNotes = target.filter((d) => (noteMap[d.id] ?? '').trim())
-    if (!withNotes.length) return
-    const r = await window.api.saveText(
-      'notes.md',
-      toNotesMarkdown(withNotes, noteMap),
-      '笔记（Markdown）',
-      'md'
-    )
-    if (r.error) setErr(`导出失败：${r.error}`)
-    else if (r.path) {
-      flashBatch(`已导出 ${withNotes.length} 条笔记到 ${r.path}`, EXPORT_NOTES_MESSAGE_VISIBLE_MS)
+    try {
+      const withNotes = target.filter((d) => (noteMap[d.id] ?? '').trim())
+      if (!withNotes.length) return
+      const r = await window.api.saveText(
+        'notes.md',
+        toNotesMarkdown(withNotes, noteMap),
+        '笔记（Markdown）',
+        'md'
+      )
+      if (r.error) setErr(`导出失败：${r.error}`)
+      else if (r.path) {
+        flashBatch(`已导出 ${withNotes.length} 条笔记到 ${r.path}`, EXPORT_NOTES_MESSAGE_VISIBLE_MS)
+      }
+    } catch (e) {
+      setErr(`导出笔记失败：${String(e)}`)
     }
   }
   /** Whether there is anything to export, so the item can say so rather than
@@ -129,20 +137,24 @@ export function useExport({
    * nothing else can reach them, and they are the most exposed thing here.
    */
   const exportAnnotations = async () => {
-    const all = await window.api.loadAnnotations()
-    const pickedIds = new Set(target.map((d) => d.id))
-    const allIds = new Set(docs.map((d) => d.id))
-    const picked = all.filter((a) => pickedIds.has(a.docId) || !allIds.has(a.docId))
-    if (!picked.length) return
-    const r = await window.api.saveText(
-      'annotations.md',
-      toAnnotationsMarkdown(target, picked, docs),
-      '标注（Markdown）',
-      'md'
-    )
-    if (r.error) setErr(`导出失败：${r.error}`)
-    else if (r.path) {
-      flashBatch(`已导出 ${picked.length} 条标注到 ${r.path}`, EXPORT_ANNOTATIONS_MESSAGE_VISIBLE_MS)
+    try {
+      const all = await window.api.loadAnnotations()
+      const pickedIds = new Set(target.map((d) => d.id))
+      const allIds = new Set(docs.map((d) => d.id))
+      const picked = all.filter((a) => pickedIds.has(a.docId) || !allIds.has(a.docId))
+      if (!picked.length) return
+      const r = await window.api.saveText(
+        'annotations.md',
+        toAnnotationsMarkdown(target, picked, docs),
+        '标注（Markdown）',
+        'md'
+      )
+      if (r.error) setErr(`导出失败：${r.error}`)
+      else if (r.path) {
+        flashBatch(`已导出 ${picked.length} 条标注到 ${r.path}`, EXPORT_ANNOTATIONS_MESSAGE_VISIBLE_MS)
+      }
+    } catch (e) {
+      setErr(`导出标注失败：${String(e)}`)
     }
   }
   /**
@@ -159,7 +171,7 @@ export function useExport({
    * thirty gigabytes, and "do you want the PDFs too" without that figure is
    * not a question anybody can answer.
    */
-  const leaveLibrary = async () => {
+  const leaveLibraryInner = async () => {
     if (!target.length) return
     const dir = await window.api.pickDir('把这一库放到哪个文件夹')
     // choosing nothing is the reader changing their mind, not a failure
@@ -216,6 +228,17 @@ export function useExport({
       }
     } finally {
       off()
+    }
+  }
+
+  /** The dialog, the plan, the two re-reads and the copy are all awaits that
+   *  can reject.  One boundary for all of them, so a broken export says so
+   *  instead of leaving an unhandled rejection behind a silent button. */
+  const leaveLibrary = async () => {
+    try {
+      await leaveLibraryInner()
+    } catch (e) {
+      setErr(`导出失败：${String(e)}`)
     }
   }
 

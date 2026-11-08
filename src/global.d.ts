@@ -1,3 +1,12 @@
+/**
+ * The one IPC contract.  The preload script checks its implementation against
+ * this interface at compile time, and `window.d.ts` gives the renderer the
+ * same type.  There used to be two hand-written `Api` declarations -- one
+ * here, one derived from the preload object -- and they had already drifted:
+ * `openExternal` was declared `void` while the channel returned a promise.
+ * Keeping the declaration here also keeps the smoke run's wiring checks
+ * pointed at the file that actually names every channel.
+ */
 import type {
   Annotation,
   AppConfig,
@@ -127,19 +136,7 @@ export interface Api {
   installUpdate: () => Promise<{ ok: boolean }>
   onUpdateState: (cb: (s: UpdateState) => void) => () => void
   pdfUrl: (absPath: string) => string
-  openExternal: (url: string) => void
+  openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>
   revealPdf: (p: string) => Promise<{ ok: boolean; error?: string }>
   openPdfExternally: (p: string) => Promise<{ ok: boolean; error?: string }>
-}
-
-declare global {
-  interface Window {
-    api: Api
-  }
-}
-
-/** Vite turns an imported asset into the URL it was emitted at. */
-declare module '*.svg' {
-  const src: string
-  export default src
 }

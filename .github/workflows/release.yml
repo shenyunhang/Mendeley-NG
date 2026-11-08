@@ -30,6 +30,12 @@ jobs:
 
       - run: npm ci
 
+      # A tag can point at any commit, so this workflow cannot assume CI ran
+      # for it.  An installer must never be built from code that fails either
+      # TypeScript project or the unit suite.
+      - name: Check both TypeScript projects and the unit suite
+        run: npm run typecheck && npm test
+
       # --publish never: we create the release ourselves below, so electron-builder
       # must not try to publish (and must not look for a GitHub token of its own)
       #

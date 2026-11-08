@@ -299,6 +299,25 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 "明确不做"那几条，以及六张已经清空的代码审查 / 体检排期表（9.7–9.10、9.13、9.14）。
 这里刻意不写编号和断言数——它们每轮都变，唯一事实源是 HANDOFF 第 0 节。
 
+### 当前工作树：第七轮优化重构（未发版）
+
+0.1.112 之后的一轮，改的是安全边界、可验证性和工程化，不改功能开关：
+
+- **本地文件不再对渲染层全开**：`mendeley://pdf` 只服务库里的 PDF 与 PDF 目录下的文件；
+  导出时逐个校验目标名，写不穿所选文件夹；外部链接只放行 http/https；
+  `config:set` 只接受声明过的键和类型。规则集中在 `shared/pathPolicy.ts`，有独立单测。
+- **第一次有了单元测试**：Vitest + 416 个用例覆盖 shared 规则、渲染层纯函数与新的安全边界；
+  CI 与打包流程各加一道 `npm test` / `npm run typecheck` 门禁。
+- **IPC 契约只剩一份**：`src/global.d.ts` 是唯一来源，preload 的实现按它做类型检查，
+  原先漂移的 `openExternal` 返回类型和两处 `Promise<any>` 一并收口。
+- **生产启动不再背着冒烟脚本**：`--smoke` 改为按需动态加载，主进程入口从 1.30 MB 降到
+  0.89 MB；chunk 特意与 `index.js` 平级，因为主进程用 `__dirname` 定位 preload 与页面。
+- **静默失败变少**：二十多处配置写入统一经 `writeConfig` 上报失败；配置读取、全文索引控制、
+  四个导出动作的 rejection 都有边界；撤销连按、配置回读后的首次回写竞态、
+  卸载后仍在排队的动画帧也各自修好。
+
+按编号排的落地记录见 HANDOFF 第 9.15 / 10.5 节。
+
 ## 结构
 
 ```
@@ -447,15 +466,19 @@ cp scripts/hooks/post-commit .git/hooks/post-commit && chmod +x .git/hooks/post-
 ## 开发用的自检
 
 ```bash
+npm test                   # 纯 Node 单元测试：shared 规则、渲染层纯函数、安全边界
 npm run typecheck          # 双侧类型检查；npx tsc --noEmit 跑的是空配置，不算
 npm run build              # 先构建：smoke 不替你构建，跑的是 out/ 里那一版
 npm run smoke              # 真实库 + 真实 PDF 的端到端自检
 npm run smoke -- --no-sync # 用本地缓存，跳过同步
 ```
 
-`npm run typecheck` 是唯一真正做检查的入口：根 `tsconfig.json` 是 `files: []` +
+`npm test` 跑的是 `tests/` 下的 Vitest 用例：不开窗口、不碰真实库、不需要 Electron，
+所以它能进 CI，也是那些被主进程和渲染层共用的纯规则唯一的自动化回归。
+`npm run typecheck` 是唯一真正做类型检查的入口：根 `tsconfig.json` 是 `files: []` +
 `references`，`npx tsc --noEmit` 等于跑空。`.github/workflows/ci.yml` 会在每次
-push / PR 替你跑这一条和 `npm run build`；**冒烟不放进 CI**——它要开真实窗口读真实库
+push / PR 依次跑 `typecheck`、`test` 和 `build`，`release.yml` 在打包前也补了前两道——
+tag 可以指向任意提交，不能假定它走过 CI。**冒烟仍不放进 CI**——它要开真实窗口读真实库
 和 PDF，还量按键那一帧的主线程耗时，托管 runner 给不出诚实的答案。
 
 `--smoke` 跑的是**真实库和真实 PDF**：拉库、开隐藏窗口、逐条断言，日志用

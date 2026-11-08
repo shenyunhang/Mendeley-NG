@@ -227,6 +227,14 @@ export function usePdfFind(o: {
   const gotoRef = useRef(gotoHit)
   gotoRef.current = gotoHit
 
+  /** Focusing the box is deferred one frame, so it can outlive the keydown
+   *  effect that scheduled it.  Keep the id and cancel it on unmount rather
+   *  than letting a callback land after the pane is gone. */
+  const focusFrame = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (focusFrame.current !== null) cancelAnimationFrame(focusFrame.current)
+  }, [])
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
@@ -242,7 +250,9 @@ export function usePdfFind(o: {
         e.preventDefault()
         e.stopPropagation()
         setFindOpen(true)
-        requestAnimationFrame(() => {
+        if (focusFrame.current !== null) cancelAnimationFrame(focusFrame.current)
+        focusFrame.current = requestAnimationFrame(() => {
+          focusFrame.current = null
           findInput.current?.focus()
           findInput.current?.select()
         })

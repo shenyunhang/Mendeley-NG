@@ -66,6 +66,10 @@ export function useLibrary(syncOnStart: boolean, onError: (message: string | nul
         setLib(r)
         setFolders(r.folders ?? [])
       }
+    }).catch((_e: unknown) => {
+      // A cache that cannot be read is an empty library, and the first-run
+      // guide already explains that.  The alternative was an unhandled
+      // rejection on every start with a damaged library.json.
     })
     window.api.appVersion().then(setVersion).catch((e) => ignoreFailure(FAILURE.appVersionCosmetic, e))
     window.api.hasToken().then(setHasToken).catch(() => setHasToken(false))

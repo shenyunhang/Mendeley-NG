@@ -15,8 +15,27 @@ import { createWindow, getWin } from './window'
 import { initFt } from './ftops'
 import { registerIpc, setDemoMode } from './ipc'
 import { runDemo } from './demo'
-import { restoreSmokeConfig, runSmoke } from './smoke'
 import { runPerf } from './perf'
+import { loadConfig, loadLibrary } from './store'
+import { canServePdf } from '../../shared/pathPolicy'
+
+/**
+ * The papers whose PDFs live outside `pdfDir` are the only reason the
+ * protocol handler ever has to read library.json.  Remember them briefly:
+ * pdf.js asks for the same file more than once, and a full library is several
+ * megabytes.  A newly attached paper still appears within a second.
+ */
+const KNOWN_PDF_TTL_MS = 1000
+let knownPdfs = { at: 0, files: [] as string[] }
+function knownLocalPdfs(): string[] {
+  const now = Date.now()
+  if (now - knownPdfs.at < KNOWN_PDF_TTL_MS) return knownPdfs.files
+  const files = (loadLibrary()?.docs ?? [])
+    .map((d) => d.localPdf)
+    .filter((p): p is string => typeof p === 'string' && p.length > 0)
+  knownPdfs = { at: now, files }
+  return files
+}
 
 const alone = !wantsSingleInstance(process.argv) || app.requestSingleInstanceLock()
 if (!alone) {
@@ -30,16 +49,29 @@ app.on('second-instance', () => {
   if (w) bringUp(w)
 })
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!alone) return
-  // serve local PDFs through our own scheme so webSecurity stays on
+  // Serve local PDFs through our own scheme so webSecurity stays on.  The
+  // scheme is not a second file API: only the library's own PDFs may be
+  // fetched, so a renderer that somehow learned an arbitrary absolute path
+  // cannot read token.json, a browser profile, or anything else on the disk.
   protocol.handle('mendeley', (req) => {
     const u = new URL(req.url)
-    if (u.hostname === 'pdf') {
-      const p = decodeURIComponent(u.pathname.replace(/^\//, ''))
-      return net.fetch('file:///' + p.replace(/\\/g, '/').replace(/^\/+/, ''))
+    if (u.hostname !== 'pdf') return new Response('not found', { status: 404 })
+    let p: string
+    try {
+      p = decodeURIComponent(u.pathname.replace(/^\//, ''))
+    } catch {
+      return new Response('bad path', { status: 400 })
     }
-    return new Response('not found', { status: 404 })
+    const cfg = loadConfig()
+    const allowed = canServePdf({
+      candidate: p,
+      roots: [cfg.pdfDir],
+      knownFiles: knownLocalPdfs()
+    })
+    if (!allowed) return new Response('forbidden', { status: 403 })
+    return net.fetch('file:///' + p.replace(/\\/g, '/').replace(/^\/+/, ''))
   })
 
   if (process.argv.includes('--demo')) {
@@ -52,16 +84,30 @@ app.whenReady().then(() => {
   }
 
   if (process.argv.includes('--smoke')) {
+    // The smoke suite is twelve thousand lines of assertions.  Loading it
+    // only on this branch keeps it out of the production startup path and
+    // out of the bundle the reader launches every day.  It is still built as
+    // its own chunk, so `--smoke` works against exactly the same source.
+    let smoke: typeof import('./smoke')
+    try {
+      smoke = await import('./smoke')
+    } catch (e) {
+      console.log('[smoke] could not load', String(e))
+      app.exit(1)
+      return
+    }
     // a run that threw still has to hand the config back: the next run starts
     // from whatever this one left, and one crash would otherwise read as a
     // dozen failures of things that are not broken.  A run that got to its
     // own last line already put it back, and calling this again changes
     // nothing.
-    runSmoke().catch((e) => {
+    try {
+      await smoke.runSmoke()
+    } catch (e) {
       console.log('[smoke] crashed', String(e))
-      restoreSmokeConfig()
+      smoke.restoreSmokeConfig()
       app.exit(1)
-    })
+    }
     return
   }
 

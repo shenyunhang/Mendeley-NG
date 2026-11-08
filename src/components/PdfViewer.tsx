@@ -81,6 +81,22 @@ export default function PdfViewer({
    *  destructive thing in here, and it has no way back. */
   confirm: (req: { title: string; body?: string; ok?: string }) => Promise<boolean>
 }) {
+  /** Every deferred scroll or focus in here is a frame that belongs to this
+   *  component.  Closing the reader while one is queued used to let it run
+   *  against refs that no longer point at a mounted pane. */
+  const frameIds = useRef<number[]>([])
+  const scheduleFrame = useCallback((fn: () => void) => {
+    const id = requestAnimationFrame(() => {
+      frameIds.current = frameIds.current.filter((x) => x !== id)
+      fn()
+    })
+    frameIds.current.push(id)
+  }, [])
+  useEffect(() => () => {
+    for (const id of frameIds.current) cancelAnimationFrame(id)
+    frameIds.current = []
+  }, [])
+
   const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null)
   const [numPages, setNumPages] = useState(0)
   const [page, setPage] = useState(1)
@@ -295,7 +311,7 @@ export default function PdfViewer({
     const want = fresh ? jumpTo!.page : resumeRef.current[doc.id] ?? 1
     const at = clampToRange(want, 1, numPages)
     setPage(at)
-    if (continuous && at > 1) requestAnimationFrame(() => scrollToPage(at))
+    if (continuous && at > 1) scheduleFrame(() => scrollToPage(at))
     // A document that opens somewhere other than page one has to say why,
     // or it looks like the page counter is broken.
     setMsg(!fresh && at > 1 ? `回到上次读到的第 ${at} 页` : null)
@@ -653,7 +669,7 @@ export default function PdfViewer({
    */
   const reveal = (n: number) => {
     setPage(n)
-    if (continuous) requestAnimationFrame(() => scrollToPage(n))
+    if (continuous) scheduleFrame(() => scrollToPage(n))
   }
   const {
     findOpen,
@@ -795,7 +811,7 @@ export default function PdfViewer({
         setPage(idx + 1)
         // in continuous mode the column has to be moved as well; the page box
         // alone only labels the page, it does not bring it into view
-        if (continuous) requestAnimationFrame(() => scrollToPage(idx + 1))
+        if (continuous) scheduleFrame(() => scrollToPage(idx + 1))
       }
     } catch {
       /* outlines pointing at a missing destination are common enough */
@@ -1228,7 +1244,7 @@ export default function PdfViewer({
           title="在这篇 PDF 里查找文字  (Ctrl+F)"
           onClick={() => {
             setFindOpen((v) => {
-              if (!v) requestAnimationFrame(() => findInput.current?.focus())
+              if (!v) scheduleFrame(() => findInput.current?.focus())
               return !v
             })
           }}

@@ -179,13 +179,16 @@ export function useContinuousPages(o: {
     if (!root) return
     // the column is about to be relaid out at the new size, so ask again on
     // the next frame rather than measuring heights that are still old
-    requestAnimationFrame(() => {
+    const frame = requestAnimationFrame(() => {
       for (const el of root.querySelectorAll('[data-page]')) {
         const n = Number((el as HTMLElement).dataset.page)
         if (Number.isFinite(n)) visible.current.add(n)
       }
       repaintVisible(scale)
     })
+    // A second scale change, or an unmount, must not let a frame from the
+    // previous layout repaint pages at the old size.
+    return () => cancelAnimationFrame(frame)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scale, continuous])
 
