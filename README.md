@@ -282,9 +282,21 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 - **合并只补缺失字段，落败的进回收站而不是删掉**。合并是不可逆操作里最容易
   手滑的，让它可恢复比让它快更重要——现在还有撤销栈兜底。
 
+### 最近一次更新（0.1.112，未打 tag）
+
+一轮全面体检与重构，改的都是行为，没有新增功能开关：
+
+- **子文件夹终于真的能用**：选中子文件夹会带上它下面所有层级的文献。此前只有顶层文件夹算得出子树，篇数偏少，拖放还能把父文件夹拖进自己的后代。
+- **引文编号不再自作主张**：正文里的 `[1, 4]` 是两篇而不是 1 到 4 四篇，浮层不再列出不存在的文献。
+- **导出再导回不吃字段**：`working_paper` 从 RIS 导出去能原样回来，页码 `1-10` 不再被改写成 `1–10`。
+- **批量操作说实话**：两百条里失败三条会报出失败数和名单，不再只显示「197 条」；撤销也只对真正成功的条目生效。
+- **一次 Esc 只关一层**：阅读器里点开筛选浮层按 Esc 只关浮层，不再顺手退出整篇 PDF；对话框按 Esc 也不会清掉多选。
+- **不再静默指向旧文件或覆盖已有文件**：换 PDF 目录后的重挂载、重复导出到同一文件夹、同名 PDF 导入、云端返回的空 PDF，都有了明确处理；检查更新、令牌刷新、全文索引在并发和磁盘异常下的几处卡死也一并收口。
+- **提交前多一道闸**：每次 push / PR 自动跑双侧类型检查和构建；端到端冒烟仍只在本地跑（要真实库和可见窗口）。
+
 还没做的：无已坐实的缺陷，也没有在飞的排期。按编号排的改动历史在
 [HANDOFF.md](HANDOFF.md) 第 10 节；第 9 节留着的是竞品对照快照、"差距可以接受"、
-"明确不做"那几条，以及已经清空的两张代码审查排期表（9.7 / 9.8）。
+"明确不做"那几条，以及六张已经清空的代码审查 / 体检排期表（9.7–9.10、9.13、9.14）。
 这里刻意不写编号和断言数——它们每轮都变，唯一事实源是 HANDOFF 第 0 节。
 
 ## 结构
@@ -306,6 +318,7 @@ src/lib/hooks/            React 状态簇，按「谁跟谁一起变」切
   useConfig / useLibrary / useFullText / useUndo / useSelection / usePaneWidths
   useExport / useFlashMessage / useCiteCard
   useContinuousPages / usePdfFind / usePdfAnnotations / usePdfLinks / usePdfRefs
+  usePersistAfterMount    「首帧不写、变化才防抖写盘」这一条状态机，两处共用
 src/lib/                  与 React 无关的纯规则，主进程冒烟能直接 import 来测
   flash.ts              一条短消息只留一个待触发的清除（151 / 156）
   latestSearch.ts       只答当前那一个词，时钟与请求可注入（152）
@@ -317,20 +330,29 @@ src/lib/                  与 React 无关的纯规则，主进程冒烟能直�
   pdfgeom.ts / pdfcache.ts / pdftext.ts / pdffind.ts / pdfsel.ts
                         PDF 坐标换算、位图缓存、文本层、篇内查找、选区
   columns.ts / panes.ts / cite.ts / offline.ts / export.ts / import.ts
-                        列定义、三栏、引文格式、离线文案、导入导出
+                        列定义、三栏、引文格式、离线文案、导入导出；
+                        export.ts 里的 todayIso 是三处当日日期的唯一来源
   refly.ts / dupes.ts / pdfmeta.ts / pdflinks.ts / pdfrefs.ts
                         补全元数据、查重、抽标识符、PDF 链接与引文标记
   popspot.ts / filters.ts / view.ts / tree.ts / doctypes.ts / match.ts
                         浮层定位、筛选、视图与文件夹树等其余纯逻辑
+  splitPersonName.ts    RIS 与 EndNote 两处共用的姓名拆分
 shared/                   三端共享，只有一份的规则放这里
   types.ts / text.ts    共享类型与标题归一化（查源与查重共用）
   fullTextPages.ts      页数预算的唯一规则与边界（161 / 163）
   clamp.ts              六处裸夹取共用的纯规则 clampToRange（166）
   failures.ts           静默失败的具名原因、忽略 / 上报两道门（165）
+  atomicJson.ts         tmp + rename 的原子 JSON 写盘（凭据与 saveConfig 除外）
+  uniquePdfPath.ts      同名 PDF 找空位；位置全占满返回 null，调用方跳过而非覆盖
+  userAgent.ts          REST 客户端与查元数据共用的浏览器 UA
+  paged.ts              所有 marker 分页端点的四道防循环闸
 scripts/                  start.mjs 启动器、demo.mjs 假库与截图、get-token.mjs、
                           check-api.mjs、copy-worker.mjs、signcheck.mjs、
                           make-icon.mjs、hooks/
 docs/screenshots/         README 用的四张图，由 `npm run demo` 生成
+.github/workflows/
+  release.yml             推 v* tag 时构建安装包并挂到 Release
+  ci.yml                  每次 push / PR 跑 typecheck + build（不跑 smoke）
 ```
 
 完整的逐文件说明在 HANDOFF 第 4 节；上面这棵树的用途是让人一眼看出
@@ -347,6 +369,12 @@ docs/screenshots/         README 用的四张图，由 `npm run demo` 生成
 安装包**不进 git**（二进制会让仓库无谓膨胀），走 GitHub Release 分发。
 
 ### 自动（推荐）
+
+> **当前状态**：`package.json` 与 `package-lock.json` 已经是 `0.1.112`，但尚未打 tag、
+> 也尚未发 Release。这一版的功能改动与版本 bump 落在同一个提交（`79e8b99`）里，
+> 与下面「功能改动单独一个 commit，版本 bump 单独一个 commit」的惯例不同。
+> 要发这一版，**跳过 `npm version` 那一行**（版本号已经对了），补一个 Release commit
+> 后直接打 annotated tag；从下一版起仍按下面的常规流程走。
 
 `.github/workflows/release.yml` 会在推送 `v*` tag 时用 GitHub 的 Windows runner 编译并把 exe 挂到 Release：
 
@@ -419,10 +447,16 @@ cp scripts/hooks/post-commit .git/hooks/post-commit && chmod +x .git/hooks/post-
 ## 开发用的自检
 
 ```bash
+npm run typecheck          # 双侧类型检查；npx tsc --noEmit 跑的是空配置，不算
 npm run build              # 先构建：smoke 不替你构建，跑的是 out/ 里那一版
 npm run smoke              # 真实库 + 真实 PDF 的端到端自检
 npm run smoke -- --no-sync # 用本地缓存，跳过同步
 ```
+
+`npm run typecheck` 是唯一真正做检查的入口：根 `tsconfig.json` 是 `files: []` +
+`references`，`npx tsc --noEmit` 等于跑空。`.github/workflows/ci.yml` 会在每次
+push / PR 替你跑这一条和 `npm run build`；**冒烟不放进 CI**——它要开真实窗口读真实库
+和 PDF，还量按键那一帧的主线程耗时，托管 runner 给不出诚实的答案。
 
 `--smoke` 跑的是**真实库和真实 PDF**：拉库、开隐藏窗口、逐条断言，日志用
 `[smoke] PASS` / `[smoke] FAIL` 打点，最后一行出现 `all checks passed` 才算过。
@@ -478,3 +512,9 @@ npm run demo   # 造一份虚构的库，截取 README 里的四张图
 - **主进程产物不能是 ESM**：package.json 里不要写 `"type": "module"`，
   否则 `require('electron')` 的 CJS 互操作会挂。
 - **`app.quit()` 不接受参数**，要带退出码用 `app.exit(code)`。
+- **`tsconfig.node.json` 是手工白名单**：新增一个被主进程冒烟 import 的纯函数模块时，
+  必须把它列进 `include`，否则 `npm run typecheck` 报 TS6307；renderer 那侧由另一个
+  tsconfig 整目录覆盖，两边别搞混。
+- **读源码字符串的断言会随重构变红**：冒烟里有一类断言靠 `includes(...)` 证明某处接线，
+  把那段逻辑抽成模块后它就会误报。这类只用来佐证接线，规则本身要配固定输入的行为
+  断言；重构时同步校正断言，不要放宽判据。
