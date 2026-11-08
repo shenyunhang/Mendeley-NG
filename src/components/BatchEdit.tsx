@@ -79,6 +79,21 @@ export default function BatchEdit({ count, onClose, onApply }: Props) {
     ref.current?.focus()
   }, [op])
 
+  // The value field is a <select> for half the operations, and a select has
+  // no onKeyDown of its own to answer Esc. Take the key on the way down so
+  // one press closes this dialog and nothing underneath it, including the
+  // app's window listener that would drop the multi-selection.
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
+    }
+    window.addEventListener('keydown', h, true)
+    return () => window.removeEventListener('keydown', h, true)
+  }, [onClose])
+
   const def = OPS.find((o) => o.key === op)!
   const picked = def.options ? def.options.some((o) => o.value === val) : val.trim().length > 0
   const ready = !busy && picked
@@ -127,7 +142,6 @@ export default function BatchEdit({ count, onClose, onApply }: Props) {
               onChange={(e) => setVal(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') void run()
-                if (e.key === 'Escape') onClose()
               }}
             />
           )}

@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { PANE_WIDTH_PERSIST_DEBOUNCE_MS } from '../timing'
+import { usePersistAfterMount } from './usePersistAfterMount'
 import {
   LEFT_MAX,
   LEFT_MIN,
@@ -71,18 +72,13 @@ export function usePaneWidths({
    * question, and the debounce means one write per drag rather than one per
    * frame, which is a hundred writes to a file nobody asked to touch.
    */
-  const panesTouched = useRef(false)
-  useEffect(() => {
-    // the first run is the mount, not a change
-    if (!panesTouched.current) {
-      panesTouched.current = true
-      return
-    }
-    const t = setTimeout(() => {
+  usePersistAfterMount(
+    [leftW, rightPct],
+    () => {
       void window.api.setConfig({ paneLeft: leftW, paneRight: rightPct })
-    }, PANE_WIDTH_PERSIST_DEBOUNCE_MS)
-    return () => clearTimeout(t)
-  }, [leftW, rightPct])
+    },
+    PANE_WIDTH_PERSIST_DEBOUNCE_MS
+  )
 
   const setLeft = (w: number) => {
     const next = clampLeft(w)

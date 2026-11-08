@@ -25,7 +25,7 @@ const completeness = (d: Doc) =>
 
 /** Which one to keep: most complete record wins, and having the PDF on disk
  *  breaks ties, because that is the copy worth reading. */
-export function pickKeeper(docs: Doc[]): Doc {
+export function pickKeeper(docs: Doc[]): Doc | undefined {
   return [...docs].sort((a, b) => {
     const c = completeness(b) - completeness(a)
     if (c) return c

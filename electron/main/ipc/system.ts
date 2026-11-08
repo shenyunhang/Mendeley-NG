@@ -122,9 +122,28 @@ export function registerSystemIpc() {
           fs.mkdirSync(path.join(dir, 'pdf'), { recursive: true })
           for (const c of copies) {
             try {
-              fs.copyFileSync(c.from, path.join(dir, c.to))
+              // A second export to the same folder must not silently replace
+              // the PDFs the first one put there.  COPYFILE_EXCL makes the
+              // check atomic; on a clash take the next free suffix and use
+              // that one path for both the copy and the size that follows.
+              const ext = path.extname(c.to)
+              const stem = c.to.slice(0, c.to.length - ext.length)
+              let rel = c.to
+              let to = path.join(dir, rel)
+              let suffix = 1
+              for (;;) {
+                try {
+                  fs.copyFileSync(c.from, to, fs.constants.COPYFILE_EXCL)
+                  break
+                } catch (err) {
+                  if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+                  suffix++
+                  rel = `${stem}-${suffix}${ext}`
+                  to = path.join(dir, rel)
+                }
+              }
               try {
-                bytes += fs.statSync(path.join(dir, c.to)).size
+                bytes += fs.statSync(to).size
               } catch {
                 /* the size is only for the progress line */
               }

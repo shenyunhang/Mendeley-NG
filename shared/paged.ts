@@ -31,11 +31,13 @@ export async function collectPaged<T extends { id?: string | null }>(
     }
     const fresh = rows.filter((r) => !r.id || !seen.has(r.id))
     const newIds = rows.filter((r) => !!r.id && !seen.has(r.id)).length
+    // Keep this page's rows before deciding to stop: a page can mix duplicate
+    // ids with new rows that have no id at all, and those must not be lost.
+    out.push(...fresh)
     // The server ignored the marker, or the marker was the wrong field: this
     // is the same page again. Pushing it would write thousands of duplicate
     // folders into library.json, and asking again would never terminate.
     if (newIds === 0) break
-    out.push(...fresh)
     for (const r of fresh) if (r.id) seen.add(r.id)
     onPage?.(out.length)
     if (rows.length < limit) break

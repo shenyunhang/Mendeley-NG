@@ -24,5 +24,5 @@ const NOT_KEY_CHAR = /[^A-Za-z\u3400-\u9fff]/g
 
 export function citationKeyStem(last: string, year: Doc['year']): string {
   const cleaned = (last || 'anon').replace(NOT_KEY_CHAR, '') || 'anon'
-  return cleaned.toLowerCase() + (year ?? '')
+  return cleaned.toLowerCase() + (Number.isFinite(year) ? year : '')
 }

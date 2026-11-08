@@ -17,7 +17,7 @@ const TYPES: Record<string, [bibtex: string, ris: string]> = {
   book_section: ['incollection', 'CHAP'],
   thesis: ['phdthesis', 'THES'],
   report: ['techreport', 'RPRT'],
-  working_paper: ['unpublished', 'GEN'],
+  working_paper: ['unpublished', 'WP'],
   web_page: ['misc', 'ELEC'],
   patent: ['misc', 'PAT'],
   magazine_article: ['article', 'MGZN'],

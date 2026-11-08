@@ -8,6 +8,7 @@ import { ftCancel, ftClear, ftSearch, ftStatus } from '../fulltext'
 import { ftDocs, indexAdded, startBuild } from '../ftops'
 import { DEFAULT_PDF_DIR, loadConfig, loadLibrary, saveLibrary } from '../store'
 import type { Doc } from '../../../shared/types'
+import { uniquePdfPath } from '../../../shared/uniquePdfPath'
 
 export function registerFilesIpc() {
 
@@ -85,18 +86,18 @@ export function registerFilesIpc() {
       const meta = await c.fileMeta(docId)
       if (!meta) return { ok: false, error: '云端没有这篇的附件' }
       const buf = await c.downloadFile(meta.id)
+      // A 200 with an empty body is not a PDF: do not write a zero-byte file
+      // or point localPdf at one.  Same guard as doc:importPdf.
+      if (!buf.length) return { ok: false, error: '下载内容为空' }
       const cfg = loadConfig()
       const dir = cfg.pdfDir || DEFAULT_PDF_DIR
       fs.mkdirSync(dir, { recursive: true })
       const lib = loadLibrary()
       const doc = lib?.docs.find((d) => d.id === docId)
-      let dest = path.join(dir, pdfNameFor(doc, meta.file_name, cfg.pdfNameTemplate))
-      for (let n = 2; fs.existsSync(dest) && n < 50; n++) {
-        dest = path.join(
-          dir,
-          pdfNameFor(doc, meta.file_name, cfg.pdfNameTemplate).replace(/\.pdf$/, ` (${n}).pdf`)
-        )
-      }
+      const wanted = pdfNameFor(doc, meta.file_name, cfg.pdfNameTemplate)
+      const dest = uniquePdfPath(dir, wanted)
+      // Every candidate name is taken: skip rather than overwrite a PDF.
+      if (!dest) return { ok: false, error: '没有可用的文件名' }
       fs.writeFileSync(dest, buf)
       if (lib && doc) {
         doc.localPdf = dest

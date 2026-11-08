@@ -2,6 +2,7 @@ import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Annotation, AppConfig, Doc, Folder, Library } from '../../shared/types'
+import { atomicWriteJson } from '../../shared/atomicJson'
 
 function dir() {
   const d = path.join(app.getPath('userData'), 'library')
@@ -47,7 +48,8 @@ export function loadConfig(): Config {
 }
 
 /** Atomic, like every other write in this file: a process killed mid-write
- *  used to leave half a JSON behind and silently lose every setting. */
+ *  used to leave half a JSON behind and silently lose every setting.  Kept
+ *  inline because the smoke run asserts this exact tmp-then-rename shape. */
 export function saveConfig(c: Config) {
   const tmp = cfgFile() + '.tmp'
   fs.writeFileSync(tmp, JSON.stringify(c, null, 2), 'utf-8')
@@ -70,11 +72,8 @@ export function loadLibrary(): Library | null {
 }
 
 function writeLibrary(docs: Doc[], folders: Folder[], syncedAt: string) {
-  // write-then-rename so an interrupted write cannot leave a half file behind
-  const tmp = libFile() + '.tmp'
   const lib: Library = { docs, folders, syncedAt }
-  fs.writeFileSync(tmp, JSON.stringify(lib), 'utf-8')
-  fs.renameSync(tmp, libFile())
+  atomicWriteJson(libFile(), lib)
 }
 
 /**
@@ -99,7 +98,9 @@ export function saveLibraryFromSync(docs: Doc[], folders: Folder[]) {
 
 export function loadAnnotations(): Annotation[] {
   try {
-    return JSON.parse(fs.readFileSync(annFile(), 'utf-8')) as Annotation[]
+    const raw = JSON.parse(fs.readFileSync(annFile(), 'utf-8')) as unknown
+    if (!Array.isArray(raw)) return []
+    return raw.filter((a) => !!a && typeof a === 'object') as Annotation[]
   } catch {
     return []
   }
@@ -109,16 +110,20 @@ export function loadAnnotations(): Annotation[] {
  *  "No service found" — so these can only ever live here, and the UI says so. */
 export function loadNotes(): Record<string, string> {
   try {
-    return JSON.parse(fs.readFileSync(notesFile(), 'utf-8')) as Record<string, string>
+    const raw = JSON.parse(fs.readFileSync(notesFile(), 'utf-8')) as unknown
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(raw)) {
+      if (typeof v === 'string') out[k] = v
+    }
+    return out
   } catch {
     return {}
   }
 }
 
 export function saveNotes(notes: Record<string, string>) {
-  const tmp = notesFile() + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify(notes, null, 1), 'utf-8')
-  fs.renameSync(tmp, notesFile())
+  atomicWriteJson(notesFile(), notes, 1)
 }
 
 /**
@@ -145,13 +150,9 @@ export function loadReading(): Record<string, number> {
 }
 
 export function saveReading(m: Record<string, number>) {
-  const tmp = readFile() + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify(m), 'utf-8')
-  fs.renameSync(tmp, readFile())
+  atomicWriteJson(readFile(), m)
 }
 
 export function saveAnnotations(list: Annotation[]) {
-  const tmp = annFile() + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify(list, null, 1), 'utf-8')
-  fs.renameSync(tmp, annFile())
+  atomicWriteJson(annFile(), list, 1)
 }

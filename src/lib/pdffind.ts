@@ -17,6 +17,9 @@ export const pageText = (items: unknown[]): TextRun[] =>
  *  taken at scale 1 so the numbers are PDF points, which is the same space
  *  `posToRect` converts annotation positions from. */
 export const runRect = (it: TextRun, vp: pdfjs.PageViewport, s: Size): Rect => {
+  if (!Number.isFinite(s.w) || !Number.isFinite(s.h) || s.w <= 0 || s.h <= 0) {
+    return { x: 0, y: 0, w: 0, h: 0 }
+  }
   const tx = pdfjs.Util.transform(vp.transform, it.transform)
   const fh = Math.hypot(tx[2], tx[3]) || Math.abs(it.height) || 10
   const w = Math.abs(it.width) || fh * 0.5

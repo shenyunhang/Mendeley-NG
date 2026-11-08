@@ -1,0 +1,43 @@
+# Checks every push before an installer is ever built for it.
+#
+# release.yml only runs on v* tags and does `npm run dist`, which bundles
+# whatever is in the checkout at that moment. A type error that only shows up
+# in one of the two tsconfig projects used to be invisible until then, and
+# `npm run typecheck` -- not `npx tsc --noEmit`, whose root config is empty --
+# is the only command that checks both halves.
+#
+# The smoke suite is deliberately absent: it drives a real Electron window
+# against the user's real library and real PDFs, and it measures one keystroke's
+# main-thread cost. Neither a hosted runner nor a headless session can give
+# that an honest answer, so it stays a local gate.
+
+name: Type check and build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check both TypeScript projects
+        run: npm run typecheck
+
+      - name: Build main, preload and renderer
+        run: npm run build

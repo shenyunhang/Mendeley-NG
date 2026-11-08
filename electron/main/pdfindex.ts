@@ -68,7 +68,6 @@ export function attachPdfs(docs: Doc[], pdfDir: string): MatchResult {
   }
 
   const used = new Set<string>()
-  let matched = 0
   for (const d of docs) {
     const k = KEY(d.title ?? '')
     if (!k) continue
@@ -77,22 +76,13 @@ export function attachPdfs(docs: Doc[], pdfDir: string): MatchResult {
     if (hit) {
       d.localPdf = path.join(pdfDir, hit)
       used.add(hit)
-      matched++
     }
   }
-  // second chance for docs that are still without a file
-  for (const d of docs) {
-    if (d.localPdf) continue
-    const k = KEY(d.title ?? '')
-    const hit = byTitle.get(k)
-    if (hit) {
-      d.localPdf = path.join(pdfDir, hit)
-      used.add(hit)
-      matched++
-    }
-  }
+  // Count distinct files actually attached, not documents: several records
+  // can share one title and land on the same PDF, and counting documents made
+  // the panel say things like "6000 / 5245".
   return {
-    matched,
+    matched: used.size,
     total: files.length,
     unmatchedFiles: files.filter((f) => !used.has(f)).slice(0, 200)
   }

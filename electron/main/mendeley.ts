@@ -4,16 +4,10 @@ import path from 'node:path'
 import type { CloudAnnotation, Doc, Folder } from '../../shared/types'
 import { collectFileDocumentIds, type FilePageRow } from '../../shared/filePages'
 import { collectPaged } from '../../shared/paged'
+import { UA } from '../../shared/userAgent'
 
 const BASE = 'https://api.mendeley.com'
 const TOKEN_URL = BASE + '/oauth/token'
-
-/** Cloudflare in front of api.mendeley.com answers error 1010 to anything that
- *  looks like a script, and that includes /oauth/token.  Every request has to
- *  go out with a browser User-Agent or the whole thing silently fails. */
-const UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-  '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 
 const CT_DOC = 'application/vnd.mendeley-document.1+json'
 const CT_FOLDER = 'application/vnd.mendeley-folder.1+json'
@@ -65,7 +59,21 @@ export class Mendeley {
     }
   }
 
-  private async refresh() {
+  private refreshPromise: Promise<void> | null = null
+
+  /** Concurrent callers share one refresh.  Without this, several requests
+   *  that all see an expired token start separate refreshes, and the second
+   *  `this.tok` assignment and `save()` can overwrite the first. */
+  private refresh(): Promise<void> {
+    if (!this.refreshPromise) {
+      this.refreshPromise = this.doRefresh().finally(() => {
+        this.refreshPromise = null
+      })
+    }
+    return this.refreshPromise
+  }
+
+  private async doRefresh() {
     const rt = this.tok.refresh_token
     if (!rt) throw new Error('no refresh_token; re-authorisation needed')
     const body = new URLSearchParams({

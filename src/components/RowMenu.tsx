@@ -54,7 +54,10 @@ export default function RowMenu({ x, y, head, items, onClose }: Props) {
       if (!ref.current?.contains(e.target as Node)) onClose()
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
     }
     // capture, so a menu dismissed by a click on a row does not also let that
     // click through and open another one

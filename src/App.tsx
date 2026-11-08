@@ -37,7 +37,6 @@ import {
 import { DEFAULT_LEFT_W, DEFAULT_RIGHT_PCT } from './lib/panes'
 import {
   ALL_HAVE_PDF_MESSAGE_VISIBLE_MS,
-  BATCH_ACTION_MESSAGE_VISIBLE_MS,
   BATCH_CLEAN_MESSAGE_VISIBLE_MS,
   BATCH_FAILED_MESSAGE_VISIBLE_MS,
   CITATION_COPIED_MESSAGE_VISIBLE_MS,
@@ -74,6 +73,7 @@ import { useUndo } from './lib/hooks/useUndo'
 import { useLibrary } from './lib/hooks/useLibrary'
 import { useSelection } from './lib/hooks/useSelection'
 import { usePaneWidths } from './lib/hooks/usePaneWidths'
+import { usePersistAfterMount } from './lib/hooks/usePersistAfterMount'
 import { useExport } from './lib/hooks/useExport'
 import { useFlashMessage } from './lib/hooks/useFlashMessage'
 import { LIBRARY, type View } from './lib/view'
@@ -313,7 +313,11 @@ export default function App() {
       ok: '彻底删除'
     })
     if (!go) return
-    await window.api.purgeDoc(id)
+    const r = await window.api.purgeDoc(id)
+    if (!r.ok) {
+      setErr('彻底删除失败：云端没有确认，这条还留在回收站里。')
+      return
+    }
     setView((v) =>
       v.kind === 'trash' ? { ...v, docs: v.docs.filter((x) => x.id !== id) } : v
     )
@@ -361,13 +365,6 @@ export default function App() {
           setSetSec(null)
           return
         }
-        // out of the reading view and back to the table, which is where the
-        // key is pressed from and the only place it can mean "leave"
-        if (view.kind === 'reader') {
-          e.preventDefault()
-          setView(LIBRARY)
-          return
-        }
         if (showCols) {
           e.preventDefault()
           setShowCols(false)
@@ -381,6 +378,15 @@ export default function App() {
         if (showFilters) {
           e.preventDefault()
           setShowFilters(false)
+          return
+        }
+        // out of the reading view and back to the table, which is where the
+        // key is pressed from and the only place it can mean "leave". It
+        // comes after the cards so a press over an open card closes the card
+        // instead of leaving the reader still underneath it.
+        if (view.kind === 'reader') {
+          e.preventDefault()
+          setView(LIBRARY)
           return
         }
         // last: drop a multi-selection without touching the row that is
@@ -791,18 +797,13 @@ export default function App() {
    * a file nobody asked to touch.  The pane widths are remembered the same way
    * for the same two reasons.
    */
-  const widthsTouched = useRef(false)
-  useEffect(() => {
-    // the first run is the mount, not a change
-    if (!widthsTouched.current) {
-      widthsTouched.current = true
-      return
-    }
-    const t = setTimeout(() => {
+  usePersistAfterMount(
+    [colWidths],
+    () => {
       void window.api.setConfig({ colWidths })
-    }, COLUMN_WIDTH_PERSIST_DEBOUNCE_MS)
-    return () => clearTimeout(t)
-  }, [colWidths])
+    },
+    COLUMN_WIDTH_PERSIST_DEBOUNCE_MS
+  )
 
   const saveView = () => {
     setAsk({
@@ -856,6 +857,14 @@ export default function App() {
     return m
   }, [saved, docs, tree, haystack])
 
+  // The anchor is an index into the current list, so anything that reshapes
+  // the list invalidates it. Without this, clicking row 100 in a wide list
+  // and then narrowing it to three rows with a search would span from an
+  // index that no longer points at the paper it was set on.
+  useEffect(() => {
+    lastIdx.current = null
+  }, [query, folderId, filters, sort])
+
   /**
    * Selection follows the file manager the user already knows: shift-click
    * spans a range, ctrl-click toggles one, a plain click replaces.  The last
@@ -867,9 +876,10 @@ export default function App() {
     index: number,
     mod: { shift: boolean; add: boolean }
   ) => {
-    if (mod.shift && lastIdx.current != null) {
-      const a = Math.min(lastIdx.current, index)
-      const b = Math.max(lastIdx.current, index)
+    const anchor = lastIdx.current
+    if (mod.shift && anchor != null && anchor >= 0 && anchor < filtered.length) {
+      const a = Math.min(anchor, index)
+      const b = Math.max(anchor, index)
       setMulti(filtered.slice(a, b + 1).map((x) => x.id))
     } else if (mod.add) {
       setMulti((m) => (m.includes(d.id) ? m.filter((x) => x !== d.id) : [...m, d.id]))
@@ -1012,6 +1022,14 @@ export default function App() {
     // a click on the × leaves nothing focused at all otherwise
     searchRef.current?.focus()
   }, [setFtQuery])
+
+  /** Typing a new query is not the saved search that was highlighted: the
+   *  name in the sidebar must not keep claiming a filter the box no longer
+   *  matches. */
+  const onQuery = (v: string) => {
+    setQuery(v)
+    setActiveSearch(null)
+  }
 
   /**
    * What the empty table says.  "没有匹配的文献" covered an empty library, a
@@ -1401,25 +1419,31 @@ export default function App() {
   const setFlagsFor = async (list: Doc[], patch: Partial<Doc>, label: string) => {
     if (!list.length) return
     const keys = Object.keys(patch) as (keyof Doc)[]
-    const prev = list.map((d) => {
+    const prev = new Map<string, Record<string, unknown>>()
+    for (const d of list) {
       const o: Record<string, unknown> = {}
       for (const k of keys) o[k] = d[k]
-      return o
-    })
-    let n = 0
-    for (const d of list) {
-      try {
-        await setFlags(d, patch)
-        n++
-      } catch {
-        /* one failure should not abandon the rest of the batch */
-      }
+      prev.set(d.id, o)
     }
-    flashBatch(`${label} ${n} 条`, BATCH_ACTION_MESSAGE_VISIBLE_MS)
+    const changedIds: string[] = []
+    const { ok: n, failed } = await runBatch(
+      list,
+      (d) => d.title || d.id,
+      async (d) => {
+        await setFlags(d, patch)
+        changedIds.push(d.id)
+      },
+      (done, total) => showBatch(`${label} ${done}/${total}…`)
+    )
+    reportBatch(label, n, failed)
     if (n) {
+      // Only what actually landed is undoable. Titles repeat across records,
+      // so filter by ids actually reported successful rather than by the
+      // failed names, which would drop a successful namesake.
+      const changed = list.filter((d) => changedIds.includes(d.id))
       pushUndo(`${label} ${n} 条`, async () => {
         await Promise.all(
-          list.map((d, i) => window.api.patchDoc(d.id, prev[i]!).catch(() => null))
+          changed.map((d) => window.api.patchDoc(d.id, prev.get(d.id)!).catch(() => null))
         )
         // re-read rather than merging: the PATCH response does not always echo
         // every flag, and a row that still shows the old value looks like the
@@ -1536,7 +1560,8 @@ export default function App() {
       list,
       (d) => d.title || d.id,
       async (d) => {
-        await window.api.trashDoc(d.id)
+        const r = await window.api.trashDoc(d.id)
+        if (!r.ok) throw new Error('the cloud refused to trash this document')
       },
       (done, total) => showBatch(`正在移入回收站 ${done}/${total}…`)
     )
@@ -1808,7 +1833,7 @@ export default function App() {
         view={view}
         onView={setView}
         query={query}
-        onQuery={setQuery}
+        onQuery={onQuery}
         ftQuery={ftQuery}
         onFtQuery={setFtQuery}
         onClearSearch={clearSearch}
@@ -2142,7 +2167,13 @@ export default function App() {
               // put it back rather than only resurrecting the losers
               const prev: Record<string, unknown> = {}
               for (const f of Object.keys(patch)) prev[f] = field(keeper, f)
-              for (const o of others) await window.api.trashDoc(o.id)
+              for (const o of others) {
+                const r = await window.api.trashDoc(o.id)
+                if (!r.ok) {
+                  setErr(`合并没能完成：「${o.title || '无标题'}」没有被移入回收站。`)
+                  return
+                }
+              }
               const gone = new Set(others.map((o) => o.id))
               setLib((l) =>
                 l
@@ -2450,7 +2481,11 @@ export default function App() {
                   ok: '移入回收站'
                 })
                 if (!go) return
-                await window.api.trashDoc(selected.id)
+                const r = await window.api.trashDoc(selected.id)
+                if (!r.ok) {
+                  setErr('移入回收站失败：云端没有确认，这条还在库里。')
+                  return
+                }
                 setLib((l) => (l ? { ...l, docs: l.docs.filter((x) => x.id !== selected.id) } : l))
                 setSelId(null)
               }}

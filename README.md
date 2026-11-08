@@ -246,6 +246,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 复制引文 | 六种样式（作者（年份）/ 全作者 / 编号 / 完整条目 / BibTeX key / BibTeX 条目），Ctrl+Shift+C |
 | 检查更新 | 一键从 GitHub Releases 拉新版、下载、安装并重启 |
 | 安装包签名 | CI 已接好，配上证书即签名；`npm run signcheck` 可自查是否签上 |
+| 提交前检查 | 每次 push / PR 由 `.github/workflows/ci.yml` 跑 `npm run typecheck`（两个 tsconfig 工程都查）与 `npm run build`；`npm run smoke` 要真实库和可见窗口，只在本地跑 |
 
 ### 附带（保留，但不占工具栏主位）
 
@@ -350,11 +351,11 @@ docs/screenshots/         README 用的四张图，由 `npm run demo` 生成
 `.github/workflows/release.yml` 会在推送 `v*` tag 时用 GitHub 的 Windows runner 编译并把 exe 挂到 Release：
 
 ```bash
-npm version 0.1.97 --no-git-tag-version   # package.json 与 package-lock.json 一起改
+npm version 0.1.112 --no-git-tag-version   # package.json 与 package-lock.json 一起改
 git add package.json package-lock.json
-git commit -m "Release v0.1.97"
-git tag -a v0.1.97 -m "Release v0.1.97"  # 必须是 annotated tag
-git push origin v0.1.97
+git commit -m "Release v0.1.112"
+git tag -a v0.1.112 -m "Release v0.1.112"  # 必须是 annotated tag
+git push origin v0.1.112
 ```
 
 **tag 必须是 annotated（`-a`）**：本仓库踩过「Release commit 有了、tag 是轻量的，
@@ -384,7 +385,8 @@ Release 附件必须同时包含**安装包和 `latest.yml`**：后者是 `elect
 需要点两次"更多信息 → 仍要运行"才能装。消除它只有一个办法：**用代码签名证书签名**，
 没有别的取巧途径。
 
-本仓库的 CI 已经接好了，只是默认没有证书所以不签。要启用：
+`release.yml`（打 `v*` tag 时打包签名）已经接好了，只是默认没有证书所以不签；
+另有一份 `ci.yml` 在每次 push / PR 跑类型检查与构建，两者互不影响。要启用签名：
 
 1. 买一张 Windows 代码签名证书（OV 即可，IV 会更快建立声誉；
    各 CA 价格差异很大，属个人开支）。拿到 `.pfx`/`.p12` 和它的密码。

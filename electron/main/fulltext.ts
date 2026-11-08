@@ -10,6 +10,7 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { DEFAULT_FT_PAGES, type Doc, type FtHit, type FtStatus } from '../../shared/types'
 import { clampFullTextPages } from '../../shared/fullTextPages'
 import { docsWithAllWords, type WordOccurrence } from '../../shared/wordCoverage'
+import { atomicWriteJson } from '../../shared/atomicJson'
 /** One lane is the floor; four is the ceiling even on a many-core box. */
 const MIN_INDEX_LANES = 1
 const MAX_INDEX_LANES = 4
@@ -261,6 +262,24 @@ let voided: 'format' | 'budget' | null = null
 /** What the unreadable index was built with, when the budget is the reason. */
 let voidedPages = 0
 
+/** Whether a parsed table has the shape the rest of this module reads:
+ *  offsets, page bounds and a byte anchor that are real numbers.  A legal
+ *  JSON object with the right version but a missing entries/bytes used to be
+ *  cached and written back, while Object.keys(m.entries) threw on every call. */
+function isMetaShape(m: unknown): m is Meta {
+  if (!m || typeof m !== 'object') return false
+  const x = m as Meta
+  if (typeof x.bytes !== 'number' || !Number.isFinite(x.bytes) || x.bytes < 0) return false
+  if (!x.entries || typeof x.entries !== 'object' || Array.isArray(x.entries)) return false
+  for (const e of Object.values(x.entries)) {
+    if (!e || typeof e !== 'object') return false
+    if (typeof e.start !== 'number' || !Number.isFinite(e.start)) return false
+    if (typeof e.len !== 'number' || !Number.isFinite(e.len)) return false
+    if (!Array.isArray(e.bounds) || !e.bounds.every((b) => typeof b === 'number' && Number.isFinite(b))) return false
+  }
+  return true
+}
+
 function loadMeta(): Meta {
   if (meta) return meta
   legacy = false
@@ -268,15 +287,19 @@ function loadMeta(): Meta {
   voidedPages = 0
   try {
     const m = JSON.parse(fs.readFileSync(metaFile(), 'utf8')) as Meta
+    const sameFormat = m?.version === 2 && m?.pages === pages
     // an index built with a different page budget does not describe the same
     // thing as the one the user is about to search, so it is discarded; so is
     // one written before the byte anchor existed, because there is no way to
     // tell where its text file can safely be appended to
-    if (m?.version === 2 && m.pages === pages) {
+    if (sameFormat && isMetaShape(m)) {
       meta = m
       return meta
     }
-    if (m?.version) {
+    // A malformed table in the current format is a broken file, not an old
+    // build: fall through to a fresh empty one instead of blaming a version
+    // change.  A genuinely older (or different-budget) table still says so.
+    if (m?.version && !sameFormat) {
       legacy = true
       // Same storage, different budget: the reader did this, and the sentence
       // has to be about a number they can put back.  Anything else is an
@@ -307,7 +330,7 @@ function endOf(m: Meta): number {
  *  table). Pass the owner explicitly. */
 function saveMeta(owned: Meta | null = meta) {
   if (!owned || !dir) return
-  fs.writeFileSync(metaFile(), JSON.stringify(owned))
+  atomicWriteJson(metaFile(), owned)
 }
 
 /**
@@ -792,17 +815,20 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
   const budget = pages
   let at = endOf(m)
   let byteAt = m.bytes
-  // The byte anchor decides both where the text goes and whether the file has
-  // to be cut back first, for the same reason `ftBuild` does it: everything
-  // after it is text that was written but never recorded.  An entry table with
-  // no anchor behind it cannot be appended to at all.
-  const had = fs.existsSync(dataFile())
-  const size = had ? fs.statSync(dataFile()).size : 0
-  const out = fs.openSync(dataFile(), had && m.bytes <= size ? 'r+' : 'w')
+  let out = -1
   let added = 0
   /** Whether a deferred clear was applied at the end of this append. */
   let clearedWhileAdding = false
   try {
+    // The byte anchor decides both where the text goes and whether the file has
+    // to be cut back first, for the same reason `ftBuild` does it: everything
+    // after it is text that was written but never recorded.  An entry table with
+    // no anchor behind it cannot be appended to at all.  The open and stat used
+    // to sit before this `try`; one failure there left `busy` set for the rest
+    // of the session, so they live inside the run now and `finally` clears it.
+    const had = fs.existsSync(dataFile())
+    const size = had ? fs.statSync(dataFile()).size : 0
+    out = fs.openSync(dataFile(), had && m.bytes <= size ? 'r+' : 'w')
     if (had && m.bytes <= size) fs.ftruncateSync(out, m.bytes)
     else {
       m.entries = {}
@@ -847,7 +873,13 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
       added++
     }
   } finally {
-    fs.closeSync(out)
+    if (out >= 0) {
+      try {
+        fs.closeSync(out)
+      } catch {
+        /* already gone */
+      }
+    }
     busy = false
     // The corpus is held in memory as one string.  Appending invalidates it,
     // and without this a search straight after an import would read the text

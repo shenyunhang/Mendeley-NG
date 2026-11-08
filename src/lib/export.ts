@@ -38,6 +38,9 @@ const escBib = (s: string) =>
  *  newline in a value produced an untagged line that the importer skipped. */
 const escRis = (s: string) => String(s ?? '').replace(/\r?\n\s*/g, ' ')
 
+/** The export's date, injected so a caller can assert a fixed day. */
+export const todayIso = (now: Date = new Date()) => now.toISOString().slice(0, 10)
+
 const el = (name: string, v?: string | number | null): string =>
   v === undefined || v === null || String(v) === ''
     ? ''
@@ -108,7 +111,7 @@ const authorsLine = (d: Doc): string =>
  */
 export function toNotesMarkdown(docs: Doc[], notes: Record<string, string>): string {
   const kept = docs.filter((d) => (notes[d.id] ?? '').trim())
-  const head = ['# 笔记导出', '', `${kept.length} 条 · ${new Date().toISOString().slice(0, 10)}`]
+  const head = ['# 笔记导出', '', `${kept.length} 条 · ${todayIso()}`]
   const body = kept.map((d) => {
     const lines = [`## ${d.title ?? '(无标题)'}`, '']
     // enough to find the paper again in another program, and no more: this
@@ -213,7 +216,7 @@ export function toAnnotationsMarkdown(
   const head = [
     '# 标注导出',
     '',
-    `${anns.length} 条 · ${parts.length} 篇 · ${new Date().toISOString().slice(0, 10)}`
+    `${anns.length} 条 · ${parts.length} 篇 · ${todayIso()}`
   ]
   return head.join('\n') + '\n\n' + parts.join('\n---\n\n')
 }
@@ -234,7 +237,7 @@ export function toExitReadme(c: {
   anns: number
   pdfs: number
 }): string {
-  const when = new Date().toISOString().slice(0, 10)
+  const when = todayIso()
   const held = [
     `${c.docs} 篇文献`,
     c.notes ? `${c.notes} 条笔记` : '',
@@ -273,6 +276,7 @@ export function toExitReadme(c: {
 /** A number of bytes as a reader would say it.  Shared with the confirm box,
  *  which has to state what copying the PDFs will cost before doing it. */
 export function humanBytes(n: number): string {
+  if (!Number.isFinite(n)) return '0 KB'
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`
   if (n >= 1e6) return `${Math.round(n / 1e6)} MB`
   return `${Math.max(1, Math.round(n / 1e3))} KB`

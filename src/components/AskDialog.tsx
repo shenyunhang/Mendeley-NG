@@ -29,6 +29,20 @@ export default function AskDialog({
     ref.current?.select()
   }, [])
 
+  // Esc is taken on the way down, so the app's window listener -- which
+  // dismisses the sheets and the multi-selection -- is not reached on the
+  // same press. One key closing two things is worse than one closing none.
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      onCancel()
+    }
+    window.addEventListener('keydown', h, true)
+    return () => window.removeEventListener('keydown', h, true)
+  }, [onCancel])
+
   return (
     <div className="modal-veil" onMouseDown={onCancel}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
@@ -40,7 +54,6 @@ export default function AskDialog({
           onChange={(e) => setV(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') onOk(v.trim())
-            if (e.key === 'Escape') onCancel()
           }}
         />
         <div className="modal-acts">

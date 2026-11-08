@@ -16,6 +16,7 @@ export function rectsInLayer(layer: HTMLElement): Rect[] {
   const sel = window.getSelection()
   if (!layer || !sel || sel.isCollapsed || !sel.rangeCount) return []
   const box = layer.getBoundingClientRect()
+  if (!box.width || !box.height) return []
   const spans = Array.from(layer.querySelectorAll('span.tx'))
   const raw: Rect[] = []
   for (let r = 0; r < sel.rangeCount; r++) {

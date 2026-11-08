@@ -1,4 +1,5 @@
 import type { Doc } from '../../shared/types'
+import { splitPersonName } from './splitPersonName'
 
 /** What a BibTeX / RIS / EndNote record gives us, before it becomes a Doc. */
 export interface Entry {
@@ -189,7 +190,7 @@ export function parseBibtex(text: string): Entry[] {
       publisher: f.publisher || f.organization || f.institution || f.school,
       volume: f.volume,
       issue: f.number,
-      pages: f.pages?.replace(/-+/g, '–'),
+      pages: f.pages,
       abstract: f.abstract,
       keywords: f.keywords
         ? f.keywords.split(/[,;]/).map((k) => k.trim()).filter(Boolean)
@@ -249,18 +250,9 @@ export function parseRis(text: string): Entry[] {
         cur.title = cur.title ? cur.title + ' ' + v : v
         break
       case 'AU':
-      case 'A1': {
-        const parts = v.split(',')
-        cur.authors.push(
-          parts.length > 1
-            ? { last_name: parts[0].trim(), first_name: parts.slice(1).join(',').trim() }
-            : (() => {
-                const p = v.split(/\s+/)
-                return { last_name: p[p.length - 1], first_name: p.slice(0, -1).join(' ') }
-              })()
-        )
+      case 'A1':
+        cur.authors.push(splitPersonName(v))
         break
-      }
       case 'PY':
       case 'Y1': {
         const y = parseInt(v.match(/\d{4}/)?.[0] ?? '', 10)

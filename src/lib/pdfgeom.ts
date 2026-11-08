@@ -55,7 +55,8 @@ export type ZoomMode = 'manual' | 'fit-width' | 'fit-page'
  *  because there are four places that zoom and they must agree. */
 export const MIN_SCALE = 0.2
 export const MAX_SCALE = 6
-export const clampScale = (s: number) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s))
+export const clampScale = (s: number) =>
+  Math.max(MIN_SCALE, Math.min(MAX_SCALE, Number.isNaN(s) ? MIN_SCALE : s))
 
 /** One node of the PDF outline, as pdf.js hands it back. */
 export type OutlineNode = Awaited<ReturnType<pdfjs.PDFDocumentProxy['getOutline']>>[number]
@@ -107,12 +108,17 @@ export const fromCloudPositions = (c: CloudAnnotation): PdfPos[] =>
   }))
 
 /** PDF points -> normalised rect with y measured from the top of the page. */
-export const posToRect = (p: PdfPos, s: Size): Rect => ({
-  x: p.x / s.w,
-  y: (s.h - (p.y + p.h)) / s.h,
-  w: p.w / s.w,
-  h: p.h / s.h
-})
+export const posToRect = (p: PdfPos, s: Size): Rect => {
+  if (!Number.isFinite(s.w) || !Number.isFinite(s.h) || s.w <= 0 || s.h <= 0) {
+    return { x: 0, y: 0, w: 0, h: 0 }
+  }
+  return {
+    x: p.x / s.w,
+    y: (s.h - (p.y + p.h)) / s.h,
+    w: p.w / s.w,
+    h: p.h / s.h
+  }
+}
 
 /** The inverse of `posToRect`. */
 export const rectToPos = (r: Rect, page: number, s: Size): PdfPos => ({

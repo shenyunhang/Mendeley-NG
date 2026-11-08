@@ -32,9 +32,11 @@ let send: (s: UpdateState) => void = () => {}
  * process instead of trusting the renderer to call things in the right order.
  */
 let updateAvailable = false
-/** Whether the check in flight is one the app started rather than the reader.
- *  The events fire outside the invoke, so they need to know whose they are. */
-let quietRun = false
+/** The check whose events are currently in flight, and whether it was quiet.
+ *  Events fire outside the invoke, so they read this to know whose they are.
+ *  Keyed by a per-check token so one run's `finally` cannot clear the quiet
+ *  flag of another run that started later. */
+let activeCheck: { token: symbol; quiet: boolean } | null = null
 /**
  * The version on offer, kept because the progress events do not repeat it.
  * A download that says "42%" without saying what is at 42% leaves the reader
@@ -59,7 +61,7 @@ function installHandlers() {
     updateAvailable = false
     // "已是最新版本" is a fine answer to a press of the button and noise when
     // nobody asked
-    if (quietRun) send({ phase: 'idle' })
+    if (activeCheck?.quiet) send({ phase: 'idle' })
     else send({ phase: 'not-available' })
   })
 
@@ -73,7 +75,7 @@ function installHandlers() {
   })
 
   autoUpdater.on('error', (e: Error) => {
-    if (quietRun) {
+    if (activeCheck?.quiet) {
       send({ phase: 'idle' })
       return
     }
@@ -114,9 +116,10 @@ export function initUpdater(emit: (s: UpdateState) => void) {
       })
       return { unsupported: true }
     }
+    const token = Symbol()
     try {
       updateAvailable = false
-      quietRun = !!quiet
+      activeCheck = { token, quiet: !!quiet }
       const r = await autoUpdater.checkForUpdates()
       const available = r?.isUpdateAvailable ?? false
       if (quiet && !available) idle()
@@ -129,7 +132,7 @@ export function initUpdater(emit: (s: UpdateState) => void) {
       else send({ phase: 'error', message: String(e) })
       return { error: String(e) }
     } finally {
-      quietRun = false
+      if (activeCheck?.token === token) activeCheck = null
     }
   })
 

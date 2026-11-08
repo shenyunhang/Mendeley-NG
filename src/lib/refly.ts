@@ -38,7 +38,7 @@ const HEAD = /^\s*(references|bibliography|reference|literature cited|works cite
 const ENTRY = /^\s*(?:[\[(]\s*(\d{1,3})\s*[\])]|(\d{1,3})\.(?!\d))\s+/
 
 /** A marker in the body: `[3]`, `[2, 5]`, `[1-3]`, `(4)`. */
-const MARKER = /^[\[(]\s*(\d{1,3})(?:\s*[-,–]\s*(\d{1,3}))?(?:\s*,\s*(\d{1,3}))*\s*[\])]$/
+const MARKER = /^[\[(]\s*(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?(?:\s*,\s*(\d{1,3}))*\s*[\])]$/
 
 export function isRefHead(line: string): boolean {
   return HEAD.test(line.trim())
@@ -74,26 +74,30 @@ export function looksLikeRef(s: string): boolean {
  */
 export function citeNums(s: string): number[] | null {
   const t = s.trim()
-  const m = MARKER.exec(t)
-  if (!m) return null
+  if (!MARKER.exec(t)) return null
+  // strip the surrounding brackets, then read each comma-separated segment
+  const inner = t.slice(1, -1).trim()
   const out: number[] = []
-  const a = Number(m[1])
-  const b = m[2] ? Number(m[2]) : 0
-  if (b && b > a) {
-    if (b - a > 12) return null
-    for (let i = a; i <= b; i++) out.push(i)
-  } else out.push(a)
-  // the tail of `[1, 4, 7]` beyond the first two
-  const rest = t.slice(m[0].indexOf(m[3] ?? '') >= 0 ? m[0].indexOf(m[3] ?? '') : m[0].length)
-  for (const part of rest.split(/[\s,\[\]()]+/)) {
-    const v = Number(part)
-    if (part && Number.isFinite(v) && v > 0 && !out.includes(v)) out.push(v)
+  for (const seg of inner.split(/\s*,\s*/)) {
+    const part = seg.trim()
+    const range = /^(\d{1,3})\s*[-–]\s*(\d{1,3})$/.exec(part)
+    if (range) {
+      const a = Number(range[1])
+      const b = Number(range[2])
+      if (b > a) {
+        if (b - a > 12) return null
+        for (let i = a; i <= b; i++) if (!out.includes(i)) out.push(i)
+      } else if (!out.includes(a)) out.push(a)
+    } else {
+      const v = Number(part)
+      if (part && Number.isFinite(v) && v > 0 && !out.includes(v)) out.push(v)
+    }
   }
   return out.length ? out : null
 }
 
 /** A marker anywhere in a line of body text: `[3]`, `[2, 5]`, `(1-3)`. */
-const MARK_SRC = String.raw`[\[(]\s*\d{1,3}(?:\s*[-,–]\s*\d{1,3})?(?:\s*,\s*\d{1,3})*\s*[\])]`
+const MARK_SRC = String.raw`[\[(]\s*\d{1,3}(?:\s*[-–]\s*\d{1,3})?(?:\s*,\s*\d{1,3})*\s*[\])]`
 
 /** One marker found in a line: where it is, and what it cites. */
 export interface CiteSpot {

@@ -72,7 +72,8 @@ import {
   toEndnoteXml,
   toExitReadme,
   toNotesMarkdown,
-  toRis
+  toRis,
+  todayIso
 } from '../../src/lib/export'
 // The fifth review found fifteen defects. Their rules are DOM-free and are
 // checked below with fixed arrays, deferred promises and injected page
@@ -152,6 +153,15 @@ import {
 // on a paper change does not stop a read of the old PDF from landing a moment
 // later, so the order is controlled by resolving each page read by hand.
 import { createLazyPages, type PageAnswer } from '../../src/lib/lazyPages'
+// The sixth pass (199+) checks the rules it changed with fixed inputs, not
+// by reading the product source back as text. A source string proves a line
+// is present; these prove what the rule answers.
+import { buildTree, isSelfOrDescendant } from '../../src/lib/tree'
+import { clampScale, posToRect } from '../../src/lib/pdfgeom'
+import { gridTemplate } from '../../src/lib/columns'
+import { markAll } from '../../src/lib/match'
+import { splitPersonName } from '../../src/lib/splitPersonName'
+import { uniquePdfPath } from '../../shared/uniquePdfPath'
 
 // Eight product-side delays used to be bare literals at eight call sites.
 // Giving them names is a readability change only if no number moved, so this
@@ -5814,7 +5824,10 @@ export async function runSmoke() {
           'FOLDER_NOOP_MESSAGE_VISIBLE_MS',
           'ALL_HAVE_PDF_MESSAGE_VISIBLE_MS',
           'DOWNLOAD_STOPPED_MESSAGE_VISIBLE_MS',
-          'BATCH_ACTION_MESSAGE_VISIBLE_MS',
+          // BATCH_ACTION_MESSAGE_VISIBLE_MS named the flash of the old
+          // hand-rolled setFlagsFor loop. That loop now goes through
+          // runBatch/reportBatch, so it has no call site; the value stays in
+          // the legacy table purely as an old-literal control (199+).
           'CITATION_COPIED_MESSAGE_VISIBLE_MS',
           'IMPORT_FINISHED_MESSAGE_VISIBLE_MS'
         ]
@@ -5853,9 +5866,15 @@ export async function runSmoke() {
       return bad
     })
     expect(
-      'all fourteen call sites use their named duration exactly once',
-      notWired.length === 0,
-      { notWired }
+      'all thirteen live call sites use their named duration exactly once',
+      notWired.length === 0 && sites[0]!.names.length === 9 && sites[1]!.names.length === 4,
+      { notWired, appNames: sites[0]!.names.length, exportNames: sites[1]!.names.length }
+    )
+    expect(
+      'the retired batch-action duration really has no call site left',
+      !reads[0]!.text!.includes('BATCH_ACTION_MESSAGE_VISIBLE_MS') &&
+        reads[0]!.text!.includes('reportBatch(label, n, failed)'),
+      {}
     )
 
     // A bare duration is either the trailing argument of a flash/setTimeout
@@ -11266,7 +11285,7 @@ export async function runSmoke() {
         ['book_section', 'incollection', 'CHAP'],
         ['thesis', 'phdthesis', 'THES'],
         ['report', 'techreport', 'RPRT'],
-        ['working_paper', 'unpublished', 'GEN'],
+        ['working_paper', 'unpublished', 'WP'],
         ['web_page', 'misc', 'ELEC'],
         ['patent', 'misc', 'PAT'],
         ['magazine_article', 'article', 'MGZN'],
@@ -11860,12 +11879,16 @@ export async function runSmoke() {
         }
       )
       const docsSrc = read('electron/main/ipc/docs.ts')
+      const filesSrc = read('electron/main/ipc/files.ts')
       const systemSrc = read('electron/main/ipc/system.ts')
       expect(
-        'importing a second PDF with the same name no longer overwrites the first',
-        docsSrc.includes('wanted.replace(/\\.pdf$/, ` (${n}).pdf`)') &&
+        'both PDF writers take a free candidate name from the shared rule',
+        docsSrc.includes('uniquePdfPath(dir, wanted)') &&
           docsSrc.includes('if (buf.length) {') &&
-          docsSrc.includes('doc.localPdf = dest'),
+          docsSrc.includes('doc.localPdf = dest') &&
+          filesSrc.includes('uniquePdfPath(dir, wanted)') &&
+          filesSrc.includes('if (!buf.length)') &&
+          filesSrc.includes('if (!dest)'),
         {}
       )
       expect(
@@ -11875,6 +11898,170 @@ export async function runSmoke() {
         (systemSrc.match(/saveConfig\(\{ \.\.\.loadConfig\(\)/g) ?? []).length === 3 &&
           !systemSrc.includes('saveConfig({ ...cfg,'),
         {}
+      )
+    }
+
+    // 199+ Sixth pass. Fixed inputs, deterministic answers: a source string
+    // proves a line is present, not that the rule answers correctly. Every
+    // rule below failed on the checkout before this pass landed.
+    {
+      const folders = [
+        { id: 'root', name: 'A' },
+        { id: 'child', name: 'B', parent_id: 'root' },
+        { id: 'grand', name: 'C', parent_id: 'child' }
+      ] as Parameters<typeof buildTree>[0]
+      const tree = buildTree(folders)
+      expect(
+        'every folder, not just a root, knows its own subtree',
+        [...tree.subtree.keys()].sort().join(',') === 'child,grand,root' &&
+          tree.subtree.get('root')!.join(',') === 'root,child,grand' &&
+          tree.subtree.get('child')!.join(',') === 'child,grand',
+        { keys: [...tree.subtree.keys()], child: tree.subtree.get('child') }
+      )
+      expect(
+        'a nested folder can now recognise its own descendant',
+        isSelfOrDescendant(tree, 'child', 'grand') === true &&
+          isSelfOrDescendant(tree, 'grand', 'child') === false &&
+          isSelfOrDescendant(tree, 'root', 'grand') === true,
+        {}
+      )
+
+      const markers: [string, number[] | null][] = [
+        ['[1, 4]', [1, 4]],
+        ['[2, 5]', [2, 5]],
+        ['[1, 4, 7]', [1, 4, 7]],
+        ['[1-3]', [1, 2, 3]],
+        ['[1–3]', [1, 2, 3]],
+        ['[1-40]', null],
+        ['(4)', [4]],
+        ['[5-2]', [5]],
+        ['[3,3]', [3]]
+      ]
+      const markerBad = markers.filter(
+        ([s, want]) => JSON.stringify(citeNums(s)) !== JSON.stringify(want)
+      )
+      expect(
+        'a comma in a citation marker separates entries, not a range',
+        markerBad.length === 0,
+        { markerBad }
+      )
+      expect(
+        'markers in running text keep their comma lists',
+        JSON.stringify(markersIn('see [1, 4] and [2-3]').map((m) => m.nums)) ===
+          JSON.stringify([[1, 4], [2, 3]]),
+        { got: markersIn('see [1, 4] and [2-3]').map((m) => m.nums) }
+      )
+
+      const one = (type: string, extra: Partial<Doc> = {}): Doc =>
+        ({ id: 'x', type, title: 'T', ...extra }) as Doc
+      expect(
+        'a working paper survives a RIS round trip',
+        risType(one('working_paper')) === 'WP' &&
+          parseRis(toRis([one('working_paper')]))[0]?.type === 'working_paper',
+        { ris: toRis([one('working_paper')]).slice(0, 40) }
+      )
+      const pagesBib = toBibtex([one('journal', { pages: '1-10' })])
+      expect(
+        'an exported page range is not rewritten into an en dash on import',
+        parseBibtex(pagesBib)[0]?.pages === '1-10',
+        { pages: parseBibtex(pagesBib)[0]?.pages }
+      )
+
+      expect(
+        'a non-finite zoom stays inside the scale range',
+        Number.isFinite(clampScale(NaN)) &&
+          clampScale(NaN) === clampScale(0.2) &&
+          clampScale(Infinity) === 6,
+        { nan: clampScale(NaN), inf: clampScale(Infinity) }
+      )
+      const pos = { page: 1, x: 0, y: 0, w: 10, h: 10 } as PdfPos
+      const zero = posToRect(pos, { w: 0, h: 0 })
+      expect(
+        'a zero-sized page cannot produce non-finite highlight coordinates',
+        [zero.x, zero.y, zero.w, zero.h].every((v) => Number.isFinite(v) && v === 0),
+        { zero }
+      )
+      const nanTrack = gridTemplate(['title'], { title: NaN })
+      const infTrack = gridTemplate(['title'], { title: Infinity })
+      expect(
+        'a non-finite column width cannot emit a NaNpx grid track',
+        !nanTrack.includes('NaN') && !infTrack.includes('Infinity'),
+        { nanTrack, infTrack }
+      )
+      expect(
+        'a zero-sized text layer has a guard before the coordinate division',
+        fs.readFileSync(path.join(__dirname, '../..', 'src/lib/pdfsel.ts'), 'utf8').includes(
+          'if (!box.width || !box.height) return []'
+        ),
+        {}
+      )
+
+      expect(
+        'a Unicode character that folds to two code units is marked exactly',
+        JSON.stringify(markAll('İstanbul', 'İ')) ===
+          JSON.stringify([{ t: 'İ', hit: true }, { t: 'stanbul', hit: false }]) &&
+          JSON.stringify(markAll('Alpha beta', 'beta')) ===
+            JSON.stringify([{ t: 'Alpha ', hit: false }, { t: 'beta', hit: true }]),
+        { turkish: markAll('İstanbul', 'İ'), ascii: markAll('Alpha beta', 'beta') }
+      )
+      expect(
+        'non-finite sizes and empty batches have honest fallbacks',
+        humanBytes(NaN) === '0 KB' &&
+          citationKeyStem('Smith', NaN) === 'smith' &&
+          todayIso(new Date('2020-01-02T00:00:00Z')) === '2020-01-02',
+        { bytes: humanBytes(NaN), key: citationKeyStem('Smith', NaN) }
+      )
+      const names: [string, string, string][] = [
+        ['Doe, Jane', 'Doe', 'Jane'],
+        ['Jane Doe', 'Doe', 'Jane'],
+        ['张三', '张三', ''],
+        ['Doe', 'Doe', '']
+      ]
+      expect(
+        'both importers split a person name the same way',
+        names.every(([raw, last, first]) => {
+          const p = splitPersonName(raw)
+          return p.last_name === last && p.first_name === first
+        }),
+        { names }
+      )
+
+      const dir = 'D'
+      const taken = new Set<string>()
+      const exists = (p: string) => taken.has(p)
+      const firstFree = uniquePdfPath(dir, 'paper.pdf', exists)
+      taken.add(firstFree!)
+      const secondFree = uniquePdfPath(dir, 'paper.pdf', exists)
+      for (let n = 2; n < 50; n++) taken.add(path.join(dir, `paper (${n}).pdf`))
+      const exhausted = uniquePdfPath(dir, 'paper.pdf', exists)
+      expect(
+        'a free PDF name is found, and an exhausted directory is refused',
+        path.basename(firstFree ?? '') === 'paper.pdf' &&
+          path.basename(secondFree ?? '') === 'paper (2).pdf' &&
+          exhausted === null,
+        { firstFree, secondFree, exhausted }
+      )
+
+      let page = 0
+      const mixed = await collectPaged<{ id?: string | null }>(
+        async () => (page++ === 0 ? [{ id: 'a' }] : [{ id: 'a' }, {}]),
+        1,
+        5
+      )
+      expect(
+        'a repeated page keeps the rows that have no id at all',
+        mixed.length === 2,
+        { got: mixed.length }
+      )
+
+      const gen = createViewGeneration<string>('library')
+      const started = gen.read()
+      gen.set('reader')
+      gen.set('library')
+      expect(
+        'an answer is refused after leaving and returning to the same view',
+        gen.still(started) === false && gen.view() === 'library',
+        { started, now: gen.read() }
       )
     }
   }

@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Folder, SavedSearch } from '../../shared/types'
+import { FILTER_LABEL, type ListFilter } from '../lib/filters'
 import { buildTree, isSelfOrDescendant } from '../lib/tree'
+
+/** The tooltip names the same conditions as the name, the count and the
+ *  restored filters: the saved filters, not the old starred flag. */
+function searchTip(s: SavedSearch): string {
+  const keys = s.filters?.length ? s.filters : s.starred ? ['star'] : []
+  return [s.query, ...keys.map((k) => FILTER_LABEL[k as ListFilter])]
+    .filter(Boolean)
+    .join(' · ')
+}
 
 interface Props {
   folders: Folder[]
@@ -246,7 +256,7 @@ export default function FolderTree({
               <div
                 key={s.id}
                 className={'folder-row' + (activeSearch === s.id ? ' sel' : '')}
-                title={[s.query, s.starred ? '只看星标' : ''].filter(Boolean).join(' · ')}
+                title={searchTip(s)}
                 onClick={() => onSelectSearch?.(s)}
               >
                 <span className="name">🔍 {s.name}</span>

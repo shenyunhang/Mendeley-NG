@@ -1,5 +1,6 @@
 import type { Doc } from '../../shared/types'
 import { parseBibtex, parseRis, safeType } from './importText'
+import { splitPersonName } from './splitPersonName'
 import type { Entry } from './importText'
 export type { Entry } from './importText'
 export { parseBibtex, parseRis } from './importText'
@@ -47,16 +48,9 @@ export function parseEndnoteXml(text: string): Entry[] {
       rec.getElementsByTagName('ref-type')[0]?.getAttribute('name') ??
       text('ref-type') ??
       ''
-    const authors = Array.from(rec.getElementsByTagName('author')).map((a) => {
-      const full = (a.textContent ?? '').trim()
-      const parts = full.split(',')
-      return parts.length > 1
-        ? { last_name: parts[0].trim(), first_name: parts.slice(1).join(',').trim() }
-        : (() => {
-            const p = full.split(/\s+/)
-            return { last_name: p[p.length - 1], first_name: p.slice(0, -1).join(' ') }
-          })()
-    })
+    const authors = Array.from(rec.getElementsByTagName('author')).map((a) =>
+      splitPersonName((a.textContent ?? '').trim())
+    )
     const year = parseInt(
       rec.getElementsByTagName('year')[0]?.textContent?.match(/\d{4}/)?.[0] ?? '',
       10

@@ -1,5 +1,6 @@
 import type { Doc, MetaCandidate } from '../../shared/types'
 import { acceptable, norm, ratio } from '../../shared/text'
+import { UA } from '../../shared/userAgent'
 
 /**
  * Metadata lookup, the replacement for Mendeley Desktop's "Update Details".
@@ -9,10 +10,6 @@ import { acceptable, norm, ratio } from '../../shared/text'
  * The matching threshold lives in shared/text.ts next to `ratio`, because
  * duplicate detection has to agree with it.
  */
-
-const UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-  '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 
 type Candidate = MetaCandidate
 

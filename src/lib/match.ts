@@ -29,20 +29,41 @@ export interface FieldHit {
  * or three times, and marking one of them is how a reader comes to believe
  * the search is approximate.
  */
+/** Map an index in the lower-cased haystack back to the source string. Most
+ *  characters lower-case one-to-one, but a few (e.g. 'İ') become two code
+ *  units, so a hit's length in the haystack is not its length in the source. */
+function lowerMap(text: string, hay: string): number[] | null {
+  if (hay.length === text.length) return null
+  const map: number[] = []
+  for (let i = 0; i < text.length && map.length < hay.length; i++) {
+    const n = text[i].toLowerCase().length
+    for (let k = 0; k < n && map.length < hay.length; k++) map.push(i)
+  }
+  while (map.length < hay.length) map.push(text.length - 1)
+  return map
+}
+
 export function markAll(text: string, q: string): Part[] {
   if (!q) return [{ t: text, hit: false }]
   const needle = q.toLowerCase()
   const hay = text.toLowerCase()
+  const map = lowerMap(text, hay)
+  const startOf = (j: number) => (map ? map[j] : j)
+  const endOf = (j: number) => (map ? map[j] + 1 : j + 1)
   const out: Part[] = []
   let at = 0
+  let cursor = 0
   for (;;) {
     const i = hay.indexOf(needle, at)
     if (i < 0) break
-    if (i > at) out.push({ t: text.slice(at, i), hit: false })
-    out.push({ t: text.slice(i, i + needle.length), hit: true })
+    const start = startOf(i)
+    const end = endOf(i + needle.length - 1)
+    if (start > cursor) out.push({ t: text.slice(cursor, start), hit: false })
+    out.push({ t: text.slice(start, end), hit: true })
+    cursor = end
     at = i + needle.length
   }
-  if (at < text.length) out.push({ t: text.slice(at), hit: false })
+  if (cursor < text.length) out.push({ t: text.slice(cursor), hit: false })
   return out.length ? out : [{ t: text, hit: false }]
 }
 
@@ -57,10 +78,15 @@ export function markAll(text: string, q: string): Part[] {
 export function snippet(text: string, q: string, lead = 44, trail = 96): Part[] | null {
   const flat = text.replace(/\s+/g, ' ').trim()
   if (!flat || !q) return null
-  const i = flat.toLowerCase().indexOf(q.toLowerCase())
+  const needle = q.toLowerCase()
+  const hay = flat.toLowerCase()
+  const i = hay.indexOf(needle)
   if (i < 0) return null
-  const from = Math.max(0, i - lead)
-  const to = Math.min(flat.length, i + q.length + trail)
+  const map = lowerMap(flat, hay)
+  const hitStart = map ? map[i] : i
+  const hitEnd = map ? map[i + needle.length - 1] + 1 : i + needle.length
+  const from = Math.max(0, hitStart - lead)
+  const to = Math.min(flat.length, hitEnd + trail)
   const parts = markAll(flat.slice(from, to), q)
   if (from > 0) parts.unshift({ t: '…', hit: false })
   if (to < flat.length) parts.push({ t: '…', hit: false })

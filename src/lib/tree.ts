@@ -67,8 +67,10 @@ export function buildTree(folders: Folder[]): Tree {
     if (seen.has(id)) return // cycle guard: a bad parent_id must not hang the UI
     seen.add(id)
     depth.set(id, d)
+    const start = out.length
     out.push(id)
     for (const c of children.get(id) ?? []) walk(c.id, d + 1, seen, out)
+    subtree.set(id, out.slice(start))
   }
 
   // sorted here rather than where the tree is rendered, so that every place
