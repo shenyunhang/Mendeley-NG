@@ -3,7 +3,7 @@
 **本地优先的 Mendeley 客户端。** 文献、PDF、正文索引、高亮和笔记都落在你自己的
 磁盘上，读和搜都不需要联网。Electron + React + pdf.js。
 
-> 要接手开发，看 [HANDOFF.md](HANDOFF.md)：现状、架构、API 的坑、按编号排的改动历史都在里面。
+> 要接手开发，看 [HANDOFF.md](HANDOFF.md)：当前架构、分层约定、API 的坑和改代码前要读的规则都在里面。改动过程看 git 历史。
 
 ## 它为什么存在
 
@@ -78,6 +78,7 @@ npm install
 npm run build      # 产出 out/
 npm start          # 启动
 npm run dev        # 热重载开发
+npm test           # 纯 Node 单元测试
 npm run typecheck  # main/preload 与 renderer 双侧类型检查
 npm run dist       # 打包 Windows NSIS 安装包
 ```
@@ -246,7 +247,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 复制引文 | 六种样式（作者（年份）/ 全作者 / 编号 / 完整条目 / BibTeX key / BibTeX 条目），Ctrl+Shift+C |
 | 检查更新 | 一键从 GitHub Releases 拉新版、下载、安装并重启 |
 | 安装包签名 | CI 已接好，配上证书即签名；`npm run signcheck` 可自查是否签上 |
-| 提交前检查 | 每次 push / PR 由 `.github/workflows/ci.yml` 跑 `npm run typecheck`（两个 tsconfig 工程都查）与 `npm run build`；`npm run smoke` 要真实库和可见窗口，只在本地跑 |
+| 提交前检查 | 每次 push / PR 由 `.github/workflows/ci.yml` 依次跑 `npm run typecheck`、`npm test`、`npm run build`；打 tag 打包前另有一道同样的类型与单测门禁；`npm run smoke` 要真实库和可见窗口，只在本地跑 |
 
 ### 附带（保留，但不占工具栏主位）
 
@@ -273,113 +274,55 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 - **补全元数据宁缺勿错**。标题相似度阈值 0.90，短标题还额外关掉"子串包含"的
   兜底。"Object detection" 对 "Lifelong Object Detection" 得分 0.78，是两篇不同的
   文章，必须拒掉；查不到顶多是少补几个字段，查错了会污染引用。
-- **全文检索默认只索引每篇的前 3 页**。全库 5245 份 PDF 全量抽正文约 293 MB 文本、
-  每份 130 ms；前 3 页约 60 MB、每份 39 ms。前者在内存里放不下，后者可以，
-  而标题、作者、摘要和引言开头基本覆盖了会去搜的词。这个取舍写在界面上，不藏着，
-  页数也能在「设置」里改——改了会丢索引，因为它描述的已经是另一份语料了。
-  页数的边界与默认值**只有一份规则**：设置面板、索引构建和开机时的配置恢复共用它，
-  不会出现界面说 3 页、索引却按 50 页建这种对不上的情况。
+- **全文检索默认只索引每篇的前 3 页**。整篇抽取的文本量是前几页的数倍，
+  内存里放不下；而标题、作者、摘要和引言开头基本覆盖了会去搜的词。这个取舍写在
+  搜不到时的空态里，页数也能在「设置」里改——改了会丢索引，因为它描述的已经是
+  另一份语料了。页数的边界与默认值**只有一份规则**：设置面板、索引构建和开机时的
+  配置恢复共用它，不会出现界面说 3 页、索引却按 50 页建这种对不上的情况。
 - **合并只补缺失字段，落败的进回收站而不是删掉**。合并是不可逆操作里最容易
   手滑的，让它可恢复比让它快更重要——现在还有撤销栈兜底。
-
-### 最近一次更新（0.1.112，未打 tag）
-
-一轮全面体检与重构，改的都是行为，没有新增功能开关：
-
-- **子文件夹终于真的能用**：选中子文件夹会带上它下面所有层级的文献。此前只有顶层文件夹算得出子树，篇数偏少，拖放还能把父文件夹拖进自己的后代。
-- **引文编号不再自作主张**：正文里的 `[1, 4]` 是两篇而不是 1 到 4 四篇，浮层不再列出不存在的文献。
-- **导出再导回不吃字段**：`working_paper` 从 RIS 导出去能原样回来，页码 `1-10` 不再被改写成 `1–10`。
-- **批量操作说实话**：两百条里失败三条会报出失败数和名单，不再只显示「197 条」；撤销也只对真正成功的条目生效。
-- **一次 Esc 只关一层**：阅读器里点开筛选浮层按 Esc 只关浮层，不再顺手退出整篇 PDF；对话框按 Esc 也不会清掉多选。
-- **不再静默指向旧文件或覆盖已有文件**：换 PDF 目录后的重挂载、重复导出到同一文件夹、同名 PDF 导入、云端返回的空 PDF，都有了明确处理；检查更新、令牌刷新、全文索引在并发和磁盘异常下的几处卡死也一并收口。
-- **提交前多一道闸**：每次 push / PR 自动跑双侧类型检查和构建；端到端冒烟仍只在本地跑（要真实库和可见窗口）。
-
-还没做的：无已坐实的缺陷，也没有在飞的排期。按编号排的改动历史在
-[HANDOFF.md](HANDOFF.md) 第 10 节；第 9 节留着的是竞品对照快照、"差距可以接受"、
-"明确不做"那几条，以及六张已经清空的代码审查 / 体检排期表（9.7–9.10、9.13、9.14）。
-这里刻意不写编号和断言数——它们每轮都变，唯一事实源是 HANDOFF 第 0 节。
-
-### 当前工作树：第七轮优化重构（未发版）
-
-0.1.112 之后的一轮，改的是安全边界、可验证性和工程化，不改功能开关：
-
-- **本地文件不再对渲染层全开**：`mendeley://pdf` 只服务库里的 PDF 与 PDF 目录下的文件；
-  导出时逐个校验目标名，写不穿所选文件夹；外部链接只放行 http/https；
-  `config:set` 只接受声明过的键和类型。规则集中在 `shared/pathPolicy.ts`，有独立单测。
-- **第一次有了单元测试**：Vitest + 416 个用例覆盖 shared 规则、渲染层纯函数与新的安全边界；
-  CI 与打包流程各加一道 `npm test` / `npm run typecheck` 门禁。
-- **IPC 契约只剩一份**：`src/global.d.ts` 是唯一来源，preload 的实现按它做类型检查，
-  原先漂移的 `openExternal` 返回类型和两处 `Promise<any>` 一并收口。
-- **生产启动不再背着冒烟脚本**：`--smoke` 改为按需动态加载，主进程入口从 1.30 MB 降到
-  0.89 MB；chunk 特意与 `index.js` 平级，因为主进程用 `__dirname` 定位 preload 与页面。
-- **静默失败变少**：二十多处配置写入统一经 `writeConfig` 上报失败；配置读取、全文索引控制、
-  四个导出动作的 rejection 都有边界；撤销连按、配置回读后的首次回写竞态、
-  卸载后仍在排队的动画帧也各自修好。
-
-按编号排的落地记录见 HANDOFF 第 9.15 / 10.5 节。
 
 ## 结构
 
 ```
-electron/main/          主进程：IPC、本地库、全文索引、自更新
-  index.ts              入口：一个窗口、是不是第二个实例、这次是哪一种启动
-  library.ts            云端同步（增量水印、PDF 挂载、缓存合并）
-  fulltext.ts / ftops.ts 正文索引与它的驱动层
-  store.ts / pdfindex.ts 本地缓存与 "作者 - 年份 - 标题.pdf" 匹配
-  mendeley.ts / lookup.ts Mendeley REST 客户端、Crossref / arXiv 查元数据
+electron/main/            主进程：IPC、本地库、全文索引、自更新
+  index.ts                入口：单实例、mendeley:// 协议、这次是哪一种启动
+  ipc/                    按域拆开的 IPC 注册（library / system / docs / marks / files）
+  library.ts / mendeley.ts / store.ts   同步、REST 客户端、本地缓存
+  fulltext.ts / ftops.ts  正文索引与驱动层
+  auth.ts / lookup.ts     OAuth 窗口、Crossref / arXiv 查元数据
   window.ts / updater.ts / instance.ts  窗口记忆、检查更新、单实例锁
-  ipc/                  按域拆开的 IPC 注册
+  pdfindex.ts / pdfname.ts  "作者 - 年份 - 标题.pdf" 匹配、命名模板
   smoke.ts / perf.ts / demo.ts  开发期自检、性能测量、虚构库截图
-electron/preload/index.ts  contextBridge，只暴露白名单方法
-src/App.tsx              组装层：把 hooks 解构出来排进 JSX，不持有大块状态
-src/components/           视图组件（PdfViewer.tsx 是阅读器，其余见目录）
-src/lib/hooks/            React 状态簇，按「谁跟谁一起变」切
-  useConfig / useLibrary / useFullText / useUndo / useSelection / usePaneWidths
-  useExport / useFlashMessage / useCiteCard
-  useContinuousPages / usePdfFind / usePdfAnnotations / usePdfLinks / usePdfRefs
-  usePersistAfterMount    「首帧不写、变化才防抖写盘」这一条状态机，两处共用
-src/lib/                  与 React 无关的纯规则，主进程冒烟能直接 import 来测
-  flash.ts              一条短消息只留一个待触发的清除（151 / 156）
-  latestSearch.ts       只答当前那一个词，时钟与请求可注入（152）
-  documentScope.ts / findScan.ts / lazyPages.ts  按文献 / 按词 / 按页给答案贴标签（153–155）
-  pageWalk.ts           连续模式一屏一次写入的页遍历，末页不丢批（162 / 167）
-  bitmapPixelSize.ts    页 canvas 的背板像素尺寸与 dpr 兜底，四处共用（169）
-  cardSpot.ts           固定卡片定位与窗口变窄后的重测（159 / 160）
-  timing.ts             二十二处延时与短消息时长的具名常量（164 / 168）
-  pdfgeom.ts / pdfcache.ts / pdftext.ts / pdffind.ts / pdfsel.ts
-                        PDF 坐标换算、位图缓存、文本层、篇内查找、选区
-  columns.ts / panes.ts / cite.ts / offline.ts / export.ts / import.ts
-                        列定义、三栏、引文格式、离线文案、导入导出；
-                        export.ts 里的 todayIso 是三处当日日期的唯一来源
-  refly.ts / dupes.ts / pdfmeta.ts / pdflinks.ts / pdfrefs.ts
-                        补全元数据、查重、抽标识符、PDF 链接与引文标记
-  popspot.ts / filters.ts / view.ts / tree.ts / doctypes.ts / match.ts
-                        浮层定位、筛选、视图与文件夹树等其余纯逻辑
-  splitPersonName.ts    RIS 与 EndNote 两处共用的姓名拆分
-shared/                   三端共享，只有一份的规则放这里
-  types.ts / text.ts    共享类型与标题归一化（查源与查重共用）
-  fullTextPages.ts      页数预算的唯一规则与边界（161 / 163）
-  clamp.ts              六处裸夹取共用的纯规则 clampToRange（166）
-  failures.ts           静默失败的具名原因、忽略 / 上报两道门（165）
-  atomicJson.ts         tmp + rename 的原子 JSON 写盘（凭据与 saveConfig 除外）
-  uniquePdfPath.ts      同名 PDF 找空位；位置全占满返回 null，调用方跳过而非覆盖
-  userAgent.ts          REST 客户端与查元数据共用的浏览器 UA
-  paged.ts              所有 marker 分页端点的四道防循环闸
-scripts/                  start.mjs 启动器、demo.mjs 假库与截图、get-token.mjs、
-                          check-api.mjs、copy-worker.mjs、signcheck.mjs、
-                          make-icon.mjs、hooks/
-docs/screenshots/         README 用的四张图，由 `npm run demo` 生成
+electron/preload/index.ts   contextBridge，按 Api 契约暴露白名单方法
+src/
+  App.tsx                  组装层：把 hooks 解构出来排进 JSX
+  global.d.ts              唯一的 IPC 契约 Api
+  window.d.ts              Window.api 的 ambient 声明（与 DOM 隔离）
+  components/              视图组件（PdfViewer.tsx 是阅读器）
+  lib/hooks/               React 状态簇，按「谁跟谁一起变」切
+  lib/                     与 React 无关的纯规则：PDF 几何与文本、导入导出、
+                           列与三栏、检索代次、引文、匹配、树、具名延时
+  lib/configWrite.ts       渲染层所有配置写入的统一入口
+shared/                    三端共享：类型、规则常量、原子写、安全策略、分页与队列
+  pathPolicy.ts            协议白名单、导出路径、外链与配置输入的校验规则
+tests/                     Vitest 单测：shared 规则 / 渲染层纯函数 / 安全边界
+scripts/                   启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
+docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
 .github/workflows/
-  release.yml             推 v* tag 时构建安装包并挂到 Release
-  ci.yml                  每次 push / PR 跑 typecheck + build（不跑 smoke）
+  ci.yml                   每次 push / PR 跑 typecheck + test + build
+  release.yml              推 v* tag 时先验 typecheck + test，再构建安装包并挂到 Release
+vitest.config.ts           单测只收 tests/**/*.test.ts，环境为 node
+electron.vite.config.ts    main / preload / renderer 三段构建配置
 ```
 
-完整的逐文件说明在 HANDOFF 第 4 节；上面这棵树的用途是让人一眼看出
-**哪一层能改状态、哪一层只是纯规则**——纯规则那一层不碰 React / DOM，
-所以冒烟能在主进程里直接喂假时钟和手控 promise 去测它。
+完整的分层说明在 HANDOFF 第 3 节。这棵树的用途是让人一眼看出
+**哪一层能改状态、哪一层只是纯规则**——纯规则层不碰 React / DOM，
+所以单测和冒烟都能直接喂假时钟、手控 promise 去测它。
 
-几个约定：类型不要三处各写一份，改 `shared/`；跨 IPC 的规则（页数预算、位图尺寸、
-夹取、延时、静默失败）也只留一份，别在调用点手抄；所有尺寸用 rem，字号旋钮才有效；
+几个约定：类型只在 `shared/types.ts` 改；跨 IPC 的规则（页数预算、位图尺寸、夹取、
+延时、静默失败、路径策略）也只留一份，别在调用点手抄；IPC 契约只在
+`src/global.d.ts` 定义一份，preload 编译期照它校验；所有尺寸用 rem，字号旋钮才有效；
 主进程产物必须是 CJS，package.json 里不能有 `"type": "module"`；
 `contextIsolation: true`，renderer 拿不到 node，所有能力走 `window.api`。
 
@@ -389,25 +332,20 @@ docs/screenshots/         README 用的四张图，由 `npm run demo` 生成
 
 ### 自动（推荐）
 
-> **当前状态**：`package.json` 与 `package-lock.json` 已经是 `0.1.112`，但尚未打 tag、
-> 也尚未发 Release。这一版的功能改动与版本 bump 落在同一个提交（`79e8b99`）里，
-> 与下面「功能改动单独一个 commit，版本 bump 单独一个 commit」的惯例不同。
-> 要发这一版，**跳过 `npm version` 那一行**（版本号已经对了），补一个 Release commit
-> 后直接打 annotated tag；从下一版起仍按下面的常规流程走。
-
-`.github/workflows/release.yml` 会在推送 `v*` tag 时用 GitHub 的 Windows runner 编译并把 exe 挂到 Release：
+`.github/workflows/release.yml` 会在推送 `v*` tag 时用 GitHub 的 Windows runner
+先跑类型检查与单测，再编译并把 exe 挂到 Release：
 
 ```bash
-npm version 0.1.112 --no-git-tag-version   # package.json 与 package-lock.json 一起改
+npm version X.Y.Z --no-git-tag-version   # package.json 与 package-lock.json 一起改
 git add package.json package-lock.json
-git commit -m "Release v0.1.112"
-git tag -a v0.1.112 -m "Release v0.1.112"  # 必须是 annotated tag
-git push origin v0.1.112
+git commit -m "Release vX.Y.Z"
+git tag -a vX.Y.Z -m "Release vX.Y.Z"   # 必须是 annotated tag
+git push origin vX.Y.Z
 ```
 
-**tag 必须是 annotated（`-a`）**：本仓库踩过「Release commit 有了、tag 是轻量的，
-workflow 没触发，Release 页面是空的」的坑（v0.1.71 / v0.1.72）。
-`post-commit` 钩子会自动推 `main`，所以上面最后一句只需推 tag。
+**tag 必须是 annotated（`-a`）**：轻量 tag 不会触发 workflow，结果会是
+「Release commit 有了、Release 页面是空的」。`post-commit` 钩子会自动推 `main`，
+所以上面最后一句只需推 tag。
 
 公开仓库的标准 runner 免费、不限分钟，产物存储也免费。
 
@@ -433,7 +371,7 @@ Release 附件必须同时包含**安装包和 `latest.yml`**：后者是 `elect
 没有别的取巧途径。
 
 `release.yml`（打 `v*` tag 时打包签名）已经接好了，只是默认没有证书所以不签；
-另有一份 `ci.yml` 在每次 push / PR 跑类型检查与构建，两者互不影响。要启用签名：
+另有一份 `ci.yml` 在每次 push / PR 跑类型检查、单测与构建，两者互不影响。要启用签名：
 
 1. 买一张 Windows 代码签名证书（OV 即可，IV 会更快建立声誉；
    各 CA 价格差异很大，属个人开支）。拿到 `.pfx`/`.p12` 和它的密码。
@@ -483,7 +421,7 @@ tag 可以指向任意提交，不能假定它走过 CI。**冒烟仍不放进 C
 
 `--smoke` 跑的是**真实库和真实 PDF**：拉库、开隐藏窗口、逐条断言，日志用
 `[smoke] PASS` / `[smoke] FAIL` 打点，最后一行出现 `all checks passed` 才算过。
-断言数与口径以 HANDOFF 第 0 节为准，README 不重复写死。
+断言数与口径以 HANDOFF 第 2 节为准，README 不写死会变的数字。
 
 截图落在系统临时目录：`mendeley-ng-smoke.png`（深色）与
 `mendeley-ng-smoke-light.png`（临时把 DOM 切成浅色再拍，拍完还原，不动用户配置）。
@@ -506,7 +444,7 @@ npm run demo   # 造一份虚构的库，截取 README 里的四张图
 `library:sync` 直接返回本地缓存、不联网；十八篇论文的 PDF 和正文都由脚本当场生成
 （标题、作者、DOI 全是编的），索引也就地建，几秒钟。
 
-## 踩过的坑
+## API 与环境的硬约束
 
 - **`GET /documents` 默认 view 不返回 `citation_key` / `file_attached` / `folder_uuids`**，
   必须带 `?view=all`。
@@ -535,9 +473,10 @@ npm run demo   # 造一份虚构的库，截取 README 里的四张图
 - **主进程产物不能是 ESM**：package.json 里不要写 `"type": "module"`，
   否则 `require('electron')` 的 CJS 互操作会挂。
 - **`app.quit()` 不接受参数**，要带退出码用 `app.exit(code)`。
-- **`tsconfig.node.json` 是手工白名单**：新增一个被主进程冒烟 import 的纯函数模块时，
-  必须把它列进 `include`，否则 `npm run typecheck` 报 TS6307；renderer 那侧由另一个
-  tsconfig 整目录覆盖，两边别搞混。
-- **读源码字符串的断言会随重构变红**：冒烟里有一类断言靠 `includes(...)` 证明某处接线，
-  把那段逻辑抽成模块后它就会误报。这类只用来佐证接线，规则本身要配固定输入的行为
-  断言；重构时同步校正断言，不要放宽判据。
+- **`tsconfig.node.json` 是手工白名单**：新增被主进程、冒烟或单测 import 的
+  `src/lib` 纯函数时，必须把它列进 `include`，否则 `npm run typecheck` 报 TS6307；
+  renderer 那侧由另一个 tsconfig 整目录覆盖，两边别搞混。
+- **源码串断言只证明接线，不证明规则**：冒烟里靠 `includes(...)` 的断言要配固定输入
+  的行为断言；改动接线时同步校正断言，不要放宽判据。
+- **渲染层发过来的路径都是不可信输入**：自定义协议、导出目标、外链与配置写入的
+  校验集中在 `shared/pathPolicy.ts`，规则见 HANDOFF 第 5 节。
