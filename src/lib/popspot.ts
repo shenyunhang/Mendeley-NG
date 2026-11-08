@@ -44,8 +44,17 @@ export function usePopSpot(
       if (a && c) setSpot(spotFor(a, c))
     }
     place()
+    // The bar scrolls sideways, and a fixed card does not follow the anchor
+    // when a scrolling ancestor moves.  Re-measure on any scroll in the
+    // window, not just on resize; capture reaches scrolls from nested panes.
+    // Width and height are all `spotFor` reads from the card, so a card that
+    // is not in the DOM simply leaves `place()` with nothing to measure.
     window.addEventListener('resize', place)
-    return () => window.removeEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
   }, [anchor, card, visible])
   return spot
 }

@@ -31,8 +31,18 @@ interface Props {
  * read at a glance than a wider button is to fit.  The commands that are not
  * needed every time go in here instead of being squeezed.
  *
- * It closes when the pointer leaves, which is how the column picker and the
- * filter card behave, so the bar is consistent about what a menu does.
+ * It stays open until a choice is made, the button is pressed again, Escape,
+ * or a press anywhere outside.  It must not close when the pointer leaves the
+ * button: the card is `position: fixed` a few pixels below its anchor, so the
+ * pointer crosses a strip belonging to neither box on its way to an item.
+ * A `mouseleave` on the button therefore dismissed the menu during the
+ * ordinary act of reaching for an item, and the horizontal correction near
+ * the window edge made the crossing longer and easier to trigger.
+ *
+ * The column picker and the filter card keep their own pointer-leave rule,
+ * but theirs is on the card itself, so moving towards the card never leaves
+ * anything.  A dropdown whose items are the whole point of opening it is not
+ * the same gesture.
  */
 export default function MenuButton({ label, title, disabled, primary, items }: Props) {
   const [open, setOpen] = useState(false)
@@ -42,6 +52,14 @@ export default function MenuButton({ label, title, disabled, primary, items }: P
 
   useEffect(() => {
     if (!open) return
+    // A press outside is the way out, not a pointer movement.  Capture, so a
+    // press on another toolbar button dismisses this menu before that button
+    // opens its own; the button and the card are both "inside".
+    const outside = (e: PointerEvent) => {
+      const t = e.target as Node | null
+      if (btn.current?.contains(t) || pop.current?.contains(t)) return
+      setOpen(false)
+    }
     // Esc is taken while the event is still travelling down, so that the
     // handler the app keeps on window — which dismisses the settings sheet,
     // the column card and the multi-selection — is not reached on the same
@@ -52,12 +70,16 @@ export default function MenuButton({ label, title, disabled, primary, items }: P
       e.stopPropagation()
       setOpen(false)
     }
+    window.addEventListener('pointerdown', outside, true)
     window.addEventListener('keydown', h, true)
-    return () => window.removeEventListener('keydown', h, true)
+    return () => {
+      window.removeEventListener('pointerdown', outside, true)
+      window.removeEventListener('keydown', h, true)
+    }
   }, [open])
 
   return (
-    <div className="menu-btn" onMouseLeave={() => setOpen(false)}>
+    <div className="menu-btn">
       <button
         ref={btn}
         className={primary ? 'primary' : ''}

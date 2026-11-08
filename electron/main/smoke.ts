@@ -419,8 +419,10 @@ export async function runSmoke() {
     if (!ok) fails.push(`${name}: ${String(detail)}`)
   }
   // Commands that are not needed every time live under a menu on the bar now,
-  // so reaching one is two clicks.  The menu closes when the pointer leaves,
-  // which a dispatched click never does, so nothing here has to close it.
+  // so reaching one is two clicks.  A dispatched click moves no pointer and
+  // presses nothing outside, so a menu this helper opens stays open until an
+  // item is clicked or the button is pressed again; callers that need it shut
+  // say so explicitly (itemsOf below does exactly that).
   const openMenu = (label: string) =>
     w.webContents.executeJavaScript(
       `(()=>{const b=[...document.querySelectorAll(".toolbar button")]`
@@ -785,6 +787,37 @@ export async function runSmoke() {
     ['查重', '全部标注', '回收站', '保存搜索'].every((x) => moreItems.includes(x)),
     moreItems
   )
+  // A dropdown has to survive the trip from its button to an item.  The card
+  // is fixed a few pixels below the bar, so the pointer crosses a strip that
+  // belongs to neither box.  A mouseleave on the button used to dismiss the
+  // menu right there, before any item could be reached.  The synthetic
+  // mouseout below is exactly what React turns into onMouseLeave on that
+  // wrapper, so the old behaviour has to make this check red.
+  await openMenu('更多')
+  await new Promise((r) => setTimeout(r, 250))
+  const menuAfterLeave = Number(
+    await w.webContents.executeJavaScript(
+      `(()=>{const b=[...document.querySelectorAll('.toolbar button')]`
+      + `.find(x=>x.textContent.trim().startsWith('更多'));`
+      + `const wrap=b&&b.parentElement;`
+      + `if(!wrap)return -1;`
+      + `wrap.dispatchEvent(new MouseEvent('mouseout',{bubbles:true,relatedTarget:document.body}));`
+      + `return wrap.querySelector('.menu-pop')?1:0})()`
+    )
+  )
+  expect(
+    'a menu stays open while the pointer moves off its button',
+    menuAfterLeave === 1,
+    menuAfterLeave
+  )
+  await w.webContents.executeJavaScript(
+    `(()=>{document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));return 1})()`
+  )
+  await new Promise((r) => setTimeout(r, 250))
+  const menuAfterOutside = Number(
+    await w.webContents.executeJavaScript('document.querySelectorAll(".menu-pop").length')
+  )
+  expect('a press outside the menu closes it', menuAfterOutside === 0, menuAfterOutside)
   // Four of 更多's eight items had a home on the bar and went to it.  What
   // matters is not only that they arrived but that they left: a command that
   // lives in two menus is the kind of duplication nobody notices, and the
