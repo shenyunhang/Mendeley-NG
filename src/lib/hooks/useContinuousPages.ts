@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef } from 'react'
 import type * as pdfjs from 'pdfjs-dist'
 import type { MutableRefObject } from 'react'
 import { PGAP, bitmapKey, type Size } from '../pdfgeom'
-import { continuousPageTop } from '../continuousScroll'
+import {
+  REPAINT_MARGIN_PX,
+  continuousPageTop,
+  pagesNearViewport
+} from '../continuousScroll'
 import { bitmapPixelSize, devicePixelRatioOrOne } from '../bitmapPixelSize'
 import { drawTextLayer } from '../pdftext'
 
@@ -168,7 +172,7 @@ export function useContinuousPages(o: {
         }
         repaintVisible(scaleRef.current)
       },
-      { root, rootMargin: '700px 0px' }
+      { root, rootMargin: `${REPAINT_MARGIN_PX}px 0px` }
     )
     for (const el of root.querySelectorAll('[data-page]')) io.observe(el)
     return () => io.disconnect()
@@ -188,9 +192,26 @@ export function useContinuousPages(o: {
     // the column is about to be relaid out at the new size, so ask again on
     // the next frame rather than measuring heights that are still old
     const frame = requestAnimationFrame(() => {
-      for (const el of root.querySelectorAll('[data-page]')) {
-        const n = Number((el as HTMLElement).dataset.page)
-        if (Number.isFinite(n)) visible.current.add(n)
+      const view = root.getBoundingClientRect()
+      const boxes = [...root.querySelectorAll('[data-page]')].map((el) => {
+        const r = (el as HTMLElement).getBoundingClientRect()
+        return {
+          page: Number((el as HTMLElement).dataset.page),
+          top: r.top,
+          bottom: r.bottom
+        }
+      })
+      // Only pages near the viewport need a fresh bitmap. Adding every
+      // [data-page] element here repainted the whole paper on every step of a
+      // zoom gesture, which is what made the full-window reader stutter: it
+      // has more room, more pages in view and larger bitmaps than the pane.
+      // The same margin as the observer keeps the two in agreement.
+      for (const n of pagesNearViewport(
+        { top: view.top, bottom: view.bottom },
+        boxes,
+        REPAINT_MARGIN_PX
+      )) {
+        visible.current.add(n)
       }
       repaintVisible(scale)
     })

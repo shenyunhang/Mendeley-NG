@@ -441,6 +441,11 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   上一个 RenderTask 并吞掉 `RenderingCancelledException`。
 - 预取的离屏渲染排在可见页之后，加入正在飞的 `Map<key, Promise<canvas>>` 而不是重开
   一次；缓存按 `页:缩放:dpr` 做 key + LRU，不在缩放变化时整表清空。
+- 缩放后只重绘视口附近的页，用 `src/lib/continuousScroll.ts` 的
+  `pagesNearViewport` 按 `REPAINT_MARGIN_PX` 决定范围，和 IntersectionObserver 的
+  `rootMargin` 共用同一个数。旧实现把整列 `[data-page]` 全塞进 `visible`，
+  于是一次 Ctrl+wheel 的每一步都把整篇重画一遍；全窗口阅读模式窗口大、视口内页多、
+  位图也大，所以比右栏卡得多。别把「已经在屏幕上的页」写成遍历所有页。
 - 连续滚动里「适宽」取最宽的那一页算、整列共用一个稳定缩放，不按当前页算，
   否则滚动→重排→改滚动位置死循环；改窗口大小不重新适宽。
 - 阅读器键只在右侧是 PDF 页签且焦点不在输入框时生效，capture 阶段
