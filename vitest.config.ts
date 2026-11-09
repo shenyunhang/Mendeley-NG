@@ -1,10 +1,13 @@
 import { defineConfig } from 'vitest/config'
 
 /**
- * The unit suite is pure Node: every module under test is a pure function or a
- * state machine with an injected clock. Nothing here opens a window, talks to
- * Electron, or needs a DOM, so it can run on a headless CI runner -- unlike
- * `npm run smoke`, which drives a real window against a real library.
+ * The unit suite is pure Node. Most cases exercise a pure function or a state
+ * machine with an injected clock; the main-process IPC cases replace the
+ * `electron` module with a stub and call the handlers captured from
+ * `ipcMain.handle` directly. Nothing starts Electron, opens a window, touches
+ * the real library or needs a DOM, so the whole suite runs on a headless CI
+ * runner -- unlike `npm run smoke`, which drives a real window against a real
+ * library.
  */
 export default defineConfig({
   test: {

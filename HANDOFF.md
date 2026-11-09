@@ -128,8 +128,11 @@ npm run demo               # 造虚构库，重生成 README 的四张截图
    `files: []` + `references`，`npx tsc --noEmit` 等于跑空。两个工程分别覆盖主进程与
    渲染层，`tsconfig.node.json` 的 `include` 是手工白名单，新增一个被主进程或单测
    import 的 `src/lib` 纯函数就要列进去，否则报 TS6307。
-2. `npm test` 跑 `tests/` 下的 Vitest 用例：不开窗口、不碰真实库、不需要 Electron，
-   是 shared 规则、渲染层纯函数与安全边界唯一的自动化回归。
+2. `npm test` 跑 `tests/` 下的 Vitest 用例：不开窗口、不碰真实库、不启动 Electron，
+   是 shared 规则、渲染层纯函数、安全边界与主进程 IPC 唯一的自动化回归。
+   `main-ipc-*.test.ts` 用 `vi.mock('electron')` 把 Electron、云端客户端、JSON 缓存
+   和索引驱动换成桩，捕获 `ipcMain.handle` 注册的 handler 后直接调用——测的是
+   channel 回答什么（含失败形态），不是源码里有没有那一行。
 3. `npm run build` 产出 `out/`。`scripts/start.mjs` 只检查 `out/main/index.js` 在不在，
    然后直接起 Electron，所以忘了构建跑的是上一版，而且会**安静地全绿**。
 4. `npm run smoke` 用真实库和真实 PDF，开隐藏窗口逐条断言，日志以
@@ -199,6 +202,7 @@ src/
   styles/               从原单文件逐字切出的十二个分片，规则顺序不可重排
 shared/                  三端共享：类型、规则常量、原子写、安全策略、分页与队列
 tests/                   Vitest 单测：shared / renderer-pure / security / refactor-regression
+                         main-ipc-system / main-ipc-files（Electron 用替身，捕获 handler）
 scripts/                 启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
 docs/screenshots/        README 的四张图，由 npm run demo 生成
 .github/workflows/       ci.yml（类型 / 单测 / 构建 / 产物）、release.yml（打包与发布）
@@ -268,6 +272,10 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 
 - 纯规则配固定输入的行为断言；源码串断言只用来佐证接线，重构时应随产品代码一起
   校正并写明旧串为什么不再成立，**不放宽判据**。
+- 主进程 handler 的桩打在输入侧：替身 `electron` 及被 import 的云端客户端、缓存、
+  索引驱动，捕获 `ipcMain.handle` 后直接调用 channel。别给产品模块本身打桩，
+  也别让 `app.getPath('userData')` 落到真实用户目录。临时目录要在异步用例
+  `await` 完之后再删，否则断言读的是已经被清理掉的文件。
 - 以「没有找到任何 X」为结论的断言，先证明探测器找得到 X（喂一段旧代码进去必须抓到）。
   数调用点数 `name(` 而不是 `\bname\b`，并排除声明与 import 路径。
 - 抽共享规则前把旧表达式逐行抄进测试、对大批量输入逐值比，并单独证明退化差异真实存在。
@@ -591,6 +599,10 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   会让 `__dirname` 定位的 preload / renderer / 仓库根全部失效。
 - `src/styles.css` 现在只是十二行 `@import`，规则逐字留在 `src/styles/` 的分片里。
   顺序就是层叠顺序：改动时先按顺序拼接与 `HEAD` 逐字节比对，别为了归类去重排。
+- 主进程侧现在只有 `system` 与 PDF 写入两类 channel 有行为单测。`library.ts` 的
+  同步对账、`fulltext.ts` 的索引状态机、`marks.ts` 的标注合并，以及渲染层的浮层栈
+  与 Esc 链仍只靠 smoke 的源码串断言和真实库自检守着。要拆这些区间，先照
+  `main-ipc-*.test.ts` 的模式补行为测试，再动结构。
 - 主窗口 `sandbox: false`（授权窗口是 `true`）：preload 只用 Electron API，
   统一沙箱前要确认没有依赖 Node 的 preload 路径。
 - `store.ts` 里五个 JSON 没有 schema 版本与迁移：结构校验失败一律当成「无缓存」，
