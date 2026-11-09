@@ -76,6 +76,9 @@ export default function DocTable({
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
   const headRef = useRef<HTMLDivElement>(null)
+  // Membership is checked once per visible row. With Ctrl+A the array can hold
+  // the whole library, so a linear includes() here is quadratic in the list.
+  const multiSet = useMemo(() => new Set(multi), [multi])
 
   // --row-h is expressed in rem, so ask the layout engine for the real height
   // instead of hard-coding 30 and drifting out of sync when the user rescales
@@ -307,7 +310,7 @@ export default function DocTable({
           <div style={{ height: v.getTotalSize(), position: 'relative' }}>
             {v.getVirtualItems().map((vi) => {
               const d = docs[vi.index]
-              const picked = multi.includes(d.id)
+              const picked = multiSet.has(d.id)
               return (
                 <div
                   key={d.id}
@@ -341,7 +344,7 @@ export default function DocTable({
                     // a right click on an unselected row is a request to act on
                     // that row, so it selects first: otherwise the menu would
                     // describe one document while the pane showed another
-                    if (!multi.includes(d.id)) {
+                    if (!multiSet.has(d.id)) {
                       onSelect(d, vi.index, { shift: false, add: false })
                     }
                     onContextMenu?.(d, e)

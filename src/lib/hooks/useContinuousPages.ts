@@ -48,6 +48,10 @@ export function useContinuousPages(o: {
   /** Pages currently inside the observer's margin. */
   const visible = useRef(new Set<number>())
   const contRef = useRef<HTMLDivElement>(null)
+  /** The observer callback must see the current zoom without re-subscribing.
+   *  Scale changes are already handled by the repaint effect below. */
+  const scaleRef = useRef(scale)
+  scaleRef.current = scale
   /** A jump that could not be made yet because page heights were still
    *  arriving.  `gen` invalidates it when another document is opened, so a
    *  late height from the old paper cannot move the new one. */
@@ -162,13 +166,17 @@ export function useContinuousPages(o: {
           if (e.isIntersecting) visible.current.add(n)
           else visible.current.delete(n)
         }
-        repaintVisible(scale)
+        repaintVisible(scaleRef.current)
       },
       { root, rootMargin: '700px 0px' }
     )
     for (const el of root.querySelectorAll('[data-page]')) io.observe(el)
     return () => io.disconnect()
-  }, [continuous, numPages, sizes, scale, repaintVisible])
+    // The column renders every [data-page] element up front from numPages;
+    // `sizes` only changes their heights. Depending on it used to disconnect
+    // and re-observe the whole column once per measured page. `scale` is read
+    // from a ref because the repaint effect below already owns zoom changes.
+  }, [continuous, numPages, repaintVisible])
 
   // a new scale invalidates every bitmap, and the observer will not fire again
   // for pages that are already on screen, so they are repainted by hand

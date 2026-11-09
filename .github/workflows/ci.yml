@@ -47,3 +47,51 @@ jobs:
 
       - name: Build main, preload and renderer
         run: npm run build
+
+      # A green build is not enough: electron-vite can emit a broken entry
+      # point, drop the --smoke chunk, or fail to copy the pdf.js worker, and
+      # all of those only show up at runtime on an installed machine.  Check
+      # the artifacts themselves, with a Node script so the logic is identical
+      # on every runner and needs no shell-specific tools or globbing.
+      - name: Verify build artifacts
+        shell: bash
+        run: |
+          node -e '
+          const fs = require("fs")
+          const path = require("path")
+          const { execFileSync } = require("child_process")
+          const mainDir = path.join("out", "main")
+          const fail = (msg) => { console.error("build artifact check FAILED: " + msg); process.exit(1) }
+          if (!fs.existsSync(mainDir)) fail("missing directory " + mainDir)
+          const entries = fs.readdirSync(mainDir)
+          const smokeChunks = entries.filter((name) => /^smoke-.*\.js$/.test(name))
+          if (smokeChunks.length === 0) fail("no out/main/smoke-*.js chunk was produced")
+          const toCheck = [path.join(mainDir, "index.js")]
+          for (const name of smokeChunks) toCheck.push(path.join(mainDir, name))
+          for (const file of toCheck) {
+            if (!fs.existsSync(file)) fail("missing " + file)
+            try {
+              execFileSync(process.execPath, ["--check", file], { stdio: "pipe" })
+            } catch (e) {
+              fail("node --check failed for " + file + "\n" + String(e.stderr || e.message))
+            }
+            console.log("node --check OK  " + file)
+          }
+          const worker = path.join(mainDir, "pdf.worker.mjs")
+          if (!fs.existsSync(worker)) fail("missing " + worker)
+          const workerSize = fs.statSync(worker).size
+          if (!(workerSize > 100000)) fail(worker + " is " + workerSize + " bytes; expected > 100000")
+          console.log("pdf.worker.mjs OK  " + workerSize + " bytes")
+          const indexSrc = fs.readFileSync(path.join(mainDir, "index.js"), "utf8")
+          const re = /require\(\s*["\x27]\.\/(smoke-[^"\x27]+\.js)["\x27]\s*\)/g
+          const referenced = new Set()
+          let match
+          while ((match = re.exec(indexSrc)) !== null) referenced.add(match[1])
+          if (referenced.size === 0) fail("index.js has no require(\"./smoke-<hash>.js\") reference")
+          for (const name of referenced) {
+            const chunk = path.join(mainDir, name)
+            if (!fs.existsSync(chunk)) fail("index.js requires missing chunk " + chunk)
+            console.log("smoke chunk OK  " + chunk)
+          }
+          console.log("build artifacts OK")
+          '

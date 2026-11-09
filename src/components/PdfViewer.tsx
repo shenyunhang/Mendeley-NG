@@ -44,6 +44,7 @@ import { usePdfLinks } from '../lib/hooks/usePdfLinks'
 import { usePdfRefs } from '../lib/hooks/usePdfRefs'
 import { usePdfAnnotations } from '../lib/hooks/usePdfAnnotations'
 import { useCiteCard } from '../lib/hooks/useCiteCard'
+import { writeConfig } from '../lib/configWrite'
 import type { CiteMark } from '../lib/pdfrefs'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
@@ -157,15 +158,15 @@ export default function PdfViewer({
       .then((c) => {
         if (typeof c.pdfContinuous === 'boolean') setContinuous(c.pdfContinuous)
       })
-      .catch(() => {
-        /* a default of one page at a time is fine */
-      })
+      .catch((e) => reportFailure(FAILURE.continuousPreference, e))
   }, [])
 
   const toggleContinuous = () => {
     setContinuous((v) => {
       const next = !v
-      void window.api.setConfig({ pdfContinuous: next }).catch((e) => reportFailure(FAILURE.continuousPreference, e))
+      // Every preference write goes through configWrite: a failed setConfig
+      // used to be swallowed here while the rest of the app reported it.
+      void writeConfig({ pdfContinuous: next })
       return next
     })
   }

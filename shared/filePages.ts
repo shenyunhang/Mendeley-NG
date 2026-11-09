@@ -9,13 +9,15 @@
  * document that was not on page one was then labelled "no PDF in the cloud",
  * which is why syncing never brought their files down.
  *
- * A page whose file ids are all already seen is treated as the end. That is
- * both the correct response to a short/duplicate last page and a guard against
- * a wrong marker quietly turning into hundreds of identical requests.
+ * The walk itself is the one in paged.ts: a page whose file ids are all
+ * already seen ends it, and so does a marker that does not move forward.
+ * This module only says what a page is worth to us: the document ids on it.
  *
  * Nothing here touches the network: the caller injects the page fetcher, so
  * the paging can be checked with fixed pages instead of a live account.
  */
+import { collectPaged } from './paged'
+
 export interface FilePageRow {
   id?: string
   document_id?: string
@@ -27,24 +29,17 @@ export async function collectFileDocumentIds(
   maxPages = 200
 ): Promise<Set<string>> {
   const ids = new Set<string>()
-  const seenFiles = new Set<string>()
-  let marker: string | undefined
-  for (let page = 0; page < maxPages; page++) {
+  // collectPaged drops rows whose file id was already seen, but a document id
+  // on such a row is still a fact about the library. Observe the page as it
+  // arrives rather than reading the collected rows back, so the shared walk
+  // owns only the paging rule and this module keeps its old answer exactly.
+  const observe: typeof fetchPage = async (marker) => {
     const rows = await fetchPage(marker)
-    if (!rows || rows.length === 0) break
-    let fresh = 0
-    for (const row of rows) {
-      if (row.id && !seenFiles.has(row.id)) {
-        seenFiles.add(row.id)
-        fresh++
-      }
+    for (const row of rows ?? []) {
       if (row.document_id) ids.add(row.document_id)
     }
-    if (fresh === 0) break
-    if (rows.length < limit) break
-    const next = rows[rows.length - 1]?.id
-    if (!next || next === marker) break
-    marker = next
+    return rows
   }
+  await collectPaged<FilePageRow>(observe, limit, maxPages)
   return ids
 }

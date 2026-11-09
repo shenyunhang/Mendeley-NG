@@ -3,6 +3,7 @@ import { clampToRange } from '../../shared/clamp'
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
@@ -161,7 +162,7 @@ import { clampScale, posToRect } from '../../src/lib/pdfgeom'
 import { gridTemplate } from '../../src/lib/columns'
 import { markAll } from '../../src/lib/match'
 import { splitPersonName } from '../../src/lib/splitPersonName'
-import { uniquePdfPath } from '../../shared/uniquePdfPath'
+import { uniquePdfPath, writeUniquePdf } from '../../shared/uniquePdfPath'
 
 // Eight product-side delays used to be bare literals at eight call sites.
 // Giving them names is a readability change only if no number moved, so this
@@ -9545,9 +9546,13 @@ export async function runSmoke() {
   // can.  The indexer now also says what the reader actually said rather than
   // blaming each paper, and that is asserted further down.
   const rootDir = app.getAppPath()
-  let workerInfo: { ok: boolean; bytes?: number; big?: boolean; script?: string } = {
-    ok: false
-  }
+  let workerInfo: {
+    ok: boolean
+    bytes?: number
+    big?: boolean
+    buildScript?: string
+    script?: string
+  } = { ok: false }
   try {
     const st = fs.statSync(path.join(rootDir, 'out', 'main', 'pdf.worker.mjs'))
     const pkg = JSON.parse(
@@ -9558,6 +9563,7 @@ export async function runSmoke() {
       bytes: st.size,
       // the real worker is about a megabyte; a stub would read fine here
       big: st.size > 100_000,
+      buildScript: pkg.scripts?.build ?? '',
       script: pkg.scripts?.dist ?? ''
     }
   } catch {
@@ -9571,7 +9577,15 @@ export async function runSmoke() {
   )
   expect(
     'packaging is told to copy it',
-    /copy-worker/.test(workerInfo.script ?? ''),
+    // dist used to spell out the whole build chain itself, including
+    // copy-worker, while build spelled it out separately. Checking dist for
+    // the literal word could not notice the two drifting apart -- which is
+    // exactly how the packaged app once lost its worker. dist now delegates
+    // to `npm run build`, so the judge is stricter: the build script must
+    // still copy the worker, and packaging must go through that same script.
+    /copy-worker/.test(workerInfo.buildScript ?? '') &&
+      /npm run build/.test(workerInfo.script ?? '') &&
+      /electron-builder/.test(workerInfo.script ?? ''),
     workerInfo
   )
 
@@ -11914,16 +11928,47 @@ export async function runSmoke() {
       const docsSrc = read('electron/main/ipc/docs.ts')
       const filesSrc = read('electron/main/ipc/files.ts')
       const systemSrc = read('electron/main/ipc/system.ts')
+      const uniqueSrc = read('shared/uniquePdfPath.ts')
       expect(
-        'both PDF writers take a free candidate name from the shared rule',
-        docsSrc.includes('uniquePdfPath(dir, wanted)') &&
+        'both PDF writers claim a free candidate name atomically',
+        // The old string was `uniquePdfPath(dir, wanted)`, which only answered
+        // "which name is free" and left a separate fs.writeFileSync to do the
+        // writing. Two concurrent imports could therefore be handed the same
+        // free name and the second silently overwrote the first paper's bytes.
+        // The judge below is stricter, not weaker: the writer must be the
+        // single atomic claim, the old check-then-write pair must be gone,
+        // and the shared rule must still show why the claim is atomic.
+        docsSrc.includes('writeUniquePdf(dir, wanted, buf)') &&
           docsSrc.includes('if (buf.length) {') &&
           docsSrc.includes('doc.localPdf = dest') &&
-          filesSrc.includes('uniquePdfPath(dir, wanted)') &&
+          !docsSrc.includes('uniquePdfPath(dir, wanted)') &&
+          !docsSrc.includes('fs.writeFileSync(dest, buf)') &&
+          filesSrc.includes('writeUniquePdf(dir, wanted, buf)') &&
           filesSrc.includes('if (!buf.length)') &&
-          filesSrc.includes('if (!dest)'),
+          filesSrc.includes('if (!dest)') &&
+          !filesSrc.includes('uniquePdfPath(dir, wanted)') &&
+          !filesSrc.includes('fs.writeFileSync(dest, buf)') &&
+          uniqueSrc.includes("flag: 'wx'") &&
+          uniqueSrc.includes('pdfCandidates(dir, wanted)'),
         {}
       )
+      // Wiring alone cannot prove the race is gone. Ask for the same name
+      // twice against a real directory and read both files back: the second
+      // claim must land on a different path and neither may be clobbered.
+      const claimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mendeley-ng-claim-'))
+      try {
+        const a = writeUniquePdf(claimDir, 'paper.pdf', Buffer.from('first bytes'))
+        const b = writeUniquePdf(claimDir, 'paper.pdf', Buffer.from('second bytes'))
+        expect(
+          'two claims for one name never overwrite each other',
+          !!a && !!b && a !== b &&
+            fs.readFileSync(a, 'utf8') === 'first bytes' &&
+            fs.readFileSync(b, 'utf8') === 'second bytes',
+          { a, b }
+        )
+      } finally {
+        fs.rmSync(claimDir, { recursive: true, force: true })
+      }
       expect(
         'a dialog re-reads the config before writing its one field',
         // pickDir already re-read it; the two file dialogs are the ones that

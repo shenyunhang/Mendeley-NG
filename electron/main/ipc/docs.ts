@@ -7,7 +7,7 @@ import { attachPdfs, parseName } from '../pdfindex'
 import { pdfNameFor } from '../pdfname'
 import { indexAdded } from '../ftops'
 import { DEFAULT_PDF_DIR, loadConfig, loadLibrary, saveLibrary } from '../store'
-import { uniquePdfPath } from '../../../shared/uniquePdfPath'
+import { writeUniquePdf } from '../../../shared/uniquePdfPath'
 export function registerDocsIpc() {
   ipcMain.handle('doc:patch', async (_e, id: string, body: Record<string, unknown>) => {
     const c = ensureClient()
@@ -187,14 +187,14 @@ export function registerDocsIpc() {
       const dir = cfg.pdfDir || DEFAULT_PDF_DIR
       fs.mkdirSync(dir, { recursive: true })
       const wanted = pdfNameFor(doc, name, cfg.pdfNameTemplate)
-      const dest = uniquePdfPath(dir, wanted)
       // Two papers can legitimately want the same file name. Overwriting the
       // first PDF with the second used to leave one paper pointing at the
       // other's bytes; when every candidate is taken we skip the local copy
-      // rather than clobber one.
+      // rather than clobber one. The claim is atomic, so two concurrent
+      // imports cannot both be handed the same free name.
       if (buf.length) {
+        const dest = writeUniquePdf(dir, wanted, buf)
         if (dest) {
-          fs.writeFileSync(dest, buf)
           doc.localPdf = dest
           doc.file_attached = true
         }

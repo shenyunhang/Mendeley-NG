@@ -8,7 +8,7 @@ import { ftCancel, ftClear, ftSearch, ftStatus } from '../fulltext'
 import { ftDocs, indexAdded, startBuild } from '../ftops'
 import { DEFAULT_PDF_DIR, loadConfig, loadLibrary, saveLibrary } from '../store'
 import type { Doc } from '../../../shared/types'
-import { uniquePdfPath } from '../../../shared/uniquePdfPath'
+import { writeUniquePdf } from '../../../shared/uniquePdfPath'
 
 export function registerFilesIpc() {
 
@@ -95,10 +95,11 @@ export function registerFilesIpc() {
       const lib = loadLibrary()
       const doc = lib?.docs.find((d) => d.id === docId)
       const wanted = pdfNameFor(doc, meta.file_name, cfg.pdfNameTemplate)
-      const dest = uniquePdfPath(dir, wanted)
+      // The write claims the free name atomically; a concurrent download that
+      // won the race makes this one fall through to the next candidate.
+      const dest = writeUniquePdf(dir, wanted, buf)
       // Every candidate name is taken: skip rather than overwrite a PDF.
       if (!dest) return { ok: false, error: '没有可用的文件名' }
-      fs.writeFileSync(dest, buf)
       if (lib && doc) {
         doc.localPdf = dest
         saveLibrary(lib.docs, lib.folders)

@@ -430,6 +430,13 @@ export function ftVoid(): boolean {
 
 type PdfDoc = Awaited<ReturnType<typeof pdfjs.getDocument>['promise']>
 
+/** Destroying a pdf.js document is what actually stops its worker. One door
+ *  for both the normal exit and an abandoned document, so a run that times
+ *  out cannot leave a worker behind just because it took a different path. */
+function cleanupDoc(doc: PdfDoc | null): Promise<void> | undefined {
+  return doc?.destroy().catch((e) => ignoreFailure(FAILURE.workerCleanup, e))
+}
+
 /**
  * How long one document is allowed to take before it is abandoned.
  *
@@ -483,10 +490,15 @@ async function extract(file: string, n: number): Promise<Got> {
     const raw = await fsp.readFile(file)
     const data = new Uint8Array(raw)
     const d = await pdfjs.getDocument({ data, useSystemFonts: false }).promise
+    // The timer may have fired while getDocument was still resolving. By then
+    // the race has already settled and finally has run with an empty box, so
+    // nobody else can destroy this document. It has to happen here, before
+    // the throw, or every PDF that times out during open leaks a worker.
+    if (stopped) {
+      await cleanupDoc(d)
+      throw new Error('timed out')
+    }
     box.doc = d
-    // the timer may have fired while getDocument was still resolving; nothing
-    // would be left to destroy it, so check before parsing pages
-    if (stopped) throw new Error('timed out')
     const count = Math.min(n, d.numPages)
     let out = ''
     const bounds: number[] = []
@@ -531,6 +543,8 @@ async function extract(file: string, n: number): Promise<Got> {
           // Only resolving the race would abandon the promise and leave the
           // parse burning a core for as long as it liked.
           void box.doc?.destroy().catch((e) => ignoreFailure(FAILURE.workerCleanupTimedOut, e))
+          // the normal exit must not destroy the same document a second time
+          box.doc = null
           if (failures++ < 3) console.warn('[fulltext] timed out', file)
           resolve(null)
         }, DOC_TIMEOUT_MS)
@@ -559,7 +573,7 @@ async function extract(file: string, n: number): Promise<Got> {
     return { text: '', bounds: [], why: 'PDF 打不开', err }
   } finally {
     if (timer) clearTimeout(timer)
-    await box.doc?.destroy().catch((e) => ignoreFailure(FAILURE.workerCleanup, e))
+    await cleanupDoc(box.doc)
   }
 }
 

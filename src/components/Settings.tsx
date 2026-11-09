@@ -2,28 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { FtStatus, UpdateState } from '../../shared/types'
 import { DEFAULT_PDF_TEMPLATE } from '../../shared/types'
 import { commitPageBudget } from '../lib/pageBudgetCommit'
+import { updateLine } from '../lib/updateText'
 import logoUrl from '../../assets/logo.svg'
-
-/**
- * What the update line says, given the state and the version that is running.
- *
- * Both numbers are named in every line that has a second number to name.
- * "有新版本" without saying which one, or "已是最新" without saying what is
- * being called latest, both leave the reader unable to answer the question
- * they actually came here with: is the thing I am running the thing that was
- * fixed?
- */
-function updLine(upd: UpdateState | null | undefined, current: string): string | null {
-  const p = upd?.phase
-  if (!upd || !p || p === 'idle') return null
-  if (p === 'checking') return `正在检查…（当前 ${current}）`
-  if (p === 'available') return `有新版本 ${upd.version ?? ''}（当前 ${current}）`
-  if (p === 'not-available') return `已是最新版本（当前 ${current}）`
-  if (p === 'downloading') return `正在下载 ${upd.version ?? ''} ${upd.percent ?? 0}%`
-  if (p === 'downloaded') return `${upd.version ?? ''} 已下载，重启后安装（当前 ${current}）`
-  if (p === 'error') return `检查更新失败：${upd.message ?? '未知错误'}`
-  return upd.message ?? null
-}
 
 interface Props {
   theme: 'dark' | 'light'
@@ -255,9 +235,9 @@ export default function Settings({
                 the fixed one or the one they reported, and that is a question
                 about two versions, not one. */}
             <div className="about-upd">
-              {updLine(upd, version) ? (
+              {updateLine(upd, version) ? (
                 <span className={upd?.phase === 'error' ? 'upd-line err' : 'upd-line'}>
-                  {updLine(upd, version)}
+                  {updateLine(upd, version)}
                 </span>
               ) : (
                 <span className="upd-line">当前 {version}</span>

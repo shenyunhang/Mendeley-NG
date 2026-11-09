@@ -84,16 +84,12 @@ export function usePaneWidths({
     configHydrated
   )
 
-  const setLeft = (w: number) => {
-    const next = clampLeft(w)
-    setLeftW(next)
-    void writeConfig({ paneLeft: next })
-  }
-  const setRight = (p: number) => {
-    const next = clampRight(p)
-    setRightPct(next)
-    void writeConfig({ paneRight: next })
-  }
+  /** Reset and nudge change the same state a drag changes, so the debounced
+   *  write above is the only writer. Writing here as well meant one gesture
+   *  produced two `setConfig` round trips: an immediate one with just this
+   *  edge, then the settled one with both edges 400 ms later. */
+  const setLeft = (w: number) => setLeftW(clampLeft(w))
+  const setRight = (p: number) => setRightPct(clampRight(p))
 
   return { bodyRef, dragLeft, dragRight, setLeft, setRight }
 }

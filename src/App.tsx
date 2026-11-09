@@ -943,13 +943,23 @@ export default function App() {
     selectOnly(next)
   }
 
+  /** Membership is asked about on every row and in every batch action. A
+   *  linear `includes` over an array that Ctrl+A can fill with the whole
+   *  library turns one selection into O(n·m) comparisons, several of them in
+   *  a single render. One set and one filtered list serve every caller. */
+  const multiSet = useMemo(() => new Set(multi), [multi])
+  const selectedDocs = useMemo(
+    () => docs.filter((d) => multiSet.has(d.id)),
+    [docs, multiSet]
+  )
+
   /** What an export or a batch action applies to: the multi-selection when
    *  there is one, else the single selected row, else the whole view. */
   const target = useMemo(() => {
-    if (multi.length > 1) return docs.filter((d) => multi.includes(d.id))
+    if (multi.length > 1) return selectedDocs
     if (selected) return [selected]
     return filtered
-  }, [multi, selected, filtered, docs])
+  }, [multi.length, selected, filtered, selectedDocs])
 
   /**
    * Run one cloud call per item and say afterwards what actually happened.
@@ -1282,7 +1292,7 @@ export default function App() {
 
   const batchFolder = (folderId: string) =>
     folderBatch(
-      docs.filter((d) => multi.includes(d.id)),
+      selectedDocs,
       folderId,
       'add'
     )
@@ -1297,13 +1307,13 @@ export default function App() {
   const batchUnfolder = () => {
     if (!currentFolder) return
     void folderBatch(
-      docs.filter((d) => multi.includes(d.id)),
+      selectedDocs,
       currentFolder.id,
       'remove'
     )
   }
 
-  const batchTrash = () => trashDocs(docs.filter((d) => multi.includes(d.id)))
+  const batchTrash = () => trashDocs(selectedDocs)
 
   /** Which of a list are worth a download: the cloud has a file and the disk
    *  does not.  Counting them is the whole point of the number on the button
@@ -1511,7 +1521,7 @@ export default function App() {
    * not happen.
    */
   const applyBatchEdit = async (op: BatchOp, value: string) => {
-    const list = docs.filter((d) => multi.includes(d.id))
+    const list = selectedDocs
     if (!list.length) return
     const patchFor = (d: Doc): Record<string, unknown> => {
       switch (op) {
@@ -1596,8 +1606,8 @@ export default function App() {
    * showed another.
    */
   const menuTargets = (id: string): Doc[] => {
-    if (multi.length > 1 && multi.includes(id)) {
-      return docs.filter((d) => multi.includes(d.id))
+    if (multi.length > 1 && multiSet.has(id)) {
+      return selectedDocs
     }
     const d = docs.find((x) => x.id === id)
     return d ? [d] : []
@@ -2326,15 +2336,15 @@ export default function App() {
                   { label: 'EndNote XML', run: exportEndnote }
                 ]}
               />
-              <button onClick={() => copyCitation(docs.filter((d) => multi.includes(d.id)))}>
+              <button onClick={() => copyCitation(selectedDocs)}>
                 复制引文
               </button>
               {(() => {
-                const need = needsPdf(docs.filter((d) => multi.includes(d.id))).length
+                const need = needsPdf(selectedDocs).length
                 return (
                   <button
                     disabled={!need || !!dlRun}
-                    onClick={() => void batchDownload(docs.filter((d) => multi.includes(d.id)))}
+                    onClick={() => void batchDownload(selectedDocs)}
                     title={
                       need
                         ? `把选中的 ${need} 篇里本地还没有的 PDF 从云端下载下来`

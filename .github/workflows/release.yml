@@ -36,6 +36,93 @@ jobs:
       - name: Check both TypeScript projects and the unit suite
         run: npm run typecheck && npm test
 
+      # A tag can name any version, so refuse to ship an installer whose
+      # version disagrees with either manifest.  Also insist on an annotated
+      # tag: git cat-file -t returns "tag" for those and "commit" for a
+      # lightweight one.  workflow_dispatch has no tag at all, so the whole
+      # gate is skipped there (see the if: below) instead of failing.
+      - name: Verify release tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          node -e '
+          const fs = require("fs")
+          const { execFileSync } = require("child_process")
+          const tag = process.env.GITHUB_REF_NAME || ""
+          if (!tag) { console.error("GITHUB_REF_NAME is empty"); process.exit(1) }
+          let type
+          try {
+            type = execFileSync("git", ["cat-file", "-t", tag], { encoding: "utf8" }).trim()
+          } catch (e) {
+            console.error("git cat-file -t " + tag + " failed: " + e.message)
+            process.exit(1)
+          }
+          console.log("git cat-file -t " + tag + " -> " + type)
+          if (type !== "tag") {
+            console.error("expected an annotated tag, got " + type + " (a lightweight tag resolves to a commit)")
+            process.exit(1)
+          }
+          const version = tag.startsWith("v") ? tag.slice(1) : tag
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")).version
+          const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8")).version
+          console.log("tag version:       " + version)
+          console.log("package.json:      " + pkg)
+          console.log("package-lock.json: " + lock)
+          if (version !== pkg || version !== lock) {
+            console.error("version mismatch")
+            process.exit(1)
+          }
+          console.log("release tag OK")
+          '
+
+      # dist rebuilds from source, so build once here to have artifacts the
+      # next step can inspect before electron-builder bundles them.
+      - name: Build main, preload and renderer
+        run: npm run build
+
+      - name: Verify build artifacts
+        shell: bash
+        run: |
+          node -e '
+          const fs = require("fs")
+          const path = require("path")
+          const { execFileSync } = require("child_process")
+          const mainDir = path.join("out", "main")
+          const fail = (msg) => { console.error("build artifact check FAILED: " + msg); process.exit(1) }
+          if (!fs.existsSync(mainDir)) fail("missing directory " + mainDir)
+          const entries = fs.readdirSync(mainDir)
+          const smokeChunks = entries.filter((name) => /^smoke-.*\.js$/.test(name))
+          if (smokeChunks.length === 0) fail("no out/main/smoke-*.js chunk was produced")
+          const toCheck = [path.join(mainDir, "index.js")]
+          for (const name of smokeChunks) toCheck.push(path.join(mainDir, name))
+          for (const file of toCheck) {
+            if (!fs.existsSync(file)) fail("missing " + file)
+            try {
+              execFileSync(process.execPath, ["--check", file], { stdio: "pipe" })
+            } catch (e) {
+              fail("node --check failed for " + file + "\n" + String(e.stderr || e.message))
+            }
+            console.log("node --check OK  " + file)
+          }
+          const worker = path.join(mainDir, "pdf.worker.mjs")
+          if (!fs.existsSync(worker)) fail("missing " + worker)
+          const workerSize = fs.statSync(worker).size
+          if (!(workerSize > 100000)) fail(worker + " is " + workerSize + " bytes; expected > 100000")
+          console.log("pdf.worker.mjs OK  " + workerSize + " bytes")
+          const indexSrc = fs.readFileSync(path.join(mainDir, "index.js"), "utf8")
+          const re = /require\(\s*["\x27]\.\/(smoke-[^"\x27]+\.js)["\x27]\s*\)/g
+          const referenced = new Set()
+          let match
+          while ((match = re.exec(indexSrc)) !== null) referenced.add(match[1])
+          if (referenced.size === 0) fail("index.js has no require(\"./smoke-<hash>.js\") reference")
+          for (const name of referenced) {
+            const chunk = path.join(mainDir, name)
+            if (!fs.existsSync(chunk)) fail("index.js requires missing chunk " + chunk)
+            console.log("smoke chunk OK  " + chunk)
+          }
+          console.log("build artifacts OK")
+          '
+
       # --publish never: we create the release ourselves below, so electron-builder
       # must not try to publish (and must not look for a GitHub token of its own)
       #

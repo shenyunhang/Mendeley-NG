@@ -17,36 +17,7 @@ import { parseAny, type Entry } from '../lib/import'
 import type { ColKey, SortKey } from '../lib/columns'
 import type { ListFilter } from '../lib/filters'
 import { LIBRARY, type View } from '../lib/view'
-
-/**
- * Toolbar wording for each updater phase; null means "say nothing".
- *
- * Every phase names the version that is running, and the ones that have a
- * version to offer name that too.  "已是最新版本" without a number answers a
- * question nobody asked — compared to what? — and a reader who was told a
- * build is fixed has no way to tell whether the number in front of them is
- * the fixed one or the one they reported.
- */
-const UPD_TEXT: Record<UpdateState['phase'], ((s: UpdateState) => string) | null> = {
-  idle: null,
-  checking: (s) => (s.current ? `检查更新…（当前 ${s.current}）` : '检查更新…'),
-  available: (s) =>
-    s.current && s.version
-      ? `新版本 ${s.version}（当前 ${s.current}），开始下载`
-      : `发现新版本 ${s.version ?? ''}，开始下载`,
-  // the answer to "am I on the fixed one?" is the number, not the adjective
-  'not-available': (s) => (s.current ? `已是最新版本（当前 ${s.current}）` : '已是最新版本'),
-  downloading: (s) =>
-    s.version ? `下载 ${s.version} ${s.percent ?? 0}%` : `下载中 ${s.percent ?? 0}%`,
-  downloaded: (s) =>
-    s.version && s.current
-      ? `${s.version} 已就绪（当前 ${s.current}），重启安装`
-      : s.version
-        ? `${s.version} 已就绪，重启安装`
-        : '安装并重启…',
-  error: (s) => `更新失败：${s.message ?? '未知错误'}`,
-  unsupported: (s) => s.message ?? '当前环境不支持更新'
-}
+import { updateLine } from '../lib/updateText'
 
 interface Props {
   /** Focused by Ctrl+F from wherever the reader is typing. */
@@ -482,7 +453,7 @@ export default function Toolbar(p: Props) {
         全文
       </button>
       <span className="grow" />
-      {p.upd && UPD_TEXT[p.upd.phase] && (
+      {p.upd && updateLine(p.upd, p.upd.current ?? '') && (
         <span
           className="status"
           style={{ color: p.upd.phase === 'error' ? 'var(--err)' : 'var(--accent)' }}
@@ -490,7 +461,7 @@ export default function Toolbar(p: Props) {
           // update; the two version numbers are already in the text
           title={p.upd.message ?? (p.upd.current ? `当前版本 ${p.upd.current}` : '')}
         >
-          {UPD_TEXT[p.upd.phase]?.(p.upd)}
+          {updateLine(p.upd, p.upd.current ?? '')}
         </span>
       )}
       <button style={{ padding: '3px 9px' }} title="缩小界面字号" onClick={() => p.onFont(-1)}>

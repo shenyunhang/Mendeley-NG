@@ -64,6 +64,9 @@ export default function SearchResults({
   empty
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
+  // One membership test per result card; a full-library Ctrl+A makes a linear
+  // scan of the id array quadratic in the number of hits.
+  const multiSet = useMemo(() => new Set(multi), [multi])
 
   // read back from CSS rather than hard-coding it, so a card that the reader
   // has made taller by scaling the UI is not measured at the old height
@@ -126,7 +129,7 @@ export default function SearchResults({
           {v.getVirtualItems().map((vi) => {
             const d = docs[vi.index]
             const m = matchAt(vi.index)
-            const picked = multi.includes(d.id)
+            const picked = multiSet.has(d.id)
             return (
               <div
                 key={d.id}
@@ -152,7 +155,7 @@ export default function SearchResults({
                   onSelect(d, vi.index, { shift: e.shiftKey, add: e.ctrlKey || e.metaKey })
                 }
                 onContextMenu={(e) => {
-                  if (!multi.includes(d.id)) onSelect(d, vi.index, { shift: false, add: false })
+                  if (!multiSet.has(d.id)) onSelect(d, vi.index, { shift: false, add: false })
                   onContextMenu?.(d, e)
                 }}
                 style={{

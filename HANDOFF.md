@@ -357,15 +357,18 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   Electron 默认图标，窗口 / 任务栏 / 安装包 / 快捷方式用我们的图标。
 - 打包 `files` 是 `out/**/*`、`package.json`、`assets/icon.png`；`build/` 是
   buildResources 目录，不会打进 app，窗口图标用 `assets/icon.png` 那份副本。
-- `dist` 与 `build` 不是同一条命令：`build` 是
-  `electron-vite build && node scripts/copy-worker.mjs`，`dist` 同样带 copy-worker。
-  漏了它，装出来的包每篇 PDF 都抛
-  `No "GlobalWorkerOptions.workerSrc" specified`。**往 `build` 里加东西时，
-  同一个动作要问一遍 `dist` 要不要。**
+- `dist` 委托给 `build`，不再抄一遍构建链：`build` 是
+  `electron-vite build && node scripts/copy-worker.mjs`，`dist` 是
+  `npm run build && electron-builder --win --x64`。从前两条命令各写一份
+  copy-worker，改一处忘另一处就会装出没有 worker 的包，每篇 PDF 都抛
+  `No "GlobalWorkerOptions.workerSrc" specified`。**往 `build` 里加东西时
+  不必再问 `dist`，但要确认 `dist` 仍然只走 `npm run build`。**
 - 主进程用 pdf.js 必须自带 worker。冒烟读 PDF 测不出打包缺件：要查
-  `out/main/pdf.worker.mjs` 存在且大于 100 KB，以及 `dist` 脚本字符串含
-  `copy-worker`；复现打包缺件去看装好的包（`npx asar list …/resources/app.asar`），
-  不是看源码目录。
+  `out/main/pdf.worker.mjs` 存在且大于 100 KB、`build` 脚本仍含
+  `copy-worker`、`dist` 脚本仍委托 `npm run build` 并调 electron-builder；
+  CI 与 release 另有一道产物门禁，逐个 `node --check` 主进程与 smoke chunk、
+  核对 `index.js` 里 require 的 chunk 文件真实存在。复现打包缺件去看装好的包
+  （`npx asar list …/resources/app.asar`），不是看源码目录。
 - 诊断不能替文件背锅：库级故障（一轮一篇都没读出来）与篇级失败分开报，
   面板把 pdf.js 的原话原样显示。`standardFontDataUrl` / `cMapUrl` 未配，
   部分 PDF 文本抽取质量受损但不致命。

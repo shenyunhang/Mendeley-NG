@@ -34,6 +34,13 @@ export interface Token {
   _expires_at?: number
 }
 
+/** A minute of slack, so no request starts with a token that is about to
+ *  expire.  One rule for construction, refresh, save and import: the same
+ *  expression used to be copied into four places. */
+function expiryFromNow(tok: Token): number {
+  return Date.now() / 1000 + (tok.expires_in ?? 3600) - 60
+}
+
 export class Mendeley {
   private tok: Token
   private tokenPath: string
@@ -41,10 +48,7 @@ export class Mendeley {
   constructor(tokenPath: string, tok: Token) {
     this.tokenPath = tokenPath
     this.tok = tok
-    if (!this.tok._expires_at) {
-      this.tok._expires_at =
-        Date.now() / 1000 + (this.tok.expires_in ?? 3600) - 60
-    }
+    if (!this.tok._expires_at) this.tok._expires_at = expiryFromNow(this.tok)
   }
 
   private save() {
@@ -101,9 +105,40 @@ export class Mendeley {
     }
     const fresh = (await res.json()) as Token
     this.tok = { ...this.tok, ...fresh }
-    this.tok._expires_at =
-      Date.now() / 1000 + (fresh.expires_in ?? 3600) - 60
+    this.tok._expires_at = expiryFromNow(fresh)
     this.save()
+  }
+
+  /** One freshness check and one header shape for every authenticated call,
+   *  including the two that carry raw bytes instead of JSON. */
+  private async ensureFresh(): Promise<void> {
+    if ((this.tok._expires_at ?? 0) < Date.now() / 1000) await this.refresh()
+  }
+
+  private authHeaders(): Record<string, string> {
+    return {
+      Authorization: 'Bearer ' + this.tok.access_token,
+      'User-Agent': UA,
+      Accept: '*/*'
+    }
+  }
+
+  /** Send once, and once more after a refresh if the token was rejected.
+   *
+   *  The JSON, download and upload paths each used to hand-roll this retry;
+   *  the two raw-byte ones never went through request() at all and so could
+   *  drift in both their error format and their retry behaviour. */
+  private async send(
+    url: string,
+    build: (headers: Record<string, string>) => RequestInit
+  ): Promise<Response> {
+    await this.ensureFresh()
+    let res = await fetch(url, build(this.authHeaders()))
+    if (res.status === 401) {
+      await this.refresh()
+      res = await fetch(url, build(this.authHeaders()))
+    }
+    return res
   }
 
   /** A bearer token for callers that talk to Mendeley without going through
@@ -111,7 +146,7 @@ export class Mendeley {
    *  /catalog answers 401 "No auth header" anonymously, so it cannot be used
    *  without this. */
   async bearer(): Promise<string> {
-    if ((this.tok._expires_at ?? 0) < Date.now() / 1000) await this.refresh()
+    await this.ensureFresh()
     return this.tok.access_token
   }
 
@@ -122,31 +157,21 @@ export class Mendeley {
       params?: Record<string, string>
       body?: unknown
       contentType?: string
-      retried?: boolean
     } = {}
   ): Promise<T> {
-    if ((this.tok._expires_at ?? 0) < Date.now() / 1000) await this.refresh()
-
     let url = BASE + p
     if (opts.params) {
       url += '?' + new URLSearchParams(opts.params).toString()
     }
-    const headers: Record<string, string> = {
-      Authorization: 'Bearer ' + this.tok.access_token,
-      'User-Agent': UA,
-      Accept: '*/*'
-    }
-    let payload: string | undefined
-    if (opts.body !== undefined) {
-      headers['Content-Type'] = opts.contentType ?? CT_DOC
-      payload = JSON.stringify(opts.body)
-    }
-    const res = await fetch(url, { method, headers, body: payload })
-
-    if (res.status === 401 && !opts.retried) {
-      await this.refresh()
-      return this.request<T>(method, p, { ...opts, retried: true })
-    }
+    const res = await this.send(url, (headers) => {
+      const h = { ...headers }
+      let payload: string | undefined
+      if (opts.body !== undefined) {
+        h['Content-Type'] = opts.contentType ?? CT_DOC
+        payload = JSON.stringify(opts.body)
+      }
+      return { method, headers: h, body: payload }
+    })
     if (!res.ok) {
       const txt = await res.text().catch(() => '')
       throw new Error(`${method} ${p} -> ${res.status} ${txt.slice(0, 300)}`)
@@ -212,21 +237,10 @@ export class Mendeley {
    * the PDF as JSON.
    */
   async downloadFile(fileId: string): Promise<Buffer> {
-    if ((this.tok._expires_at ?? 0) < Date.now() / 1000) await this.refresh()
-    const headers: Record<string, string> = {
-      Authorization: 'Bearer ' + this.tok.access_token,
-      'User-Agent': UA,
-      Accept: '*/*'
-    }
-    let res = await fetch(`${BASE}/files/${fileId}`, {
+    let res = await this.send(`${BASE}/files/${fileId}`, (headers) => ({
       headers,
       redirect: 'manual'
-    })
-    if (res.status === 401) {
-      await this.refresh()
-      headers.Authorization = 'Bearer ' + this.tok.access_token
-      res = await fetch(`${BASE}/files/${fileId}`, { headers, redirect: 'manual' })
-    }
+    }))
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get('location')
       if (!loc) throw new Error(`download ${fileId}: ${res.status} without location`)
@@ -251,25 +265,16 @@ export class Mendeley {
    * from the file name, so anything else has to be patched afterwards.
    */
   async createDocumentFromFile(fileName: string, data: Buffer): Promise<Doc> {
-    if ((this.tok._expires_at ?? 0) < Date.now() / 1000) await this.refresh()
-    const headers: Record<string, string> = {
-      Authorization: 'Bearer ' + this.tok.access_token,
-      'User-Agent': UA,
-      Accept: '*/*',
-      'Content-Type': 'application/pdf',
-      // the server parses the file name out of this header
-      'Content-Disposition': `attachment; filename="${fileName.replace(/["\r\n]/g, '')}"`
-    }
-    let res = await fetch(`${BASE}/documents`, {
+    const res = await this.send(`${BASE}/documents`, (headers) => ({
       method: 'POST',
-      headers,
+      headers: {
+        ...headers,
+        'Content-Type': 'application/pdf',
+        // the server parses the file name out of this header
+        'Content-Disposition': `attachment; filename="${fileName.replace(/["\r\n]/g, '')}"`
+      },
       body: data
-    })
-    if (res.status === 401) {
-      await this.refresh()
-      headers.Authorization = 'Bearer ' + this.tok.access_token
-      res = await fetch(`${BASE}/documents`, { method: 'POST', headers, body: data })
-    }
+    }))
     if (!res.ok) {
       throw new Error(`create from file -> ${res.status} ${(await res.text()).slice(0, 200)}`)
     }
@@ -393,18 +398,29 @@ export class Mendeley {
   }
 }
 
+/** The one authoritative destination for credentials.
+ *
+ *  findToken, saveToken and importTokenFrom used to disagree about it: with
+ *  MENDELEY_TOKEN_PATH set, a fresh authorization was written to the override
+ *  while the next launch still returned the older userData token first, so
+ *  the new token never took effect and nothing said why.  The override is now
+ *  both the first place looked and the only place written. */
+export function tokenDest(): string {
+  return process.env.MENDELEY_TOKEN_PATH ||
+    path.join(app.getPath('userData'), 'token.json')
+}
+
 /** Look for an existing token in the obvious places, so the app can reuse the
  *  credentials the CLI scripts already produced instead of asking the user to
  *  authorise again. */
 export function findToken(): { path: string; tok: Token } | null {
   const candidates = [
+    tokenDest(),
     path.join(app.getPath('userData'), 'token.json'),
     path.join(app.getPath('userData'), 'mendeley-token.json')
   ]
-  // an explicit override keeps this generic; nothing machine-specific belongs
-  // in the source tree
-  if (process.env.MENDELEY_TOKEN_PATH) candidates.push(process.env.MENDELEY_TOKEN_PATH)
-  for (const c of candidates) {
+  // the override and the default can be the same path; only read it once
+  for (const c of new Set(candidates)) {
     try {
       if (fs.existsSync(c)) {
         const tok = JSON.parse(fs.readFileSync(c, 'utf-8')) as Token
@@ -458,29 +474,26 @@ export async function exchangeCode(
   return tok
 }
 
-/**
- * Write a token where the app will look for it on the next launch.
- *
- * `MENDELEY_TOKEN_PATH` wins when it is set, so a token obtained in the app
- * lands in the same place `findToken` already searches and the two never
- * disagree about which file is authoritative.
- */
-export function saveToken(tok: Token): string {
-  const dest =
-    process.env.MENDELEY_TOKEN_PATH ||
-    path.join(app.getPath('userData'), 'token.json')
+/** Credentials stay a plain write rather than the shared tmp+rename helper on
+ *  purpose: renaming replaces the inode and would discard the file permissions
+ *  and the plaintext temp file that this path is deliberately careful about. */
+function writeToken(dest: string, tok: Token): void {
   fs.mkdirSync(path.dirname(dest), { recursive: true })
-  tok._expires_at = Date.now() / 1000 + (tok.expires_in ?? 3600) - 60
+  tok._expires_at = expiryFromNow(tok)
   fs.writeFileSync(dest, JSON.stringify(tok, null, 2), 'utf-8')
+}
+
+/** Write a token where the app will look for it on the next launch. */
+export function saveToken(tok: Token): string {
+  const dest = tokenDest()
+  writeToken(dest, tok)
   return dest
 }
 
 export function importTokenFrom(src: string): { path: string; tok: Token } {
   const tok = JSON.parse(fs.readFileSync(src, 'utf-8')) as Token
   if (!tok.access_token) throw new Error('token file has no access_token')
-  const dest = path.join(app.getPath('userData'), 'token.json')
-  fs.mkdirSync(path.dirname(dest), { recursive: true })
-  tok._expires_at = Date.now() / 1000 + (tok.expires_in ?? 3600) - 60
-  fs.writeFileSync(dest, JSON.stringify(tok, null, 2), 'utf-8')
+  const dest = tokenDest()
+  writeToken(dest, tok)
   return { path: dest, tok }
 }

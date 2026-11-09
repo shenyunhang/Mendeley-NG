@@ -1,22 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type * as pdfjs from 'pdfjs-dist'
 import type { CiteMark, RefList } from '../pdfrefs'
 import { findRefList, marksOnPage } from '../pdfrefs'
-import { createLazyPages, type LazyPages } from '../lazyPages'
-import { createPageWalk } from '../pageWalk'
+import { useLazyPdfPages } from './useLazyPdfPages'
 
 /**
  * The references of the open paper, and the citations in its body.
  *
- * These are two jobs and they are done at two different times.  The list is
- * read once, in the background, as soon as the paper is open: nothing can be
- * offered for a marker until the entry it names is known.  A page's markers
- * are read only when that page is being looked at, like the links — a paper
- * is fifty pages long and nobody hovers a marker on a page they never opened.
- *
- * The list is what decides whether anything happens at all.  A paper with no
- * list that can be read gets no markers, and the reader sees the paper they
- * always saw.
+ * The per-page markers are read lazily by useLazyPdfPages, shared with the
+ * links; this wrapper supplies `marksOnPage` and the last body page (one before
+ * the reference list).  The list itself is a second, earlier job and stays
+ * here: it is read once in the background as soon as the paper opens, because
+ * nothing can be offered for a marker until the entry it names is known.  A
+ * paper with no list that can be read gets no markers.
  */
 export function usePdfRefs(o: {
   pdf: pdfjs.PDFDocumentProxy | null
@@ -29,33 +25,22 @@ export function usePdfRefs(o: {
 }) {
   const { pdf, numPages, continuous, page } = o
   const [list, setList] = useState<RefList | null>(null)
-  const [marks, setMarks] = useState<Record<number, CiteMark[]>>({})
-  const known = useRef(marks)
-  known.current = marks
-  /** The background walk in continuous mode owns its own page claims. */
-  const busy = useRef(new Set<number>())
 
-  /** The lazy single-page reads. Clearing `marks` on a document change cannot
-   *  stop a `marksOnPage` for the old PDF from landing later; only a
-   *  generation guard can (see 155). */
-  const lazy = useRef<LazyPages<string, CiteMark[]> | null>(null)
-  if (lazy.current === null) {
-    lazy.current = createLazyPages<string, CiteMark[]>(
-      (a) => setMarks((prev) => ({ ...prev, [a.page]: a.value })),
-      []
-    )
-  }
+  /** The page the list opens on, or 0 while it is still being looked for. */
+  const refPage = list?.page ?? 0
+  // Only the body pages before the list can carry a marker.  0 while the list
+  // is unknown (or opens on page one) disables every read and the walk.
+  const lastPage = refPage > 0 ? refPage - 1 : 0
 
-  // another paper makes the list wrong and every marker with it. Clear
-  // `known` here too: the effects below run in the same commit, and would
-  // otherwise still see the previous paper's page numbers and skip them.
-  useEffect(() => {
-    lazy.current?.invalidate()
-    known.current = {}
-    setList(null)
-    setMarks({})
-    busy.current.clear()
-  }, [o.docKey])
+  const { values: marks } = useLazyPdfPages<CiteMark>({
+    pdf,
+    continuous,
+    page,
+    docKey: o.docKey,
+    lastPage,
+    load: marksOnPage,
+    onReset: () => setList(null)
+  })
 
   useEffect(() => {
     if (!pdf || !numPages) return
@@ -68,47 +53,6 @@ export function usePdfRefs(o: {
       dead = true
     }
   }, [pdf, numPages, o.docKey])
-
-  /** The page the list opens on, or 0 while it is still being looked for. */
-  const refPage = list?.page ?? 0
-
-  const ensure = useCallback(
-    (n: number) => {
-      if (!pdf || !refPage || n < 1 || n >= refPage) return
-      if (known.current[n] !== undefined || busy.current.has(n)) return
-      lazy.current?.read(o.docKey ?? '', n, (p) => marksOnPage(pdf, p))
-    },
-    [pdf, refPage, o.docKey]
-  )
-
-  useEffect(() => {
-    if (!pdf || continuous) return
-    void ensure(page)
-    void ensure(page + 1)
-    void ensure(page - 1)
-  }, [pdf, continuous, page, ensure])
-
-  // Same batching rule as the links, in pageWalk.ts.  The list starts on
-  // `refPage`, so only the pages before it can carry a citation marker; a
-  // list found on page one gives a walk over no pages at all.
-  useEffect(() => {
-    if (!pdf || !continuous || !refPage) return
-    let dead = false
-    const walk = createPageWalk<CiteMark>({
-      isDead: () => dead,
-      isClaimed: (n) =>
-        known.current[n] !== undefined ||
-        busy.current.has(n) ||
-        !!lazy.current?.isBusy(n),
-      claim: (n) => busy.current.add(n),
-      release: (n) => busy.current.delete(n),
-      publish: (batch) => setMarks((prev) => ({ ...prev, ...batch }))
-    })
-    void walk.walk(refPage - 1, (n) => marksOnPage(pdf, n))
-    return () => {
-      dead = true
-    }
-  }, [pdf, continuous, refPage])
 
   return { list, marks }
 }

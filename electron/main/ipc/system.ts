@@ -263,13 +263,20 @@ export function registerSystemIpc() {
     }))
   })
 
-  ipcMain.handle('shell:openExternal', (_e, url: string) => {
+  ipcMain.handle('shell:openExternal', async (_e, url: string) => {
     // Only a web address may reach the OS shell.  A renderer that asked for
     // `file:`, `smb:` or a custom protocol handler must not be able to turn
     // an IPC call into launching something off the local disk.
     if (!isSafeExternalUrl(url)) return { ok: false, error: 'unsupported url scheme' }
-    void shell.openExternal(url)
-    return { ok: true }
+    // openExternal is a promise.  Dropping it used to report success even when
+    // the OS refused the link, and left the rejection unhandled in the main
+    // process; the renderer only ever sees the outcome after it has settled.
+    try {
+      await shell.openExternal(url)
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
   })
 
   // Sometimes the file itself is the thing to work on: rename it, move it, or
