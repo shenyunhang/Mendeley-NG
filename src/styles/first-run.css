@@ -1,0 +1,274 @@
+/* ---------- first run ---------- */
+.setup-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--msg-bg);
+  font-size: 0.867rem;
+  line-height: 1.6;
+}
+.setup-hint span {
+  flex: 1;
+  min-width: 0;
+}
+.setup-hint button {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+}
+.setup {
+  flex: 1;
+  overflow: auto;
+  padding: 28px 34px;
+  max-width: 62em;
+}
+.setup h2 {
+  margin: 0 0 10px;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+.setup .lede {
+  margin: 0 0 18px;
+  color: var(--fg-dim);
+  line-height: 1.7;
+  font-size: 0.933rem;
+}
+/* the one thing on this page that is not an instruction: what it costs.  It
+   is set apart because it is the answer to a question the reader has already
+   asked themselves, and an answer buried at the end of a paragraph of setup
+   steps is not an answer they will find */
+.setup-once {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-2);
+  border-radius: 0 4px 4px 0;
+  color: var(--fg);
+  line-height: 1.7;
+  font-size: 0.933rem;
+}
+.setup .steps {
+  margin: 0 0 22px;
+  padding-left: 1.4em;
+  line-height: 1.85;
+  font-size: 0.933rem;
+}
+.setup .steps li {
+  margin-bottom: 10px;
+}
+/* the commands have to be selectable, so they are not buttons and they do not
+   inherit the UI font scale that would reflow them */
+.setup code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  color: var(--fg);
+  font-family: ui-monospace, Consolas, 'Courier New', monospace;
+  font-size: 0.867rem;
+  overflow-wrap: anywhere;
+}
+.setup .steps b {
+  font-weight: 600;
+}
+/* the redirect URI is the one thing that has to match character for character,
+   so it is offered as a copy rather than as something to retype */
+.setup code.copyable {
+  cursor: pointer;
+  border: 1px dashed var(--border);
+}
+.setup code.copyable:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.setup-auth {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+/* both are pasted from a web page and neither is a sentence, so neither wants
+   the proportional font or the spell checker's red squiggles */
+.setup-id {
+  flex: 1 1 15em;
+  min-width: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--fg);
+  font-family: ui-monospace, Consolas, 'Courier New', monospace;
+  font-size: 0.867rem;
+}
+.setup-id:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.setup-err {
+  margin: 0 0 14px;
+  color: var(--err);
+  font-size: 0.867rem;
+  line-height: 1.6;
+}
+.setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.setup .foot {
+  margin: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--sep);
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+  line-height: 1.75;
+}
+
+.cand-box {
+  flex: 0 0 auto;
+  max-height: 40%;
+  overflow: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.cand-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+.cand-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--row-line);
+  font-size: 0.867rem;
+  cursor: pointer;
+}
+.cand-row:hover {
+  background: var(--cand-hover);
+}
+.cand-row .t {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cand-row .n {
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+  white-space: nowrap;
+}
+.pdf-msg {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--msg-bg);
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+  cursor: default;
+}
+.ann-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-head);
+  font-size: 0.8rem;
+  /* the swatches are the same story as the bar above: squeezed, they shrink
+     to nothing rather than overflow, and a row of eight colours is the only
+     way to pick one */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.ann-box > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* Both bars scroll instead of squeezing, so at a narrow pane there is a
+   scrollbar inside the bar -- and a full-height one would make the bar jump
+   taller at exactly the width where the pane is smallest and the page needs
+   the room most. */
+.pdf-bar::-webkit-scrollbar,
+.ann-box::-webkit-scrollbar {
+  height: 6px;
+}
+.pdf-bar::-webkit-scrollbar-thumb,
+.ann-box::-webkit-scrollbar-thumb {
+  background: var(--sep);
+  border-radius: 3px;
+}
+.pdf-bar::-webkit-scrollbar-track,
+.ann-box::-webkit-scrollbar-track {
+  background: transparent;
+}
+.swatch {
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border: 1px solid var(--sep);
+  border-radius: 3px;
+  cursor: pointer;
+  outline-offset: 1px;
+}
+.swatch:hover {
+  border-color: var(--fg-dim);
+}
+
+/* A citation in the body.  Nothing is drawn for one until the pointer is on
+   it, for the same reason a link is drawn that way: a page ringed in boxes
+   makes every number look like it goes somewhere.  The ring on hover is the
+   whole answer to "does this one". */
+.cite-hot {
+  cursor: help;
+}
+.cite-hot:hover {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  background: rgba(90, 170, 255, 0.16);
+}
+.cite-pop {
+  z-index: 40;
+  max-width: 460px;
+  padding: 6px 8px;
+  background: var(--panel-head);
+  border: 1px solid var(--sep);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.cite-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.cite-row + .cite-row {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--sep);
+}
+.cite-no {
+  flex: none;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.cite-tx {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+.cite-open {
+  flex: none;
+  padding: 1px 6px;
+  font-size: 0.733rem;
+}

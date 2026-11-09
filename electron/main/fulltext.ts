@@ -475,6 +475,53 @@ function isReaderFailure(err: string): boolean {
  */
 type Got = { text: string; bounds: number[]; why: string; err?: string }
 
+/** Where the next piece of text goes. The entry table counts UTF-16 code
+ *  units, while the file on disk counts UTF-8 bytes; the two are not
+ *  convertible without reading the whole corpus. */
+interface Anchor {
+  at: number
+  byteAt: number
+}
+
+/** Write one paper's text and the entry that describes it.
+ *
+ *  ftBuild and ftAdd each used to keep a copy of these lines. They have to
+ *  move both numbers from the same anchor and update `m.bytes` in the same
+ *  step, otherwise a meta written midway through a run describes bytes that
+ *  are not on disk and every hit behind that point points into another paper.
+ *  One writer makes that invariant impossible to break in one call site only. */
+function appendEntry(
+  out: number,
+  m: Meta,
+  d: Doc,
+  st: fs.Stats,
+  g: Got,
+  anchor: Anchor
+): Anchor {
+  const buf = Buffer.from(g.text, 'utf8')
+  // written at an explicit position rather than appended: append always goes
+  // to the end of the file, and the byte anchor has just been brought back to
+  // the end of the recorded text, which are not the same thing after an
+  // interrupted run
+  fs.writeSync(out, buf, 0, buf.length, anchor.byteAt)
+  m.entries[d.id] = {
+    start: anchor.at,
+    len: g.text.length,
+    bounds: g.bounds.map((b) => anchor.at + b),
+    mtime: Math.floor(st.mtimeMs),
+    size: st.size,
+    file: d.localPdf
+  }
+  const next = {
+    at: anchor.at + g.text.length,
+    byteAt: anchor.byteAt + buf.length
+  }
+  // kept in step with the entries, so a meta written at any moment describes
+  // exactly the bytes that are on disk for those papers
+  m.bytes = next.byteAt
+  return next
+}
+
 /** Pull the text of the first `n` pages, and say why if there is none. */
 async function extract(file: string, n: number): Promise<Got> {
   // held in a box rather than a plain `let`, because the only assignment is
@@ -728,26 +775,10 @@ export async function ftBuild(
           }
           continue
         }
-        const buf = Buffer.from(g.text, 'utf8')
-        // written at an explicit position rather than appended: append always
-        // goes to the end of the file, and the byte anchor has just been
-        // brought back to the end of the recorded text, which are not the
-        // same thing after an interrupted run
-        fs.writeSync(out, buf, 0, buf.length, byteAt)
-        fresh.entries[d.id] = {
-          start: at,
-          len: g.text.length,
-          bounds: g.bounds.map((b) => at + b),
-          mtime: Math.floor(st.mtimeMs),
-          size: st.size,
-          file: d.localPdf
-        }
-        at += g.text.length
-        byteAt += buf.length
+        const next = appendEntry(out, fresh, d, st, g, { at, byteAt })
+        at = next.at
+        byteAt = next.byteAt
         wrote++
-        // kept in step with the entries, so that a meta written at any moment
-        // describes exactly the bytes that are on disk for those papers
-        fresh.bytes = byteAt
       }
       // the offset table is written as we go, so a run that is cancelled or
       // crashes is not wasted
@@ -871,19 +902,9 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
       }
       const g = await extract(d.localPdf as string, budget)
       if (!g.text.trim()) continue
-      const buf = Buffer.from(g.text, 'utf8')
-      fs.writeSync(out, buf, 0, buf.length, byteAt)
-      m.entries[d.id] = {
-        start: at,
-        len: g.text.length,
-        bounds: g.bounds.map((b) => at + b),
-        mtime: Math.floor(st.mtimeMs),
-        size: st.size,
-        file: d.localPdf
-      }
-      at += g.text.length
-      byteAt += buf.length
-      m.bytes = byteAt
+      const next = appendEntry(out, m, d, st, g, { at, byteAt })
+      at = next.at
+      byteAt = next.byteAt
       added++
     }
   } finally {

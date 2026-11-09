@@ -1,0 +1,41 @@
+/* ---------- details ---------- */
+.details {
+  overflow: auto;
+  padding: 10px 12px;
+  flex: 1;
+}
+.field {
+  margin-bottom: 9px;
+}
+.field label {
+  display: block;
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+  margin-bottom: 3px;
+}
+.field input,
+.field textarea {
+  width: 100%;
+}
+.field textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+/* The abstract is read far more often than it is written, and a three-line
+   box makes the one field the decision is made on the only field that has to
+   be scrolled inside — so it grows to fit what is in it, and stops growing
+   before it takes the whole panel.  A box that waits to be resized by hand is
+   asking the reader to do the panel's job. */
+.field textarea.abs-box {
+  field-sizing: content;
+  max-height: 260px;
+  line-height: 1.5;
+}
+.meta-actions {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+

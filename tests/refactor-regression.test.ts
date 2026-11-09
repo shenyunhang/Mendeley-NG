@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
+import { runBatch } from '../src/lib/batch'
 import { collectFileDocumentIds, type FilePageRow } from '../shared/filePages'
 import {
   pdfCandidates,
@@ -189,5 +190,39 @@ describe('atomic PDF name claim', () => {
     // ENOENT is not EEXIST, so it must reach the IPC handler's catch rather
     // than being retried 49 times and reported as "no free name".
     expect(() => writeUniquePdf(missing, 'paper.pdf', Buffer.from('mine'))).toThrow()
+  })
+})
+
+describe('batch runner moved out of the component', () => {
+  it('keeps going after a failure and names exactly what was lost', async () => {
+    const progress: [number, number][] = []
+    const result = await runBatch(
+      ['a', 'b', 'c', 'd'],
+      (x) => `paper-${x}`,
+      async (x) => {
+        if (x === 'b' || x === 'd') throw new Error('cloud refused')
+      },
+      (done, total) => progress.push([done, total])
+    )
+    expect(result.ok).toBe(2)
+    expect(result.failed).toEqual(['paper-b', 'paper-d'])
+    expect(progress[progress.length - 1]).toEqual([4, 4])
+  })
+
+  it('reports progress about twenty times, not once per document', async () => {
+    const items = Array.from({ length: 100 }, (_, i) => i)
+    const calls: number[] = []
+    const result = await runBatch(items, String, async () => {}, (done) => calls.push(done))
+    expect(result.ok).toBe(100)
+    expect(result.failed).toEqual([])
+    expect(calls.length).toBeLessThanOrEqual(21)
+    expect(calls[calls.length - 1]).toBe(100)
+  })
+
+  it('an empty batch reports nothing and succeeds trivially', async () => {
+    let progress = 0
+    const result = await runBatch<number>([], String, async () => {}, () => progress++)
+    expect(result).toEqual({ ok: 0, failed: [] })
+    expect(progress).toBe(0)
   })
 })

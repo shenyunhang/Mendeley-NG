@@ -1,0 +1,212 @@
+/* ---------- folder tree: nesting and per-row actions ---------- */
+.folder-row.drag {
+  background: var(--accent-dim);
+  outline: 1px solid var(--accent);
+}
+.folder-row .twisty {
+  width: 12px;
+  flex: 0 0 12px;
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+  text-align: center;
+  cursor: default;
+}
+.folder-row .acts {
+  display: none;
+  gap: 2px;
+  margin-left: 4px;
+}
+.folder-row:hover .acts,
+.folder-row.sel .acts {
+  display: flex;
+}
+button.mini {
+  padding: 0 4px;
+  font-size: 0.733rem;
+  line-height: 1.5;
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-dim);
+}
+button.mini:hover {
+  background: var(--mini-hover);
+  color: var(--fg);
+}
+.folder-row input.rename {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  font-size: 0.867rem;
+}
+.drop-root {
+  flex: 1;
+  min-height: 24px;
+}
+
+button.danger {
+  border-color: var(--danger-border);
+  color: var(--danger-fg);
+}
+button.danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+}
+.trash-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--row-line);
+  font-size: 0.867rem;
+}
+.trash-row .t {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trash-row .n {
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+  white-space: nowrap;
+}
+/* the row that survives a merge; it had its background as a literal, so in
+   the light theme the one row you are being asked to keep was dark green */
+.trash-row.keeper {
+  background: var(--keeper-bg);
+}
+/* In the duplicate list a row is a way to look at the paper and not a line
+   of text about it: which of two same-titled entries to keep is a question
+   about their files, and a row that looks inert does not get pressed.  The
+   recycle bin is the same, and both are scoped: ImportView uses .trash-row
+   for its result lines, and those are not buttons. */
+.dupe-group .trash-row,
+.trash-list .trash-row {
+  cursor: pointer;
+}
+.dupe-group .trash-row:hover,
+.trash-list .trash-row:hover {
+  background: var(--hover);
+}
+/* which one the right pane is showing.  Outlined rather than filled, so it
+   does not fight the keeper's background: a row can be both. */
+.dupe-group .trash-row.open,
+.trash-list .trash-row.open {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+/* the read-only view of a paper that is in the bin.  It is not a form, so
+   nothing here looks like a field that could be saved. */
+.trash-doc-banner {
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--hover);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.trash-doc-title {
+  font-size: 1rem;
+  line-height: 1.45;
+}
+.trash-doc-abs {
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.trash-doc-pdf {
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+.app.dropping {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+}
+.drop-veil {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--fg);
+  font-size: 1.2rem;
+  pointer-events: none;
+  z-index: 50;
+}
+.tx-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  line-height: 1;
+  transform-origin: 0 0;
+}
+.tx-layer span.tx {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  transform-origin: 0% 0%;
+  cursor: text;
+}
+.tx-layer span.tx::selection {
+  background: rgba(90, 170, 255, 0.4);
+}
+
+/* highlighting is opt-in, so being in it has to be visible without reading
+   the toolbar: the pointer over a page stops being a text caret */
+.marking .tx-layer span.tx {
+  cursor: crosshair;
+}
+.marking canvas {
+  cursor: crosshair;
+}
+
+/* Links in the paper.  Nothing is drawn until the pointer is on one: a paper
+   carries dozens of them, and a page of blue boxes makes every sentence look
+   like it goes somewhere.  The ring on hover is the whole answer to "is this
+   one a link", which is why it has to be a ring and not a tint — a tint over
+   text you are trying to read is the same damage as the boxes. */
+.pdf-link {
+  cursor: pointer;
+  text-decoration: none;
+}
+.pdf-link:hover,
+.pdf-link:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  background: rgba(90, 170, 255, 0.14);
+}
+/* A link that leaves the paper and lands on a paper already on the shelf is
+   not a link out: it says so instead of showing the arrow, so the reader
+   knows before pressing that they are going to stay here. */
+.pdf-link.ext:not(.own):hover::after {
+  content: '↗';
+  position: absolute;
+  top: -0.55em;
+  left: 0;
+  font-size: 0.75em;
+  line-height: 1;
+  color: var(--accent);
+}
+.pdf-link.own:hover::after {
+  content: '库内';
+  position: absolute;
+  top: -0.55em;
+  left: 0;
+  font-size: 0.75em;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--accent);
+}
+.dupe-group {
+  border-bottom: 1px solid var(--sep);
+}
+.dupe-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: var(--panel-head);
+  font-size: 0.8rem;
+}

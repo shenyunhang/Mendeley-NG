@@ -12,6 +12,7 @@ import { DEFAULT_PDF_TEMPLATE } from '../shared/types'
 import { clampFullTextPages } from '../shared/fullTextPages'
 import { folderForOpenedDoc } from './lib/folderForDoc'
 import { createBatchGate } from './lib/batchGate'
+import { runBatch } from './lib/batch'
 import { savedSearchMatches } from './lib/savedSearch'
 import { createViewGeneration } from './lib/viewGeneration'
 import FolderTree from './components/FolderTree'
@@ -960,40 +961,6 @@ export default function App() {
     if (selected) return [selected]
     return filtered
   }, [multi.length, selected, filtered, selectedDocs])
-
-  /**
-   * Run one cloud call per item and say afterwards what actually happened.
-   *
-   * A batch that quietly does less than it was asked is worse than one that
-   * fails outright: two hundred documents, three of which did not make it,
-   * reads as two hundred documents, and the three are discovered later as
-   * "this thing does not work".  There is no transaction across PATCHes, so
-   * partial success is the ordinary case and not an accident.
-   *
-   * Progress is reported in at most twenty steps, because setting state once
-   * per document re-renders the table once per document.
-   */
-  const runBatch = async <T,>(
-    items: T[],
-    name: (t: T) => string,
-    run: (t: T) => Promise<void>,
-    onProgress: (done: number, total: number) => void
-  ): Promise<{ ok: number; failed: string[] }> => {
-    const failed: string[] = []
-    let ok = 0
-    const every = Math.max(1, Math.floor(items.length / 20))
-    for (let i = 0; i < items.length; i++) {
-      try {
-        await run(items[i]!)
-        ok++
-      } catch {
-        // one failure must not abandon the rest of the batch
-        failed.push(name(items[i]!))
-      }
-      if (i % every === 0 || i === items.length - 1) onProgress(i + 1, items.length)
-    }
-    return { ok, failed }
-  }
 
   /**
    * How a batch ends.  A clean run is a momentary note; a run that lost

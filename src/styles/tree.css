@@ -1,0 +1,30 @@
+/* ---------- folder tree ---------- */
+.folders {
+  overflow: auto;
+  padding: 4px 0;
+  flex: 1;
+}
+.folder-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 0.867rem;
+  white-space: nowrap;
+}
+.folder-row:hover {
+  background: var(--bg-3);
+}
+.folder-row.sel {
+  background: var(--accent-dim);
+}
+.folder-row .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.folder-row .n {
+  margin-left: auto;
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+}
+

@@ -1,0 +1,154 @@
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Reading one paper: the panes are gone and the paper has the whole window.
+   A column at the side of a table is the room a catalogue gives a paper;
+   reading is what the catalogue was for, so it gets its own view. */
+.body.reading {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-2);
+}
+.body.reading > .pdf-pane {
+  flex: 1;
+  min-height: 0;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* without this a flex pane is floored at its content's min-content width,
+     so a zoomed-in PDF would widen the reader instead of scrolling it */
+  min-width: 0;
+}
+.pane-left {
+  /* shrink is allowed, down to a floor: on a narrow window the tree giving up
+     width is much better than the whole row overflowing and growing a
+     horizontal scroll bar */
+  flex: 0 1 240px;
+  min-width: 140px;
+  background: var(--bg-2);
+}
+.pane-mid {
+  /* basis 0, not auto: an `auto` basis sizes the pane to its content, and the
+     content here is a table whose columns have widths of their own.  Every
+     column added, or any column dragged wider, then inflates the pane and
+     steals width back from the tree — which is the opposite of what dragging
+     the tree to a width is for.  With a zero basis the pane takes what is
+     left over and the table scrolls sideways instead. */
+  flex: 1 1 0;
+  min-width: 260px;
+}
+.pane-right {
+  flex: 0 0 46%;
+  background: var(--bg-2);
+}
+
+/* The draggable edge between two panes.  The visible part is a hairline; the
+   part that answers the pointer is the hairline plus two pixels on either
+   side, because a one-pixel target is not a target.  It sits above both
+   panes, or the right-hand overhang would be painted over and lost. */
+.splitter {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 7px;
+  background: transparent;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+}
+.splitter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--border);
+}
+.splitter::after {
+  content: '';
+  position: absolute;
+  inset: 0 -2px;
+}
+.splitter:hover::before,
+.splitter.on::before,
+.splitter:focus-visible::before {
+  left: 1px;
+  width: 5px;
+  background: var(--accent);
+}
+.splitter:focus-visible {
+  outline: none;
+}
+/* while a drag is on, the cursor stays a resize cursor even when the pointer
+   outruns the bar and ends up over a pane, and nothing gets selected */
+body.resizing,
+body.resizing * {
+  cursor: col-resize !important;
+}
+body.resizing {
+  user-select: none;
+}
+/* The width handle on a column header.  Seven pixels for the same reason the
+   splitter is seven pixels: a one-pixel target is not a target.  The visible
+   line is drawn inset, so an untouched header still reads as a header. */
+.col-grip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+.col-grip::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  right: 3px;
+  width: 1px;
+  background: var(--border);
+}
+.col-grip:hover::before,
+.col-grip.on::before {
+  right: 1px;
+  width: 5px;
+  background: var(--accent);
+}
+/* The header being dragged to a new position: kept readable rather than
+   hidden, so it is still obvious which column is in the reader's hand. */
+.col-moving {
+  opacity: 0.55;
+}
+/* Where it would land.  A line on the gap, not a box on the column: the
+   question being answered is "between which two", and a highlighted column
+   answers a different one. */
+.col-drop {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 2;
+}
+.pane-head {
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+

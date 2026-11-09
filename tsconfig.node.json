@@ -20,6 +20,7 @@
     "vitest.config.ts",
     "src/lib/annotationMerge.ts",
     "src/lib/annotationNote.ts",
+    "src/lib/batch.ts",
     "src/lib/batchGate.ts",
     "src/lib/bitmapPixelSize.ts",
     "src/lib/cardSpot.ts",

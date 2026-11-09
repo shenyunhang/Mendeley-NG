@@ -1,0 +1,49 @@
+/* ---------- table ---------- */
+.table-wrap {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+/* Whether a row carries a PDF, and where that PDF is.
+ *
+ * Three answers, not two.  "There is one on this machine" and "there is one
+ * in the cloud" are the same thing to a reader only until they try to open
+ * one, and the old mark painted both green.
+ *
+ * These were written as `td .pdf-dot`, back when a row was a table cell.  Rows
+ * became a CSS grid of divs several releases ago and the selectors quietly
+ * stopped matching, which left the mark with neither width nor height: the
+ * column was in the layout and the dot was not on screen at all. */
+.pdf-dot {
+  display: inline-block;
+  border-radius: 50%;
+  vertical-align: middle;
+  /* the unmarked case: a full dot means the PDF is on this machine and opens
+     when the row does */
+  width: 9px;
+  height: 9px;
+  background: var(--ok);
+}
+/* in the cloud only: the same dot, hollow — it exists, it is not here yet.
+   `no-pdf` below is left as the name for the third case rather than renamed
+   along with it, because that name is what the smoke run asks for by. */
+.pdf-dot.cloud {
+  box-sizing: border-box;
+  background: transparent;
+  border: 1.5px solid var(--ok);
+  opacity: 0.8;
+}
+/* nothing at all: smaller and barely there, so the eye skips the column
+   instead of stopping on a mark whose whole meaning is "no" */
+.pdf-dot.no-pdf {
+  width: 7px;
+  height: 7px;
+  background: var(--muted);
+  opacity: 0.45;
+}
+

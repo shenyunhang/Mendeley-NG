@@ -254,6 +254,14 @@ import {
   savedBounds,
   setWin
 } from './window'
+import { iconPixels } from './smoke-icon'
+import { flashMessages } from './smoke-flash'
+import { hoverCard } from './smoke-hover'
+import { listBlankRules } from './smoke-listblank'
+import { shortDateRules } from './smoke-shortdate'
+import { restoredBudget } from './smoke-budget'
+import type { SmokeCtx } from './smoke-ctx'
+
 /**
  * The config as the run found it, kept at module scope so that a run which
  * never reaches its last line can still put it back.
@@ -419,6 +427,7 @@ export async function runSmoke() {
     log(ok ? 'PASS' : 'FAIL', name, detail)
     if (!ok) fails.push(`${name}: ${String(detail)}`)
   }
+  const ctx: SmokeCtx = { expect, log, fails, w }
   // Commands that are not needed every time live under a menu on the bar now,
   // so reaching one is two clicks.  A dispatched click moves no pointer and
   // presses nothing outside, so a menu this helper opens stays open until an
@@ -462,145 +471,7 @@ export async function runSmoke() {
   // 8-bit RGBA with filter 0 on every row, so the icon can be read back with
   // nothing but zlib: the official Mendeley outline (three discs, one round
   // hole), no tile behind it, and the violet-to-cyan recolouring (183).
-  {
-    const decodeIconPng = (buf: Buffer) => {
-      let off = 8
-      let n = 0
-      const parts: Buffer[] = []
-      while (off + 12 <= buf.length) {
-        const len = buf.readUInt32BE(off)
-        const type = buf.toString('ascii', off + 4, off + 8)
-        const data = buf.subarray(off + 8, off + 8 + len)
-        if (type === 'IHDR') n = data.readUInt32BE(0)
-        if (type === 'IDAT') parts.push(data)
-        off += 12 + len
-      }
-      const raw = zlib.inflateSync(Buffer.concat(parts))
-      const stride = n * 4
-      const rgba = new Uint8Array(stride * n)
-      for (let y = 0; y < n; y++) {
-        const at = y * (stride + 1)
-        if (raw[at] !== 0) throw new Error('unexpected PNG row filter')
-        for (let x = 0; x < stride; x++) rgba[y * stride + x] = raw[at + 1 + x]
-      }
-      return { n, rgba }
-    }
-    const iconDir = path.join(app.getAppPath(), 'assets')
-    const { n, rgba } = decodeIconPng(fs.readFileSync(path.join(iconDir, 'icon.png')))
-    const alphaAt = (x: number, y: number) => rgba[(y * n + x) * 4 + 3]
-    const corners = [
-      alphaAt(0, 0), alphaAt(n - 1, 0), alphaAt(0, n - 1), alphaAt(n - 1, n - 1)
-    ]
-    let opaque = 0
-    let warm = 0
-    for (let i = 0; i < rgba.length; i += 4) {
-      const r = rgba[i]
-      const b = rgba[i + 2]
-      if (rgba[i + 3] < 200) continue
-      opaque++
-      // red, orange and yellow all have a red channel well above blue; the
-      // new mark is violet -> blue -> cyan and has none of them
-      if (r > b + 40 && r > 140) warm++
-    }
-    expect(
-      'the icon has no tile behind it',
-      corners.every((a) => a === 0),
-      { corners, n }
-    )
-    expect(
-      'the icon stays in one cool colour family',
-      opaque > (n * n) / 20 && warm === 0,
-      { opaque, warm, n }
-    )
-    // The official mark has three separate discs along the bottom and one
-    // round hole in the middle. Counting opaque runs on two scanlines is a
-    // shape assertion, not a colour one: a recoloured blob would still fail.
-    const runsAt = (fy: number) => {
-      const y = Math.round(n * fy)
-      let runs = 0
-      let inRun = false
-      for (let x = 0; x < n; x++) {
-        const on = rgba[(y * n + x) * 4 + 3] > 200
-        if (on && !inRun) runs++
-        inRun = on
-      }
-      return runs
-    }
-    expect(
-      'the mark still has its three bottom discs',
-      runsAt(0.66) === 3 && runsAt(0.7) === 3,
-      { low: runsAt(0.66), lower: runsAt(0.7) }
-    )
-    expect(
-      'the mark still has the round hole between the upper lobes',
-      runsAt(0.45) === 2 && runsAt(0.5) === 2,
-      { mid: runsAt(0.45), centre: runsAt(0.5) }
-    )
-    // Colour is the part that changed: the official logo is one flat dark
-    // colour, this one runs from violet on the left to cyan on the right.
-    const edgeColour = (fromRight: boolean) => {
-      const y = Math.round(n * 0.7)
-      for (let k = 0; k < n; k++) {
-        const x = fromRight ? n - 1 - k : k
-        if (rgba[(y * n + x) * 4 + 3] < 200) continue
-        const o = (y * n + x) * 4
-        return [rgba[o], rgba[o + 1], rgba[o + 2]]
-      }
-      return null
-    }
-    const leftEdge = edgeColour(false)
-    const rightEdge = edgeColour(true)
-    // Violet #6d3bf5 is blue-dominant in RGB, not red-dominant: asking for
-    // r > b on the left was a detector that could never pass (166). What
-    // actually separates the two ends is the green channel and the red
-    // channel falling away as the ramp runs left to right.
-    expect(
-      'the colour was changed to violet-to-cyan, not the official flat black',
-      !!leftEdge &&
-        !!rightEdge &&
-        Math.abs(leftEdge[1] - rightEdge[1]) > 80 &&
-        leftEdge[0] > rightEdge[0] + 40 &&
-        Math.max(...leftEdge) > 150 &&
-        Math.max(...rightEdge) > 150,
-      { leftEdge, rightEdge }
-    )
-
-    const svgText = fs.readFileSync(path.join(iconDir, 'logo.svg'), 'utf8')
-    expect(
-      'the vector source is one even-odd path with a gradient and no masks',
-      !svgText.includes('<mask') &&
-        !svgText.includes('stroke-dasharray') &&
-        svgText.includes('fill-rule="evenodd"') &&
-        svgText.includes('<linearGradient') &&
-        svgText.length < 4096,
-      { bytes: svgText.length }
-    )
-    const genText = fs.readFileSync(
-      path.join(app.getAppPath(), 'scripts', 'make-icon.mjs'),
-      'utf8'
-    )
-    expect(
-      'the vector and every raster come from the same Mendeley ring table',
-      genText.includes('const RINGS = [') &&
-        genText.includes('RINGS.map(ringPath)') &&
-        genText.includes('for (const ring of RINGS)') &&
-        !genText.includes('const ROLL') &&
-        !genText.includes('const SLIP') &&
-        !genText.includes('const CORD') &&
-        (genText.match(/^  \[0\.0, \[/m) ?? []).length === 1 &&
-        (genText.match(/^  \[1\.0, \[/m) ?? []).length === 1,
-      { bytes: genText.length }
-    )
-    // A detector that cannot see the old shape table would report "all clear"
-    // for either generator (168).
-    const oldMarkLine = 'const ROLL = {\n  turns: 1.15'
-    const ringTables = (t: string) => (t.match(/const RINGS = \[/g) ?? []).length
-    expect(
-      'the ring detector can tell the old generator from the new one',
-      ringTables(oldMarkLine) === 0 && ringTables('const RINGS = [') === 1,
-      {}
-    )
-  }
+  iconPixels(ctx)
   const info = await w.webContents.executeJavaScript(
     // typeof, not a call: a real prompt would block the run
     'JSON.stringify({dpr: devicePixelRatio, rows: document.querySelectorAll("table,.row,[data-row]").length,'
@@ -2602,110 +2473,7 @@ export async function runSmoke() {
   // The clock here is advanced by hand: this is a race, and waiting 2.4 real
   // seconds would make the check depend on how busy the machine is, which is
   // precisely the kind of assertion that goes red for no reason (11.11).
-  {
-    type Job = { at: number; fn: () => void; live: boolean }
-    const jobs: Job[] = []
-    let clockNow = 0
-    const clock: FlashClock = {
-      set: (fn, ms) => {
-        const job: Job = { at: clockNow + ms, fn, live: true }
-        jobs.push(job)
-        return job
-      },
-      clear: (h) => {
-        ;(h as Job).live = false
-      }
-    }
-    const advanceTo = (t: number) => {
-      clockNow = t
-      for (const j of jobs) {
-        if (j.live && j.at <= clockNow) {
-          j.live = false
-          j.fn()
-        }
-      }
-    }
-    // Control: the same two messages through the fire-and-forget version
-    // that was in the app before. It never cancels a pending clear, so the
-    // later message has to be wiped at 2400ms. If it were not, the checks
-    // below would be asserting nothing — an assertion that cannot fail looks
-    // exactly like one that passes (142 / 145 / 146).
-    {
-      const oldJobs: Job[] = []
-      let oldNow = 0
-      const oldClock: FlashClock = {
-        set: (fn, ms) => {
-          const j: Job = { at: oldNow + ms, fn, live: true }
-          oldJobs.push(j)
-          return j
-        },
-        clear: (h) => {
-          ;(h as Job).live = false
-        }
-      }
-      let oldShown: string | null = null
-      const naiveFlash = (text: string, ms: number) => {
-        oldShown = text
-        oldClock.set(() => {
-          oldShown = null
-        }, ms)
-      }
-      naiveFlash('已复制引文', 2400)
-      oldNow = 1000
-      naiveFlash('已导出 12 条', 6000)
-      oldNow = 2500
-      for (const j of oldJobs) {
-        if (j.live && j.at <= oldNow) {
-          j.live = false
-          j.fn()
-        }
-      }
-      expect(
-        'the old fire-and-forget version really does wipe the later message',
-        oldShown === null,
-        { oldShown, oldNow }
-      )
-    }
-
-    let shown: string | null = null
-    const msg = createFlashMessage((t) => {
-      shown = t
-    }, clock)
-
-    msg.flash('已复制引文', 2400)
-    clockNow = 1000
-    msg.flash('已导出 12 条', 6000)
-    advanceTo(2500)
-    expect(
-      'a later message is not wiped by an earlier timeout',
-      shown === '已导出 12 条',
-      { shown, clockNow, live: jobs.filter((j) => j.live).length }
-    )
-    advanceTo(7100)
-    expect(
-      'and the later message still clears on its own',
-      shown === null,
-      { shown, clockNow }
-    )
-
-    msg.flash('已修改 5 条', 2200)
-    msg.show('正在移入回收站 3/10…')
-    advanceTo(9500)
-    expect(
-      'a progress line survives a stale timeout',
-      shown === '正在移入回收站 3/10…',
-      { shown, clockNow }
-    )
-
-    msg.flash('即将卸载', 1000)
-    msg.dispose()
-    advanceTo(20000)
-    expect(
-      'unmount cancels the pending clear without rendering',
-      !msg.hasPending() && shown === '即将卸载',
-      { shown, clockNow, pending: msg.hasPending() }
-    )
-  }
+  flashMessages(ctx)
 
   // The full-text box used to debounce a lookup with
   // `setTimeout(() => ftSearch(q).then(setHits), 250)` and clean up with
@@ -3303,132 +3071,7 @@ export async function runSmoke() {
   // string. Before the refactor, dismissing a card (scroll, page change, the
   // open button) called setCite(null) and left the 260ms hide timer running,
   // so it wrote null a second time. Checked with a clock advanced by hand.
-  {
-    type Card = { rows: string[] }
-    const makeClock = () => {
-      let now = 0
-      const jobs: { at: number; live: boolean; fn: () => void }[] = []
-      const clock: FlashClock = {
-        set(fn, ms) {
-          const j = { at: now + ms, live: true, fn }
-          jobs.push(j)
-          return j
-        },
-        clear(h) {
-          const j = h as (typeof jobs)[number] | undefined
-          if (j) j.live = false
-        }
-      }
-      const advanceTo = (t: number) => {
-        now = t
-        for (const j of jobs) {
-          if (j.live && j.at <= now) {
-            j.live = false
-            j.fn()
-          }
-        }
-      }
-      return { clock, jobs, advanceTo }
-    }
-
-    // Control: the old card had its own timer. Dismissing it did not clear
-    // that timer, so it really does call setCite(null) once more afterwards.
-    {
-      const { clock, advanceTo } = makeClock()
-      const writes: (Card | null)[] = []
-      const oldSetCite = (v: Card | null) => writes.push(v)
-      oldSetCite({ rows: ['[1]'] })
-      clock.set(() => oldSetCite(null), 260)
-      oldSetCite(null)
-      const before = writes.length
-      advanceTo(300)
-      expect(
-        'the old hide timer really does write after the card is already gone',
-        writes.length === before + 1 && writes[writes.length - 1] === null,
-        { before, after: writes.length }
-      )
-    }
-
-    const { clock, jobs, advanceTo } = makeClock()
-    const box: { card: Card | null; writes: number } = { card: null, writes: 0 }
-    const card = createFlashMessage<Card>(
-      (v) => {
-        box.card = v
-        box.writes += 1
-      },
-      clock
-    )
-
-    card.show({ rows: ['[1] He et al. (2022)'] })
-    expect(
-      'one controller now carries a card, not only a status string',
-      box.card !== null &&
-        box.card.rows[0] === '[1] He et al. (2022)' &&
-        !card.hasPending(),
-      { card: box.card, pending: card.hasPending() }
-    )
-
-    card.hold(260)
-    const beforeHold = box.writes
-    card.hold(260)
-    expect(
-      'hold keeps the card and never leaves two pending clears',
-      box.writes === beforeHold &&
-        box.card !== null &&
-        card.hasPending() &&
-        jobs.filter((j) => j.live).length === 1,
-      { writes: box.writes, beforeHold, live: jobs.filter((j) => j.live).length }
-    )
-
-    card.keep()
-    advanceTo(1000)
-    expect(
-      'the pointer coming back cancels the pending exit',
-      box.writes === beforeHold && box.card !== null && !card.hasPending(),
-      { writes: box.writes, beforeHold, card: box.card }
-    )
-
-    card.hold(260)
-    advanceTo(1400)
-    expect(
-      'the card still exits on its own when the pointer stays away',
-      box.card === null && box.writes === beforeHold + 1,
-      { card: box.card, writes: box.writes, beforeHold }
-    )
-
-    card.show({ rows: ['[2]'] })
-    card.hold(260)
-    card.clear()
-    const beforeClear = box.writes
-    advanceTo(2000)
-    expect(
-      'dismissing the card cancels its pending clear, no second write',
-      box.card === null &&
-        box.writes === beforeClear &&
-        !card.hasPending() &&
-        jobs.filter((j) => j.live).length === 0,
-      { writes: box.writes, beforeClear, live: jobs.filter((j) => j.live).length }
-    )
-
-    card.show({ rows: ['[3]'] })
-    card.hold(260)
-    card.dispose()
-    const beforeUnmount = box.writes
-    advanceTo(3000)
-    expect(
-      'unmount cancels the pending exit without rendering',
-      box.writes === beforeUnmount && box.card !== null && !card.hasPending(),
-      { writes: box.writes, beforeUnmount, card: box.card }
-    )
-
-    card.flash({ rows: ['[4]'] }, 100)
-    advanceTo(3200)
-    expect(
-      'flash still works with an object payload',
-      box.card === null && !card.hasPending(),
-      { card: box.card, pending: card.hasPending() }
-    )
-  }
+  hoverCard(ctx)
 
   // A citation card hung off a marker in a PDF, measured exactly once. When
   // the reader narrowed the window the card kept its old `left`, so it sat
@@ -4711,64 +4354,7 @@ export async function runSmoke() {
   // selected now". Esc and the batch bar only drop the multi-selection and
   // keep the open paper; a blank click drops all of it. Row clicks bubble to
   // the container, so the target decides (177).
-  {
-    const row = { closest: (s: string) => (s === '.row' ? {} : null) }
-    const card = { closest: (s: string) => (s === '.res-row' ? {} : null) }
-    const plain = { closest: () => null }
-    expect(
-      'a click outside every row is blank in both lists',
-      isListBlank(plain, 'row') &&
-        isListBlank(plain, 'res-row') &&
-        isListBlank(null, 'row') &&
-        isListBlank(undefined, 'row'),
-      { plain: isListBlank(plain, 'row') }
-    )
-    expect(
-      'a click on a row or a card is not blank in its own list',
-      !isListBlank(row, 'row') &&
-        !isListBlank(card, 'res-row') &&
-        isListBlank(row, 'res-row') &&
-        isListBlank(card, 'row'),
-      { rowInTable: isListBlank(row, 'row'), cardInCards: isListBlank(card, 'res-row') }
-    )
-    expect(
-      'a target without closest is blank, not a row',
-      isListBlank({}, 'row') && isListBlank({ closest: 1 }, 'row'),
-      {}
-    )
-
-    const blankRoot = path.join(__dirname, '../..')
-    const tableSrc = fs.readFileSync(
-      path.join(blankRoot, 'src/components/DocTable.tsx'),
-      'utf8'
-    )
-    const cardsSrc = fs.readFileSync(
-      path.join(blankRoot, 'src/components/SearchResults.tsx'),
-      'utf8'
-    )
-    const appSrc = fs.readFileSync(path.join(blankRoot, 'src/App.tsx'), 'utf8')
-    const blankCalls = (t: string) => (t.match(/isListBlank\(/g) ?? []).length
-    const oldWrap = '<div className="table-wrap" ref={parentRef}>'
-    const wiredWrap = "if (isListBlank(e.target, 'row')) onClearSelection()"
-    expect(
-      'the wiring detector can really see a blank-click guard',
-      blankCalls(oldWrap) === 0 && blankCalls(wiredWrap) === 1,
-      { old: blankCalls(oldWrap), wired: blankCalls(wiredWrap) }
-    )
-    expect(
-      'both lists share the rule and the app owns the clearing',
-      blankCalls(tableSrc) === 1 &&
-        blankCalls(cardsSrc) === 1 &&
-        (appSrc.match(/onClearSelection=\{clearSelection\}/g) ?? []).length === 2 &&
-        /if \(!selId && !pinned && multi\.length === 0\) return/.test(appSrc) &&
-        appSrc.includes('lastIdx.current = null'),
-      {
-        inTable: blankCalls(tableSrc),
-        inCards: blankCalls(cardsSrc),
-        wired: (appSrc.match(/onClearSelection=\{clearSelection\}/g) ?? []).length
-      }
-    )
-  }
+  listBlankRules(ctx)
 
   // Opening a paper from a citation popover or an in-PDF link used to leave
   // the folder tree pointing at whatever folder was selected before — which
@@ -4885,53 +4471,7 @@ export async function runSmoke() {
   // `created` has been in the library cache all along and is already a
   // default column, but the details pane never showed it. Trimming the ISO
   // timestamp must stay one rule shared by both places (180).
-  {
-    const oldShortDate = (s?: string) => (s ? s.slice(0, 10) : '')
-    const samples = [
-      undefined,
-      null,
-      '',
-      '2022-04-23T09:56:01.818Z',
-      '2026-11-07T04:57:38.829Z',
-      '2022-04-23',
-      'abc',
-      'x'.repeat(40)
-    ]
-    const drift = samples.filter((s) => shortDate(s) !== oldShortDate(s ?? undefined))
-    expect(
-      'the shared day rule answers the old column rule for every input',
-      drift.length === 0 && shortDate('2022-04-23T09:56:01.818Z') === '2022-04-23',
-      { drift, samples: samples.length }
-    )
-    expect(
-      'an absent or empty created stays empty',
-      shortDate(undefined) === '' && shortDate(null) === '' && shortDate('') === '',
-      {}
-    )
-    const dateRoot = path.join(__dirname, '../..')
-    const colSrc = fs.readFileSync(path.join(dateRoot, 'src/lib/columns.ts'), 'utf8')
-    const panelSrc = fs.readFileSync(
-      path.join(dateRoot, 'src/components/DetailsPanel.tsx'),
-      'utf8'
-    )
-    const sharedSrc = fs.readFileSync(path.join(dateRoot, 'shared/shortDate.ts'), 'utf8')
-    expect(
-      'both callers import the same day rule instead of keeping a copy',
-      /from '[^']*shared\/shortDate'/.test(colSrc) &&
-        /from '[^']*shared\/shortDate'/.test(panelSrc) &&
-        !colSrc.includes('const shortDate =') &&
-        sharedSrc.includes('export function shortDate('),
-      { shared: sharedSrc.length > 0 }
-    )
-    expect(
-      'the details pane shows it read-only with the exact moment on hover',
-      /<label>加入时间<\/label>/.test(panelSrc) &&
-        /shortDate\(doc\.created\) \|\| '未知'/.test(panelSrc) &&
-        /readOnly/.test(panelSrc) &&
-        /title=\{doc\.created \?\? ''\}/.test(panelSrc),
-      { panel: panelSrc.length > 0 }
-    )
-  }
+  shortDateRules(ctx)
 
   // A pull can run for minutes. While it talked to Mendeley the reader may
   // have trashed a paper or imported one; the old sync wrote the starting
@@ -5523,80 +5063,7 @@ export async function runSmoke() {
   // goes through the same shared rule (163). One assertion is a control:
   // without it the other five would be scoring a disagreement that was never
   // shown to exist.
-  {
-    const oldRestore = (v: unknown): number =>
-      typeof v === 'number' && v > 0 ? v : DEFAULT_FT_PAGES
-    const indexUses = (v: unknown): number => clampFullTextPages(v)
-
-    expect(
-      'the old restore really could disagree with the index builder',
-      oldRestore(999) === 999 &&
-        indexUses(999) === FULL_TEXT_MAX_PAGES &&
-        oldRestore(999) !== indexUses(999),
-      { restored: oldRestore(999), indexed: indexUses(999) }
-    )
-
-    const values: unknown[] = [
-      1, 2, 3, 4.9, 50, 51, 999, -1, -999, 0, NaN, Infinity, -Infinity,
-      0.5, 49.9
-    ]
-    for (let n = -10; n <= 60; n++) values.push(n)
-    const drift = values.filter(
-      (v) =>
-        restoredPageBudget(v) !==
-        indexUses(typeof v === 'number' && v > 0 ? v : DEFAULT_FT_PAGES)
-    )
-    expect(
-      'a restored budget agrees with the index rule for every valid value',
-      drift.length === 0,
-      { checked: values.length, drift }
-    )
-
-    const unusable: unknown[] = [undefined, null, 0, -1, NaN, '', '7', {}, []]
-    expect(
-      'a missing or unusable config value falls back to the shared default',
-      unusable.every((v) => restoredPageBudget(v) === DEFAULT_FT_PAGES),
-      {
-        answers: unusable.map((v) => restoredPageBudget(v))
-      }
-    )
-
-    expect(
-      'a numeric string in a hand-edited config is not a page budget',
-      restoredPageBudget('7') === DEFAULT_FT_PAGES &&
-        restoredPageBudget('50') === DEFAULT_FT_PAGES &&
-        oldRestore('7') === DEFAULT_FT_PAGES,
-      { seven: restoredPageBudget('7'), fifty: restoredPageBudget('50') }
-    )
-
-    expect(
-      'a fractional budget from a config file is floored before it is stored',
-      restoredPageBudget(4.9) === 4 &&
-        restoredPageBudget(2.1) === 2 &&
-        restoredPageBudget(50.9) === FULL_TEXT_MAX_PAGES,
-      {
-        fourNine: restoredPageBudget(4.9),
-        twoOne: restoredPageBudget(2.1),
-        fiftyNine: restoredPageBudget(50.9)
-      }
-    )
-
-    let outside = 0
-    for (let n = -100; n <= 200; n++) {
-      const v = restoredPageBudget(n + 0.5)
-      if (
-        v < FULL_TEXT_MIN_PAGES ||
-        v > FULL_TEXT_MAX_PAGES ||
-        !Number.isInteger(v)
-      ) outside += 1
-    }
-    expect(
-      'no restored budget can leave the index bounds',
-      outside === 0 &&
-        restoredPageBudget(DEFAULT_FT_PAGES) === DEFAULT_FT_PAGES,
-      { outside, min: FULL_TEXT_MIN_PAGES, max: FULL_TEXT_MAX_PAGES }
-    )
-  }
+  restoredBudget(ctx)
 
 
   // Eight delays that used to be bare literals (164). Naming them is only a

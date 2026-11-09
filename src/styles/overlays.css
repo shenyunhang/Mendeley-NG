@@ -1,0 +1,364 @@
+.modal-veil {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+  min-width: 320px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+
+.modal-head {
+  font-size: 0.867rem;
+  margin-bottom: 8px;
+  color: var(--fg);
+}
+
+.modal input {
+  width: 100%;
+}
+
+.modal-acts {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+/* the second question before anything that cannot be taken back.  Wider than
+   the one-line input dialog because it has to say what the consequence is,
+   and the consequence is the whole reason it is on screen. */
+.confirm-modal {
+  max-width: 30em;
+}
+.confirm-body {
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: var(--fg-dim);
+  white-space: pre-line;
+}
+
+.group-head {
+  padding: 5px 8px;
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  user-select: none;
+}
+
+/* full-text results: one block per paper, one line per place it matched */
+.ft-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.ft-row {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--sep);
+}
+.ft-title {
+  font-size: 0.867rem;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ft-title:hover {
+  color: var(--accent);
+}
+.ft-meta {
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+}
+.ft-hit {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0 1px 4px;
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.ft-hit:hover .ft-snip {
+  color: var(--fg);
+}
+.ft-hit .pg {
+  flex: 0 0 auto;
+  font-size: 0.733rem;
+}
+.ft-snip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ft-more {
+  padding-left: 4px;
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+}
+
+/* papers the last run could not index: a short row under the header, because
+   "5237 / 5245" without names is the difference between knowing the word is
+   not there and knowing it is in a scan nobody can read */
+.ft-skipped {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--msg-bg);
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+  line-height: 1.6;
+}
+.ft-skip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+/* The message pdf.js gave when it would not start.  Shown verbatim because it
+   names the missing thing, and a paraphrase of an error message is how a
+   reader ends up searching for a problem that was never described to them. */
+.ft-err {
+  display: inline-block;
+  margin: 2px 0 4px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--msg-bg);
+  font-family: var(--mono, monospace);
+  font-size: 0.733rem;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+/* column picker: floats under its button so the table can be watched while
+   boxes are ticked.  Fixed for the same reason the menu is — the bar clips
+   what hangs below it. */
+.col-picker {
+  position: fixed;
+  z-index: 40;
+  width: 232px;
+  max-height: 420px;
+  overflow: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-size: 0.8rem;
+}
+.col-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.col-picker-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+}
+.col-row {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px;
+}
+.col-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  cursor: pointer;
+}
+.col-move {
+  display: flex;
+  gap: 2px;
+}
+/* a group put aside as "not a duplicate": dimmed rather than removed, because
+   it is only ever shown on purpose, and a reader who is looking at it is
+   looking at it to undo the decision */
+.dupe-gone {
+  opacity: 0.55;
+}
+/* the sort card: one row per key, the whole row is the press.  A row that
+   only pressed on a small arrow would be a row the reader has to aim at. */
+.sort-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  padding: 3px 4px;
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sort-pick:hover {
+  background: var(--hover);
+}
+/* kept at a fixed width whether or not it holds an arrow, so the labels of
+   the other rows do not shift sideways when the sort moves */
+.sort-arrow {
+  width: 10px;
+  color: var(--accent);
+  font-size: 0.733rem;
+}
+.sort-dir {
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+}
+.col-views .ol-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.col-views .ol-row .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ann-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* every annotation in the library, grouped by the paper it belongs to */
+.notes-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+}
+.notes-only {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  color: var(--fg-dim);
+}
+.notes-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+  font-size: 0.8rem;
+}
+.notes-group {
+  margin-bottom: 6px;
+}
+.notes-doc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--bg-2);
+  color: var(--fg-dim);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notes-count {
+  flex: 0 0 auto;
+  min-width: 16px;
+  text-align: center;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent-dim);
+  color: var(--fg);
+  font-size: 0.667rem;
+  font-weight: 400;
+}
+.notes-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 14px;
+  cursor: pointer;
+}
+.notes-row:hover {
+  background: var(--bg-3);
+}
+.notes-row .pg {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+}
+.notes-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notes-row .grow {
+  flex: 1;
+}
+.notes-act {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  font-size: 0.667rem;
+}
+
+.ol-row .pg {
+  color: var(--fg-dim);
+  margin-right: 6px;
+}
+
+.star {
+  cursor: pointer;
+  font-size: 1.05rem;
+  line-height: 1;
+  user-select: none;
+}
+
+/* The rules between rows and the hover feedback live here rather than in the
+   component, because the component had the line colour as a literal: it was
+   a copy of the dark --row-line, so the light theme drew a dark rule under
+   every row and there was nothing in the stylesheet to override. */
+.row {
+  border-bottom: 1px solid var(--row-line);
+}
+/* A table this long gives no other hint of which row a click will land on. */
+.row:hover {
+  background: var(--hover);
+}
+.row.multi {
+  background: var(--multi);
+}
+/* last, so a row that is both selected and part of a multi-selection reads
+   as the one being read rather than as one of the batch */
+.row.sel {
+  background: var(--accent-dim);
+}
+

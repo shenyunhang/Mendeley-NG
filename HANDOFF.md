@@ -140,9 +140,13 @@ npm run demo               # 造虚构库，重生成 README 的四张截图
 
 ### CI 与发布门禁
 
-- `.github/workflows/ci.yml` 在每次 push / PR 依次跑 `typecheck`、`npm test`、`build`。
+- `.github/workflows/ci.yml` 在每次 push / PR 依次跑 `typecheck`、`npm test`、`build`，
+  再验一遍 `out/`：逐个 `node --check` 主进程与全部 smoke chunk、确认
+  `pdf.worker.mjs` 大于 100 KB、确认 `index.js` 里 require 的 chunk 文件真实存在。
 - `.github/workflows/release.yml` 在 `v*` tag（或手动触发）打包前先跑
-  `npm run typecheck && npm test`。tag 可以指向任意提交，不能假定它走过 CI。
+  `npm run typecheck && npm test`，再做同一道产物检查，并拒绝版本与
+  `package.json` / `package-lock.json` 不一致或不是 annotated 的 tag；手动触发
+  没有 tag，这一步整个跳过。tag 可以指向任意提交，不能假定它走过 CI。
 - **`smoke` 不进 CI**：它要真实库、真实 PDF 和一个真正显示的窗口，还要量按键那一帧
   的主线程耗时，托管 runner 给不出诚实的答案。
 
@@ -177,7 +181,9 @@ electron/main/
   auth.ts / lookup.ts   OAuth 窗口、Crossref / arXiv 查元数据
   store.ts / pdfindex.ts / pdfname.ts  本地缓存、文件名匹配、命名模板
   fulltext.ts / ftops.ts 正文索引与驱动层
-  updater.ts / demo.ts / perf.ts / smoke.ts  自更新与三种开发期运行模式
+  updater.ts / demo.ts / perf.ts  自更新与两种开发期运行模式
+  smoke.ts              冒烟入口：窗口、快照、共享 expect、收尾与配置恢复都留在这里
+  smoke-*.ts            从入口抽出的纯 Node 断言块，只接一个 SmokeCtx，静态 import
   ipc/                  library / system / docs / marks / files，按域注册
 electron/preload/index.ts  contextBridge，按 Api 契约暴露白名单方法
 src/
@@ -188,11 +194,14 @@ src/
   lib/hooks/            React 状态簇，按「谁跟谁一起变」切
   lib/                  与 React 无关的纯规则，可直接在 Node 里 import
   lib/configWrite.ts    渲染层所有配置写入的统一入口
+  lib/batch.ts          批量动作的进度节流与失败名单，不碰 React
+  styles.css            样式唯一入口，只有一串按原顺序排列的 @import
+  styles/               从原单文件逐字切出的十二个分片，规则顺序不可重排
 shared/                  三端共享：类型、规则常量、原子写、安全策略、分页与队列
-tests/                   Vitest 单测：shared / renderer-pure / security
+tests/                   Vitest 单测：shared / renderer-pure / security / refactor-regression
 scripts/                 启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
 docs/screenshots/        README 的四张图，由 npm run demo 生成
-.github/workflows/       ci.yml（类型 / 单测 / 构建）、release.yml（打包与发布）
+.github/workflows/       ci.yml（类型 / 单测 / 构建 / 产物）、release.yml（打包与发布）
 vitest.config.ts         test 只收 tests/**/*.test.ts，环境为 node
 electron.vite.config.ts  main / preload / renderer 三段构建配置
 ```
@@ -571,8 +580,17 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - `shared/atomicJson.ts` 的临时名固定为 `<file>.tmp`。本进程内所有 JSON 写都在主线程
   串行，且自检会拒绝第二份程序共写同一份 config；这不是并发安全的实现，不要把它
   拿去给多进程场景用。
-- `src/App.tsx` 是组装层里的一个大文件，`Toolbar` 的 props 很多。拆分要连带
-  重排冒烟里大量 UI 驱动与接线断言，动手前先确保纯规则侧有单测兜底。
+- `src/App.tsx` 仍是组装层里的一个大文件，`Toolbar` 的 props 很多。这次只把
+  与 React 无关的 `runBatch` 抽到 `src/lib/batch.ts` 并配了单测；真正拆 UI 状态簇
+  要连带重排冒烟里大量 UI 驱动与接线断言，动手前先给那些状态规则补单测兜底。
+- `smoke.ts` 只抽走了六个不碰窗口、不碰真实库、不读自身源码的纯断言块，入口、
+  `cfgSnapshot`、`restoreSmokeConfig`、共享 `expect`/`fails` 与末尾汇总都没动。
+  剩下两段 UI 驱动链、读真实库的块、读 smoke.ts 自身源码的块、以及配置收尾块
+  都还留在入口：它们共享闭包状态或依赖源码串计数，拆之前要先给这些依赖解耦。
+  新增子模块只能用静态 import，且必须与 `smoke.ts` 同级，否则产物里多一层目录
+  会让 `__dirname` 定位的 preload / renderer / 仓库根全部失效。
+- `src/styles.css` 现在只是十二行 `@import`，规则逐字留在 `src/styles/` 的分片里。
+  顺序就是层叠顺序：改动时先按顺序拼接与 `HEAD` 逐字节比对，别为了归类去重排。
 - 主窗口 `sandbox: false`（授权窗口是 `true`）：preload 只用 Electron API，
   统一沙箱前要确认没有依赖 Node 的 preload 路径。
 - `store.ts` 里五个 JSON 没有 schema 版本与迁移：结构校验失败一律当成「无缓存」，

@@ -1,0 +1,158 @@
+.settings {
+  width: 520px;
+  max-height: 84vh;
+  overflow: auto;
+}
+.set-sec {
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 3px;
+  margin: 12px 0 8px;
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 0.8rem;
+}
+.set-key {
+  flex: 0 0 92px;
+  color: var(--fg-dim);
+}
+.set-val {
+  min-width: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* the paths are long and the dialog is fixed-width, so they are clipped to the
+   end, which is the part that distinguishes two directories */
+.set-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.set-note {
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+  margin: 2px 0 2px 100px;
+}
+
+.about {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.about .set-note {
+  margin-left: 0;
+}
+
+/* the mark next to the version, at a size where the folded corner is still
+   legible rather than a smudge */
+.about-logo {
+  flex: 0 0 auto;
+  border-radius: 12%;
+}
+/* the two version numbers, and the one button that acts on them */
+.about-upd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+.about-upd .upd-line {
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+}
+.about-upd .upd-line.err {
+  color: var(--err);
+}
+.batch-edit {
+  min-width: 380px;
+}
+.be-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.be-key {
+  flex: 0 0 40px;
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.be-row select,
+.be-row input {
+  flex: 1;
+}
+.be-hint {
+  color: var(--fg-dim);
+  font-size: 0.733rem;
+  margin-bottom: 10px;
+}
+.row-menu {
+  position: fixed;
+  z-index: 60;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  padding: 4px 0;
+  font-size: 0.8rem;
+}
+.row-menu-head {
+  padding: 4px 10px 6px;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+.row-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 5px 10px;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.row-menu-item:hover:not(:disabled) {
+  background: var(--accent-dim);
+}
+.row-menu-item:disabled {
+  color: var(--fg-dim);
+  cursor: default;
+}
+.cite-box select {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+  font-size: 0.733rem;
+  padding: 3px 2px;
+  max-width: 110px;
+}
+.toolbar .status {
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  max-width: 44%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

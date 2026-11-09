@@ -1,0 +1,132 @@
+/* Sizes are in CSS pixels, which Chromium scales by the system factor on its
+   own.  Nothing here needs a DPI workaround: that was the entire reason for
+   rewriting this app rather than patching 1.19.8. */
+
+:root {
+  --bg: #1a1a1a;
+  --bg-2: #212121;
+  --bg-3: #2a2a2a;
+  --border: #3a3a3a;
+  --fg: #e8e8e8;
+  --fg-dim: #a0a0a0;
+  --accent: #4a9eff;
+  --accent-dim: #2d5f8f;
+  --warn: #d4a24a;
+  --ok: #5cb85c;
+  /* named slots for what used to be literals: a second theme only works if
+     every colour is a variable */
+  --row-line: #2c2c2c;
+  --hover: #262626;
+  --btn-hover: #353535;
+  --mini-hover: #3d3d3d;
+  --muted: #555;
+  --multi: #2b3a4d;
+  --pdf-bg: #151515;
+  --pdf-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+  --panel-head: #1e1e1e;
+  --panel: #1b1f27;
+  --cand-hover: #262b34;
+  --msg-bg: #1c2430;
+  --danger-border: #7a3b3b;
+  --danger-fg: #ff9b9b;
+  --danger-bg: #4a2626;
+  --err: #ff8080;
+  --sep: #333;
+  --keeper-bg: #1f2a20;
+  --star-on: #ffd43b;
+  --star-off: #4d4d4d;
+  --row-h: 2rem;
+  /* one search result: a title, the authors, and up to two matched fields */
+  --res-h: 5.2rem;
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei',
+    'PingFang SC', sans-serif;
+  font-size: var(--ui-fs, 15px);
+}
+
+:root[data-theme='light'] {
+  --bg: #f4f5f7;
+  --bg-2: #ffffff;
+  --bg-3: #eceff3;
+  --border: #d6dae0;
+  --fg: #1c1e21;
+  --fg-dim: #666b72;
+  --accent: #0b62d6;
+  --accent-dim: #c9ddf7;
+  --warn: #a0641a;
+  --ok: #2e7d32;
+  --row-line: #e4e7ec;
+  --hover: #e8ebf0;
+  --btn-hover: #e2e5ea;
+  --mini-hover: #dfe3e9;
+  --muted: #b6bcc4;
+  --multi: #cfe2f8;
+  --pdf-bg: #8b8f95;
+  --pdf-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  --panel-head: #f0f2f5;
+  --panel: #eaeff7;
+  --cand-hover: #d9e4f5;
+  --msg-bg: #e3edfa;
+  --danger-border: #d09a9a;
+  --danger-fg: #a4262c;
+  --danger-bg: #f7dcdd;
+  --err: #b3261e;
+  --sep: #cfd4da;
+  --keeper-bg: #dff0e3;
+  --star-on: #e0a800;
+  --star-off: #b8bec6;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+button {
+  font-family: inherit;
+  font-size: 0.867rem;
+  background: var(--bg-3);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: var(--btn-hover);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.primary {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 0.867rem;
+  background: var(--bg-3);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+}
+input:focus,
+textarea:focus {
+  outline: 1px solid var(--accent);
+}
+
