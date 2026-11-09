@@ -79,7 +79,7 @@ import { usePersistAfterMount } from './lib/hooks/usePersistAfterMount'
 import { setConfigWriteReporter, writeConfig } from './lib/configWrite'
 import { useExport } from './lib/hooks/useExport'
 import { useFlashMessage } from './lib/hooks/useFlashMessage'
-import { LIBRARY, type View } from './lib/view'
+import { LIBRARY, viewAfterReadingToggle, type View } from './lib/view'
 
 
 /**
@@ -1782,7 +1782,7 @@ export default function App() {
         upd={upd}
         onSettings={() => setSettings(true)}
         canRead={!!selected?.localPdf}
-        onRead={() => setView({ kind: 'reader' })}
+        onRead={() => setView((v) => viewAfterReadingToggle(v))}
         onImportRefs={(entries) => setView({ kind: 'import', entries })}
         onExportBib={exportBib}
         onExportRis={exportRis}

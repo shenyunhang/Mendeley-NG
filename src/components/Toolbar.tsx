@@ -239,12 +239,18 @@ export default function Toolbar(p: Props) {
       {/* Reading comes first because it is what the library was gathered for.
           Syncing used to own this spot and the highlight that went with it,
           which put the only action in the program that needs the network at
-          the front of the bar. */}
+          the front of the bar. The button is a toggle: from the reader the
+          very same press goes back to the table, so it stays enabled there
+          even when no PDF is attached any more. */}
       <button
         className={'reading-button' + (p.view.kind === 'reader' ? ' primary' : '')}
         onClick={p.onRead}
-        disabled={!p.canRead}
-        title="把这篇 PDF 放到整个窗口里读（Esc 回到列表）"
+        disabled={p.view.kind !== 'reader' && !p.canRead}
+        title={
+          p.view.kind === 'reader'
+            ? '回到列表（Esc 也可以）'
+            : '把这篇 PDF 放到整个窗口里读（Esc 回到列表）'
+        }
       >
         阅读
       </button>

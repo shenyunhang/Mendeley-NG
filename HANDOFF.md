@@ -70,8 +70,11 @@ DPI 靠 Chromium 按系统 scale factor 缩放 CSS 像素，不加任何 DPI 补
 三条规矩：
 
 - 「守」层动作不占主位：联网按钮不做工具栏第一个、不做 `primary`。工具栏第一个按钮是
-  「阅读」，它把 PDF 交给整个窗口（`.body.reading`），Esc 回列表；右栏 PDF 页签这条
-  通路保留，新增路径不替换它。
+  「阅读」，它把 PDF 交给整个窗口（`.body.reading`）；再按一次同一个按钮直接回列表，
+  Esc 和面板头的「← 回到列表」是另外两条出路。规则是 `src/lib/view.ts` 的
+  `viewAfterReadingToggle`：只有 `reader` 回列表，其它视图一律进阅读。阅读模式下按钮
+  不受 `canRead` 限制，免得论文失去本地 PDF 时连列表都回不去。右栏 PDF 页签这条通路
+  保留，新增路径不替换它。
 - 「读」层动作不挤在右栏 `PdfViewer` 内部；附带层收在「更多」里，新功能默认也进那里。
 - 工具栏恒为一行、不溢出。溢出会让按键那一帧抖到几百毫秒，判据是
   `the bar fits without being scrolled`，不要改断言去迁就布局。
@@ -591,7 +594,9 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   `switchTo` 放渲染期不放 effect；取消只作废代次、不靠 `setState` 清空，
   清 state 停不了已经发出的 promise。
 - 跨层 import 一个纯函数前先看它所在文件是不是真的无 DOM（EndNote XML 的
-  `DOMParser` 拆在 `src/lib/importText.ts`）。
+  `DOMParser` 拆在 `src/lib/importText.ts`）。`src/lib/view.ts` 的 `Entry` 必须直接从
+  `importText.ts` 取，别经 `import.ts` 的转导出：后者带 `DOMParser`，一旦 `view.ts`
+  被列进 `tsconfig.node.json` 白名单，node 工程就报一串 DOM 类型错误。
 - 需要输入一律用 `AskDialog`；`window.confirm` 可用。
 - 冒烟里取消路径要真点「取消」，别用 `window.confirm = () => false` 打桩。
 

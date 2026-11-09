@@ -7550,6 +7550,48 @@ export async function runSmoke() {
   const z3 = await zoomPct()
   expect('ctrl + wheel zooms back out', pctOf(z3) < pctOf(z2), { ctrl: z2, back: z3 })
 
+  // The reading button is a toggle, not a one-way door. Kept after the
+  // prefetch and zoom checks: entering the reader again remounts the viewer,
+  // and a run that did that just before "prefetch serves a step back" saw a
+  // different bitmap scale and blamed the cache for a timing change.
+  const toggleInfo = await (async () => {
+    const press = () =>
+      w.webContents.executeJavaScript(
+        '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+        + '.find(x=>x.textContent.trim()==="阅读");if(!b||b.disabled)return 0;'
+        + 'b.click();return 1})()'
+      )
+    const state = async () =>
+      JSON.parse(
+        await w.webContents.executeJavaScript(
+          '(()=>JSON.stringify({reading:!!document.querySelector(".body.reading"),'
+          + 'table:!!document.querySelector(".pane-mid")}))()'
+        )
+      ) as { reading: boolean; table: boolean }
+    const first = Number(await press())
+    await new Promise((r) => setTimeout(r, 1800))
+    const opened = await state()
+    const second = Number(await press())
+    await new Promise((r) => setTimeout(r, 900))
+    const closed = await state()
+    return { first, opened, second, closed }
+  })()
+  log('reading button toggle', toggleInfo)
+  expect(
+    'the reading button opens the reader from the table',
+    toggleInfo.first === 1 &&
+      toggleInfo.opened.reading === true &&
+      toggleInfo.opened.table === false,
+    toggleInfo
+  )
+  expect(
+    'and pressing it again from the reader returns to the table',
+    toggleInfo.second === 1 &&
+      toggleInfo.closed.reading === false &&
+      toggleInfo.closed.table === true,
+    toggleInfo
+  )
+
   // Continuous scrolling lays every page out in one column.  Only the pages
   // in view get a canvas painted into them, so the run checks both that the
   // column exists and that scrolling it paints more and moves the page box.

@@ -1,6 +1,9 @@
 import type { Annotation, Doc } from '../../shared/types'
 import type { DupeGroup } from './dupes'
-import type { Entry } from './import'
+// `Entry` lives in importText.ts, which has no DOM in it. Taking it through
+// import.ts would drag that file's EndNote DOMParser into the main-process
+// TypeScript project whenever the view types are checked there.
+import type { Entry } from './importText'
 
 /**
  * Where the reader is.
@@ -48,3 +51,16 @@ export type View =
   | { kind: 'annotations'; anns: Annotation[] }
 
 export const LIBRARY: View = { kind: 'library' }
+
+/**
+ * What the reading button does when it is pressed.
+ *
+ * It is a toggle, not a one-way door: the first press gives the paper the
+ * whole window, and pressing the very same button from the reader goes back
+ * to the table. Esc and the pane-head back button stay as other ways out;
+ * this is about the button the reader just used being the obvious way back.
+ * Any other view still leads into the reader, as it always did.
+ */
+export function viewAfterReadingToggle(current: View): View {
+  return current.kind === 'reader' ? LIBRARY : { kind: 'reader' }
+}

@@ -54,6 +54,7 @@
     "src/lib/splitPersonName.ts",
     "src/lib/timing.ts",
     "src/lib/tree.ts",
+    "src/lib/view.ts",
     "src/lib/viewGeneration.ts"
   ]
 }
