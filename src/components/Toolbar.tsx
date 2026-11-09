@@ -241,7 +241,7 @@ export default function Toolbar(p: Props) {
           which put the only action in the program that needs the network at
           the front of the bar. */}
       <button
-        className={p.view.kind === 'reader' ? 'primary' : ''}
+        className={'reading-button' + (p.view.kind === 'reader' ? ' primary' : '')}
         onClick={p.onRead}
         disabled={!p.canRead}
         title="把这篇 PDF 放到整个窗口里读（Esc 回到列表）"

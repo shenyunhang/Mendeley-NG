@@ -88,6 +88,17 @@
 .toolbar select {
   white-space: nowrap;
 }
+/* Reading is the first command because it is what the library was gathered
+   for. Give it a bigger target than the network actions beside it: a larger
+   label, a little more weight and more room around both axes. Sizes are in
+   rem so the font-size knob still moves it. The bar stays one row — the search
+   box and the status line give way — and the extra width is small enough that
+   the far-end buttons remain reachable without scrolling (checked by smoke). */
+.toolbar > .reading-button {
+  font-size: 1.05rem;
+  font-weight: 600;
+  padding: 0.45rem 1.2rem;
+}
 .menu-btn {
   position: relative;
   display: inline-flex;
