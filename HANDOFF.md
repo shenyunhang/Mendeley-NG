@@ -203,9 +203,11 @@ src/
   styles.css            样式唯一入口，只有一串按原顺序排列的 @import
   styles/               从原单文件逐字切出的十二个分片，规则顺序不可重排
 shared/                  三端共享：类型、规则常量、原子写、安全策略、分页与队列
+                         librarySync.ts：把云端回答变成同步提议的三条纯规则
 tests/                   Vitest 单测：shared / renderer-pure / security / refactor-regression
                          main-ipc-system / main-ipc-files（Electron 用替身，捕获 handler）
-                         overlay-stack（Esc 优先级的全部十六种组合）
+                         main-library / main-marks（同步 pull、标注与阅读位置的接线）
+                         library-sync / overlay-stack（抽出的纯规则）
 scripts/                 启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
 docs/screenshots/        README 的四张图，由 npm run demo 生成
 .github/workflows/       ci.yml（类型 / 单测 / 构建 / 产物）、release.yml（打包与发布）
@@ -251,6 +253,10 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   受一条源码串断言守护。动这两处先改约定和断言。
 - 配置写盘在渲染层统一走 `src/lib/configWrite.ts` 的 `writeConfig`。它把失败交给
   App 注册的错误提示，不让「内存已更新、磁盘没写进去」无声发生。
+- `reading:set` 每次先 `loadReading()` 再合并再 `saveReading()`，不留进程内快照。
+  曾经缓存一份在 handler 闭包里，外部（第二个窗口、恢复、手改）一写就过期，
+  下一次 set 会把旧页码写回去，而 `reading:load` 读的是文件、两边答案不一致。
+  文件只有每篇一个页码，多读一次的成本可以忽略。
 
 ### 仓库
 
@@ -609,10 +615,10 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   会让 `__dirname` 定位的 preload / renderer / 仓库根全部失效。
 - `src/styles.css` 现在只是十二行 `@import`，规则逐字留在 `src/styles/` 的分片里。
   顺序就是层叠顺序：改动时先按顺序拼接与 `HEAD` 逐字节比对，别为了归类去重排。
-- 主进程侧只有 `system` 与 PDF 写入两类 channel 有行为单测；渲染层只有浮层优先级
-  有纯规则单测（Esc 逐层关闭的 UI 行为仍由 smoke 实测）。`library.ts` 同步对账、
-  `fulltext.ts` 索引状态机、`marks.ts` 标注合并、`App.tsx` 剩余状态簇仍只靠
-  smoke 的源码串断言和真实库自检守着。拆之前照 `main-ipc-*.test.ts` 补行为测试。
+- 主进程侧 `system`、PDF 写入、同步 pull、标注与阅读位置四类都有行为单测；
+  渲染层浮层优先级有纯规则单测（Esc 逐层关闭的 UI 行为仍由 smoke 实测）。
+  `fulltext.ts` 索引状态机与 `App.tsx` 剩余状态簇仍只靠 smoke 的源码串断言
+  和真实库自检守着；这两处是接下来唯一还没拆的高耦合区间。
 - 主窗口 `sandbox: false`（授权窗口是 `true`）：preload 只用 Electron API，
   统一沙箱前要确认没有依赖 Node 的 preload 路径。
 - `store.ts` 里五个 JSON 没有 schema 版本与迁移：结构校验失败一律当成「无缓存」，

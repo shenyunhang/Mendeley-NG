@@ -136,9 +136,13 @@ export function registerMarksIpc() {
   // cheap.  Kept in the main process so the renderer cannot lose it by
   // navigating away mid-write.
   ipcMain.handle('reading:load', () => loadReading())
-  let reading: Record<string, number> | null = null
   ipcMain.handle('reading:set', (_e, docId: string, page: number) => {
-    if (reading === null) reading = loadReading()
+    // Re-read before every write. A process-local snapshot looked cheaper but
+    // went stale the moment anything else wrote reading.json: the next set put
+    // the old pages back, and reading:load -- which always reads the file --
+    // disagreed with what had just been saved. The file is a handful of page
+    // numbers, so one extra read per debounced write costs nothing.
+    const reading = loadReading()
     reading[docId] = Math.max(1, Math.floor(Number(page) || 1))
     saveReading(reading)
     return { ok: true }

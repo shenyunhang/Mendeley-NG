@@ -4,6 +4,11 @@ import { attachPdfs } from './pdfindex'
 import { loadConfig, loadLibrary, saveConfig, saveLibraryFromSync } from './store'
 import { status } from './window'
 import { reconcileSyncWrite } from '../../shared/libraryReconcile'
+import {
+  keepKnownFolderMemberships,
+  keepLocalPdfPaths,
+  mergeChangedIntoCache
+} from '../../shared/librarySync'
 import { createSyncQueue } from '../../shared/syncQueue'
 
 /**
@@ -68,9 +73,7 @@ async function pull(full: boolean) {
     since
   )
 
-  const byId = new Map((prev?.docs ?? []).map((d) => [d.id, d]))
-  for (const d of changed) byId.set(d.id, d)
-  let docs = since ? [...byId.values()] : changed
+  const docs = mergeChangedIntoCache(prev?.docs ?? [], changed, !!since)
 
   // Nothing changed and we already have a library: skip the two expensive
   // steps, which is most of what an incremental sync is for.
@@ -86,29 +89,11 @@ async function pull(full: boolean) {
     pdf = attachPdfs(docs, cfg.pdfDir)
   }
 
-  if (since && prev) {
-    // Mendeley occasionally hands back a changed document with an empty
-    // folder_uuids, and losing a folder membership is far worse than
-    // redundantly keeping one, so the known value wins when the fresh one
-    // is blank.  Only done incrementally: a full pull is authoritative.
-    const known = new Map(prev.docs.map((d) => [d.id, d.folder_uuids]))
-    for (const d of changed) {
-      if (!d.folder_uuids?.length && known.get(d.id)?.length) {
-        d.folder_uuids = known.get(d.id)
-      }
-    }
-  }
-
-  // keep previously resolved pdf paths across a resync
-  if (prev) {
-    const oldById = new Map(prev.docs.map((d) => [d.id, d]))
-    for (const d of docs) {
-      const old = oldById.get(d.id)
-      if (old && !d.localPdf && old.localPdf && fs.existsSync(old.localPdf)) {
-        d.localPdf = old.localPdf
-      }
-    }
-  }
+  // Only incremental pulls need the two local-preservation rules: a full pull
+  // is authoritative. Both are pure and injectable, with their own unit tests
+  // in shared/librarySync.ts; the pull only supplies the file existence check.
+  if (since && prev) keepKnownFolderMemberships(prev.docs, changed)
+  if (prev) keepLocalPdfPaths(prev.docs, docs, (p) => fs.existsSync(p))
 
   // A pull runs for seconds or minutes, and everything it writes comes from
   // the snapshot taken at the top. Re-read the cache now and let one rule
