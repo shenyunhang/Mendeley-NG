@@ -42,6 +42,7 @@
     "src/lib/listBlank.ts",
     "src/lib/match.ts",
     "src/lib/offline.ts",
+    "src/lib/overlayStack.ts",
     "src/lib/pageBudgetCommit.ts",
     "src/lib/pageWalk.ts",
     "src/lib/panes.ts",

@@ -195,7 +195,9 @@ src/
   window.d.ts           Window.api 的 ambient 声明（与 DOM 隔离）
   components/           视图组件，PdfViewer.tsx 是阅读器
   lib/hooks/            React 状态簇，按「谁跟谁一起变」切
+  lib/hooks/useOverlayStack.ts  设置面板与三张工具条卡片的状态 + 一次 Esc 关一层
   lib/                  与 React 无关的纯规则，可直接在 Node 里 import
+  lib/overlayStack.ts   浮层优先级的纯规则 topOverlay
   lib/configWrite.ts    渲染层所有配置写入的统一入口
   lib/batch.ts          批量动作的进度节流与失败名单，不碰 React
   styles.css            样式唯一入口，只有一串按原顺序排列的 @import
@@ -203,6 +205,7 @@ src/
 shared/                  三端共享：类型、规则常量、原子写、安全策略、分页与队列
 tests/                   Vitest 单测：shared / renderer-pure / security / refactor-regression
                          main-ipc-system / main-ipc-files（Electron 用替身，捕获 handler）
+                         overlay-stack（Esc 优先级的全部十六种组合）
 scripts/                 启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
 docs/screenshots/        README 的四张图，由 npm run demo 生成
 .github/workflows/       ci.yml（类型 / 单测 / 构建 / 产物）、release.yml（打包与发布）
@@ -479,10 +482,15 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - 一次 Esc 只关最上面一层：capture 阶段接键 → `preventDefault` + `stopPropagation`
   → 只关自己这层，浮层分支排在「退出视图」之前；`AskDialog` / `BatchEdit` /
   `RowMenu` 都别漏 `stopPropagation`，`<select>` 最容易漏。
+- 工具条三张卡片与设置面板这四层的顺序是纯规则 `src/lib/overlayStack.ts` 的
+  `topOverlay`（settings → columns → sort → filters），状态与事件在
+  `src/lib/hooks/useOverlayStack.ts`。App 的 Esc 分支只问一次 `closeTopOnEscape(e)`，
+  返回 true 就停；退出阅读视图与清多选排在后面，不属于浮层。
 - ↑↓/Delete/Space/Ctrl+A 只在焦点不在 INPUT/TEXTAREA/按钮时当导航键；
   Ctrl+F 用 capture 抢（App 先注册了 bubble 监听）。
-- Esc / Ctrl+A 由 App 统一管理，handler 依赖数组带上 `settings` / `showCols` 等 state，
-  否则闭包抓到 false 彻底没反应。
+- Esc / Ctrl+A 仍由 App 统一管理，但 handler 依赖数组现在带的是
+  `closeTopOnEscape`（hook 在四个浮层状态变化时重建它）、`folderId` 与 `view.kind`，
+  不再逐个列 `settings` / `showCols`。少任何一个都会让闭包抓到旧值，Esc 彻底没反应。
 - 改名请求带 `{ id, n }` 计数器，F2 由 App 全局认、`FolderTree` 用 effect 应答；
   没有打开文件夹、焦点在输入控件、焦点不在 `.pane-left`、或该行被筛选掉时都拒绝开框。
 - `onBlur` 在冒烟里要派发 `focusout`（React 把 `onBlur` 映射成 `focusout`），
@@ -588,9 +596,11 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - `shared/atomicJson.ts` 的临时名固定为 `<file>.tmp`。本进程内所有 JSON 写都在主线程
   串行，且自检会拒绝第二份程序共写同一份 config；这不是并发安全的实现，不要把它
   拿去给多进程场景用。
-- `src/App.tsx` 仍是组装层里的一个大文件，`Toolbar` 的 props 很多。这次只把
-  与 React 无关的 `runBatch` 抽到 `src/lib/batch.ts` 并配了单测；真正拆 UI 状态簇
-  要连带重排冒烟里大量 UI 驱动与接线断言，动手前先给那些状态规则补单测兜底。
+- `src/App.tsx` 仍是组装层里的一个大文件，`Toolbar` 的 props 很多。已抽出
+  `runBatch`（`lib/batch.ts`）与浮层栈（`lib/overlayStack.ts` +
+  `hooks/useOverlayStack.ts`），两者都是先配纯规则单测再改接线。剩下的
+  `setLib` 状态簇与 Esc 之后的键盘导航仍在 App 里；拆它们要连带重排冒烟里
+  大量 UI 驱动与接线断言，同样先补行为测试再动手。
 - `smoke.ts` 只抽走了六个不碰窗口、不碰真实库、不读自身源码的纯断言块，入口、
   `cfgSnapshot`、`restoreSmokeConfig`、共享 `expect`/`fails` 与末尾汇总都没动。
   剩下两段 UI 驱动链、读真实库的块、读 smoke.ts 自身源码的块、以及配置收尾块
@@ -599,10 +609,10 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   会让 `__dirname` 定位的 preload / renderer / 仓库根全部失效。
 - `src/styles.css` 现在只是十二行 `@import`，规则逐字留在 `src/styles/` 的分片里。
   顺序就是层叠顺序：改动时先按顺序拼接与 `HEAD` 逐字节比对，别为了归类去重排。
-- 主进程侧现在只有 `system` 与 PDF 写入两类 channel 有行为单测。`library.ts` 的
-  同步对账、`fulltext.ts` 的索引状态机、`marks.ts` 的标注合并，以及渲染层的浮层栈
-  与 Esc 链仍只靠 smoke 的源码串断言和真实库自检守着。要拆这些区间，先照
-  `main-ipc-*.test.ts` 的模式补行为测试，再动结构。
+- 主进程侧只有 `system` 与 PDF 写入两类 channel 有行为单测；渲染层只有浮层优先级
+  有纯规则单测（Esc 逐层关闭的 UI 行为仍由 smoke 实测）。`library.ts` 同步对账、
+  `fulltext.ts` 索引状态机、`marks.ts` 标注合并、`App.tsx` 剩余状态簇仍只靠
+  smoke 的源码串断言和真实库自检守着。拆之前照 `main-ipc-*.test.ts` 补行为测试。
 - 主窗口 `sandbox: false`（授权窗口是 `true`）：preload 只用 Electron API，
   统一沙箱前要确认没有依赖 Node 的 preload 路径。
 - `store.ts` 里五个 JSON 没有 schema 版本与迁移：结构校验失败一律当成「无缓存」，

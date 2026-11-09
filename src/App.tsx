@@ -13,6 +13,7 @@ import { clampFullTextPages } from '../shared/fullTextPages'
 import { folderForOpenedDoc } from './lib/folderForDoc'
 import { createBatchGate } from './lib/batchGate'
 import { runBatch } from './lib/batch'
+import { useOverlayStack } from './lib/hooks/useOverlayStack'
 import { savedSearchMatches } from './lib/savedSearch'
 import { createViewGeneration } from './lib/viewGeneration'
 import FolderTree from './components/FolderTree'
@@ -185,13 +186,22 @@ export default function App() {
   const [filters, setFilters] = useState<ListFilter[]>([])
   const toggleFilter = (k: ListFilter) =>
     setFilters((f) => (f.includes(k) ? f.filter((x) => x !== k) : [...f, k]))
-  // Which card the toolbar has open lives here even though only the toolbar
-  // draws them: Esc closes one layer per press, in a fixed order that runs
-  // from the settings sheet down to the selection, and a row that dismissed
-  // its own card without knowing what was above it would close two at once.
-  const [showFilters, setShowFilters] = useState(false)
-  const [showSort, setShowSort] = useState(false)
-  const [showCols, setShowCols] = useState(false)
+  // The cards and the sheet live together because one Esc press may close only
+  // the topmost one. The order is a pure rule in overlayStack.ts; the hook
+  // owns the state and the event, the app still owns what happens afterwards.
+  const {
+    showFilters,
+    setShowFilters,
+    showSort,
+    setShowSort,
+    showCols,
+    setShowCols,
+    settings,
+    setSettings,
+    setSec,
+    setSetSec,
+    closeTopOnEscape
+  } = useOverlayStack()
   const [activeSearch, setActiveSearch] = useState<string | null>(null)
   const [ask, setAsk] = useState<{
     title: string
@@ -245,10 +255,6 @@ export default function App() {
   /** The open row menu, positioned where the right click landed. */
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string } | null>(null)
   const [batchEdit, setBatchEdit] = useState(false)
-  const [settings, setSettings] = useState(false)
-  /** Which section the settings sheet opens on, when it is opened because
-   *  something else named a setting rather than because 设置 was pressed. */
-  const [setSec, setSetSec] = useState<string | null>(null)
   /** Local notes, kept here only so the search box can look inside them.
    *  They are written by the details panel, which reports back after saving. */
   const [noteMap, setNoteMap] = useState<Record<string, string>>({})
@@ -363,30 +369,10 @@ export default function App() {
       // mouse, which is most jarring exactly where the key is most likely to
       // be pressed — while something is covering the window.
       if (e.key === 'Escape') {
-        if (settings) {
-          e.preventDefault()
-          setSettings(false)
-          // and the section it was opened on: a sheet asked for from the
-          // full-text panel opens on 全文检索, and one asked for from the
-          // toolbar has no business landing there the next time
-          setSetSec(null)
-          return
-        }
-        if (showCols) {
-          e.preventDefault()
-          setShowCols(false)
-          return
-        }
-        if (showSort) {
-          e.preventDefault()
-          setShowSort(false)
-          return
-        }
-        if (showFilters) {
-          e.preventDefault()
-          setShowFilters(false)
-          return
-        }
+        // One press closes one layer, in the order owned by overlayStack.
+        // The sheet and the cards claim the key here; anything still open
+        // after that belongs to the app, not to a floating layer.
+        if (closeTopOnEscape(e)) return
         // out of the reading view and back to the table, which is where the
         // key is pressed from and the only place it can mean "leave". It
         // comes after the cards so a press over an open card closes the card
@@ -503,15 +489,15 @@ export default function App() {
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-    // settings and showCols are read here, so the listener has to be rebuilt
-    // when either moves: a closure captured at mount would still see them
-    // as false and Esc would do nothing at all.  folderId is read by F2 for
-    // the same reason.
+    // closeTopOnEscape is the listener's handle on the floating layers: the
+    // hook rebuilds it whenever one of them moves, so a closure captured at
+    // mount would still see them all as false and Esc would do nothing at all.
+    // folderId is read by F2 for the same reason.
     // `view.kind` has to be in here, not merely read: the handler is built
     // once per change, and a closure over the view from the render it was
     // built in would go on answering for a view that has since been left —
     // which is how Esc stopped leaving the reader.
-  }, [bumpFont, settings, showCols, showFilters, showSort, folderId, view.kind])
+  }, [bumpFont, closeTopOnEscape, folderId, view.kind])
 
   const docs = lib?.docs ?? []
 
