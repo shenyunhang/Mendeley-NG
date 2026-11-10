@@ -146,6 +146,12 @@ npm run demo               # 造虚构库，重生成 README 的四张截图
 
 ### CI 与发布门禁
 
+- **`actions/checkout` 在 release.yml 必须 `fetch-depth: 0` + `fetch-tags: true`**。
+  版本门禁用 `git cat-file -t <tag>` 判 annotated，而默认的浅检出可能只取到
+  commit、本地根本没有 tag ref，于是正确的 annotated tag 也会被判失败、整个
+  release 被 skip（`v0.1.112` 首次 run 42789647855 就是这样）。门禁里还显式
+  `git fetch origin refs/tags/<tag>:refs/tags/<tag>` 作第二道保险，失败时打印
+  `show-ref --tags`，别让日志只剩一个 exit 1。
 - `.github/workflows/ci.yml` 在每次 push / PR 依次跑 `typecheck`、`npm test`、`build`，
   再验一遍 `out/`：逐个 `node --check` 主进程与全部 smoke chunk、确认
   `pdf.worker.mjs` 大于 100 KB、确认 `index.js` 里 require 的 chunk 文件真实存在。

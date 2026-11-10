@@ -22,6 +22,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The version gate below inspects the tag object itself, not just the
+          # commit it points at. A depth-1 checkout can leave no local tag ref
+          # for `git cat-file -t`, which made a correctly annotated v0.1.112
+          # fail the gate and skip the whole release (run 42789647855).
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: actions/setup-node@v4
         with:
@@ -50,11 +57,25 @@ jobs:
           const { execFileSync } = require("child_process")
           const tag = process.env.GITHUB_REF_NAME || ""
           if (!tag) { console.error("GITHUB_REF_NAME is empty"); process.exit(1) }
+          // Ask for the tag object explicitly as well. Fetching tags in the
+          // checkout is the first line of defence; this makes the gate work
+          // even if a future checkout setting fetches only the commit again.
+          try {
+            execFileSync("git", ["fetch", "--force", "origin",
+              "refs/tags/" + tag + ":refs/tags/" + tag], { stdio: "pipe" })
+          } catch (e) {
+            console.log("tag fetch unavailable: " + e.message)
+          }
           let type
           try {
             type = execFileSync("git", ["cat-file", "-t", tag], { encoding: "utf8" }).trim()
           } catch (e) {
             console.error("git cat-file -t " + tag + " failed: " + e.message)
+            try {
+              console.error("local tags:\n" + execFileSync("git", ["show-ref", "--tags"], { encoding: "utf8" }))
+            } catch (inner) {
+              console.error("no local tags: " + inner.message)
+            }
             process.exit(1)
           }
           console.log("git cat-file -t " + tag + " -> " + type)
