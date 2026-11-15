@@ -187,6 +187,13 @@ export function usePdfFind(o: {
           if (hits.length) {
             all.push(...hits)
             s.publish([...all])
+            // The marks are on the page now. Waiting for the last page to
+            // open the bar left orange highlights with nothing naming their
+            // word for as long as a hundred-page walk takes — the very thing
+            // the bar exists to prevent. The first publish already proves the
+            // word is in *this* paper, which was the only reason to wait: a
+            // library term that matches only a title never gets here.
+            if (queryDriven.current) setFindOpen(true)
           }
         } catch {
           /* a page that will not give up its text costs a hit, not the scan */

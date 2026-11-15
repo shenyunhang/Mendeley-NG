@@ -633,6 +633,23 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - 范围目前是**会话内状态**，没有写进 `SavedSearch` / `AppConfig`。要持久化时
   `SavedSearch.scope` 必须可选并兼容旧配置（照 `s.filters?.filter(` 的写法），
   且别动冒烟锁住的 `filters: [...filters]` / `savedSearchMatches(` 等源码串。
+- `references` 没有自己的 `View`，只换**文献表那一格**：条件分支放在
+  `query.trim() ? <SearchResults> : <DocTable>` 这一层，不能放在
+  `view.kind === 'add' ? …` 链的链首，否则查重 / 导入 / 回收站 / 全部标注全部被吞。
+  另有 `scope === 'references' && view.kind !== 'library'` 的复位 effect 兜住所有
+  `setView` 入口；`applySearch` 也要显式回 `LIBRARY` + `all`，否则已保存搜索的高亮
+  和计数描述的是一张不在屏上的表。
+- `refsindex.ts` 的 build 有**进程内 busy 闸门**（渲染层另有一个 `useRef` 闸门，
+  防先结束者提前清进度条）；每 20 篇 checkpoint 写一次盘，`finally` 再写一次，
+  进度按 200ms 节流且回调抛错要吞掉。跑完按 `candidates()` 的 id 集合 prune，
+  否则已删文献的参考文献文本会一直被搜到、`indexed` 还能大于 `total`。
+  单字查询（`MIN_QUERY = 1`）是正常中文检索，渲染层那道 `q.length < 1` 要与它一致。
+- 渲染层的 refs 查询必须带 `live` 守卫和 `.catch`：清 timer 只挡住还没发出的请求，
+  慢 IPC 回来会拿旧词结果盖住新词；错误对象静默变成空结果比报错更难查。
+- **PDF 查找栏**：`usePdfFind` 每页命中就 `publish` 画高亮，早期实现却要等全篇
+  扫完才 `setFindOpen(true)`，于是几十到上百页的论文会先出现橙框、很久之后才有
+  写着词的查找栏（`box: 0`）。首次 publish 已证明词就在这篇里，此时就开框；
+  冒烟的 `the marks come with a box` / `shutting the box` 两条即此项回归。
 
 ---
 

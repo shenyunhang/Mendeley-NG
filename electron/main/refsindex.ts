@@ -27,6 +27,16 @@ const SNIPPET_HALF = 80
 /** Nobody reads more than this many hits. */
 const MAX_HITS = 200
 
+/** A build reads every local PDF and can take minutes; only one may run. */
+let building = false
+/** Checkpoint this often: a killed process then keeps most of its work. */
+const CHECKPOINT_EVERY = 20
+/** Progress is a UI hint, not a per-paper event. Thousands of sends freeze
+ *  both the main process and the renderer that has to render each one. */
+const PROGRESS_MIN_MS = 200
+/** A one-character query is a normal Chinese search, not a typo. */
+const MIN_QUERY = 1
+
 interface RefEntry {
   mtime: number
   size: number
@@ -240,58 +250,106 @@ function candidates(): Doc[] {
   return docs.filter((d) => d.localPdf && fs.existsSync(d.localPdf))
 }
 
+function countIndexed(c: RefsCache): number {
+  return Object.values(c.entries).filter((e) => e.text).length
+}
+
 export async function buildRefsIndex(
   onProgress?: (p: { done: number; total: number }) => void
 ): Promise<{ total: number; indexed: number; skipped: string[] }> {
+  // A second invoke must not interleave writes into the same in-memory table,
+  // push a second stream of progress, or let the first finisher clear the
+  // renderer's "building" state while the other is still reading.
+  if (building) {
+    return {
+      total: candidates().length,
+      indexed: countIndexed(loadCache()),
+      skipped: ['已有一次索引在跑']
+    }
+  }
+  building = true
   const c = loadCache()
   const list = candidates()
   const total = list.length
   const skipped: string[] = []
   let done = 0
-  const step = () => onProgress?.({ done, total })
+  let lastPing = 0
 
-  for (const d of list) {
-    const file = d.localPdf as string
-    let st: fs.Stats
+  /** Every write is atomic; a process killed mid-write leaves the old table. */
+  const save = () => {
     try {
-      st = fs.statSync(file)
+      atomicWriteJson(cacheFile(), c)
     } catch {
-      done++
-      step()
-      skipped.push(`${d.id}: 文件不在原处`)
-      continue
+      // A full disk must not throw away the whole build; the in-memory table
+      // still answers searches for this session and the next run retries.
     }
-    const mtime = Math.floor(st.mtimeMs)
-    const prev = c.entries[d.id]
-    // Same moment and same length: the cached section is this file's section.
-    if (prev && prev.mtime === mtime && prev.size === st.size) {
-      done++
-      step()
-      continue
-    }
+  }
+  const step = (force = false) => {
+    const now = Date.now()
+    if (!force && now - lastPing < PROGRESS_MIN_MS) return
+    lastPing = now
     try {
-      const got = await extract(file)
-      if (!got.found || !got.text) {
-        // Cache the empty result too, so a paper with no list is not re-read
-        // on every run; the reason travels back in `skipped`.
-        c.entries[d.id] = { mtime, size: st.size, text: '', page: got.page }
-        skipped.push(`${d.id}: 未找到 References`)
-      } else {
-        c.entries[d.id] = { mtime, size: st.size, text: got.text, page: got.page }
-      }
-    } catch (e) {
-      // One unreadable paper is recorded and left WITHOUT a cache entry, so the
-      // next run retries it; the rest of the library still gets read.
-      skipped.push(`${d.id}: ${String(e)}`)
+      onProgress?.({ done, total })
+    } catch {
+      // A window that closed mid-build must not abort the remaining papers.
     }
+  }
+  const advance = () => {
     done++
+    if (done % CHECKPOINT_EVERY === 0) save()
     step()
   }
 
-  // Every write is atomic; a process killed mid-write leaves the old table.
-  atomicWriteJson(cacheFile(), c)
-  const indexed = Object.values(c.entries).filter((e) => e.text).length
-  return { total, indexed, skipped }
+  try {
+    for (const d of list) {
+      const file = d.localPdf as string
+      let st: fs.Stats
+      try {
+        st = fs.statSync(file)
+      } catch {
+        advance()
+        skipped.push(`${d.id}: 文件不在原处`)
+        continue
+      }
+      const mtime = Math.floor(st.mtimeMs)
+      const prev = c.entries[d.id]
+      // Same moment and same length: the cached section is this file's section.
+      if (prev && prev.mtime === mtime && prev.size === st.size) {
+        advance()
+        continue
+      }
+      try {
+        const got = await extract(file)
+        if (!got.found || !got.text) {
+          // Cache the empty result too, so a paper with no list is not re-read
+          // on every run; the reason travels back in `skipped`.
+          c.entries[d.id] = { mtime, size: st.size, text: '', page: got.page }
+          skipped.push(`${d.id}: 未找到 References`)
+        } else {
+          c.entries[d.id] = { mtime, size: st.size, text: got.text, page: got.page }
+        }
+      } catch (e) {
+        // One unreadable paper is recorded and left WITHOUT a cache entry, so the
+        // next run retries it; the rest of the library still gets read.
+        skipped.push(`${d.id}: ${String(e)}`)
+      }
+      advance()
+    }
+
+    // Papers trashed, deleted or detached since the last build must not keep
+    // answering searches with text that no longer belongs to the library.
+    const live = new Set(list.map((d) => d.id))
+    for (const id of Object.keys(c.entries)) {
+      if (!live.has(id)) delete c.entries[id]
+    }
+    step(true)
+  } finally {
+    // Whatever happened — an exception, a cancelled progress callback, a
+    // window closed — the papers already read must reach disk.
+    save()
+    building = false
+  }
+  return { total, indexed: countIndexed(c), skipped }
 }
 
 function snippetAt(text: string, at: number, len: number): string {
@@ -303,7 +361,7 @@ function snippetAt(text: string, at: number, len: number): string {
 
 export function searchRefs(query: string): RefHit[] {
   const needle = query.trim().toLowerCase().replace(/\s+/g, ' ')
-  if (needle.length < 2) return []
+  if (needle.length < MIN_QUERY) return []
   const c = loadCache()
   const hits: RefHit[] = []
   for (const docId of Object.keys(c.entries).sort()) {
@@ -318,7 +376,5 @@ export function searchRefs(query: string): RefHit[] {
 }
 
 export function refsStatus(): { indexed: number; total: number } {
-  const c = loadCache()
-  const indexed = Object.values(c.entries).filter((e) => e.text).length
-  return { indexed, total: candidates().length }
+  return { indexed: countIndexed(loadCache()), total: candidates().length }
 }

@@ -172,10 +172,67 @@ describe('buildRefsIndex', () => {
     expect(saved.entries.d1.text).toContain('Deep Learning')
     expect(mod.searchRefs('Deep')).toHaveLength(1)
   })
+
+  it('only allows one build at a time', async () => {
+    const a = doc('d1')
+    fs.writeFileSync(a.localPdf, 'x')
+    m.loadLibrary.mockReturnValue({ docs: [a], folders: [], syncedAt: '' })
+    // Hold the first document open so the second invoke arrives in flight.
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    const original = m.getDocument.getMockImplementation()!
+    m.getDocument.mockImplementation((params: unknown) => ({
+      promise: gate.then(() => (original(params) as { promise: Promise<unknown> }).promise)
+    }))
+
+    const first = mod.buildRefsIndex()
+    const second = await mod.buildRefsIndex()
+    expect(second.skipped).toContain('已有一次索引在跑')
+    expect(m.getDocument).toHaveBeenCalledTimes(1)
+    release()
+    await first
+    expect(m.getDocument).toHaveBeenCalledTimes(1)
+  })
+
+  it('saves what it read even when the progress callback throws', async () => {
+    const a = doc('d1')
+    fs.writeFileSync(a.localPdf, 'x')
+    m.loadLibrary.mockReturnValue({ docs: [a], folders: [], syncedAt: '' })
+
+    const r = await mod.buildRefsIndex(() => {
+      throw new Error('window closed mid-build')
+    })
+    expect(r.indexed).toBe(1)
+    const saved = JSON.parse(fs.readFileSync(cachePath, 'utf-8'))
+    expect(saved.entries.d1.text).toContain('Deep Learning')
+  })
+
+  it('drops cached text for papers that are no longer in the library', async () => {
+    const a = doc('d1')
+    fs.writeFileSync(a.localPdf, 'x')
+    fs.writeFileSync(
+      cachePath,
+      JSON.stringify({
+        version: 1,
+        entries: {
+          d1: { mtime: 1, size: 1, text: 'stale d1', page: 1 },
+          ghost: { mtime: 1, size: 1, text: 'ghost references', page: 2 }
+        }
+      })
+    )
+    m.loadLibrary.mockReturnValue({ docs: [a], folders: [], syncedAt: '' })
+
+    await mod.buildRefsIndex()
+    const saved = JSON.parse(fs.readFileSync(cachePath, 'utf-8'))
+    expect(saved.entries.ghost).toBeUndefined()
+    expect(mod.searchRefs('ghost')).toEqual([])
+  })
 })
 
 describe('searchRefs', () => {
-  it('is case-insensitive, rejects empty/short queries, and centers the snippet on the hit', () => {
+  it('is case-insensitive, accepts one-character terms and centers the snippet', () => {
     fs.writeFileSync(
       cachePath,
       JSON.stringify({
@@ -193,7 +250,8 @@ describe('searchRefs', () => {
 
     expect(mod.searchRefs('')).toEqual([])
     expect(mod.searchRefs('   ')).toEqual([])
-    expect(mod.searchRefs('a')).toEqual([]) // length < 2
+    // A single character is a normal Chinese search, not a typo.
+    expect(mod.searchRefs('a')[0]?.docId).toBe('d1')
     expect(mod.searchRefs('zzzz')).toEqual([])
 
     const hit = mod.searchRefs('DEEP LEARNING') // case-insensitive phrase

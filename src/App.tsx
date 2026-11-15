@@ -249,7 +249,13 @@ export default function App() {
 
   /** References are indexed on demand. The first pass reads the last pages of
    *  every local PDF, so it reports progress instead of blocking an invoke. */
+  const refsBuildRef = useRef(false)
   const buildRefs = useCallback(async () => {
+    // Two entries into the scope, or a second press of 建索引, must not start
+    // a second build. The main process has its own gate, but without this one
+    // the first response would clear the progress bar while the other ran.
+    if (refsBuildRef.current) return
+    refsBuildRef.current = true
     setRefsBuilding(true)
     setRefsError(null)
     try {
@@ -263,6 +269,7 @@ export default function App() {
     } catch (e) {
       setRefsError(String(e))
     } finally {
+      refsBuildRef.current = false
       setRefsBuilding(false)
       setRefsProgress(null)
     }
@@ -273,15 +280,25 @@ export default function App() {
   useEffect(() => {
     if (scope !== 'references') return
     let live = true
-    void window.api.refsStatus().then((s) => {
-      if (!live || 'error' in s) return
-      setRefsStatus(s)
-      if (s.indexed === 0 && s.total > 0) void buildRefs()
-    })
+    void window.api
+      .refsStatus()
+      .then((s) => {
+        if (!live || 'error' in s) return
+        setRefsStatus(s)
+        if (s.indexed === 0 && s.total > 0) void buildRefs()
+      })
+      .catch(() => undefined)
     return () => {
       live = false
     }
   }, [scope, buildRefs])
+
+  // A references scope owns the library pane only. Every other view is
+  // reached through its own setView call, so the selector is reset here
+  // instead of hunting down each of those call sites.
+  useEffect(() => {
+    if (scope === 'references' && view.kind !== 'library') setScope('all')
+  }, [scope, view.kind])
 
   // Debounced: a references lookup goes through IPC, and starting one for
   // every keystroke would leave answers arriving out of order.
@@ -291,16 +308,29 @@ export default function App() {
       return
     }
     const q = normaliseQuery(query)
-    if (q.length < 2) {
+    // A single character is a normal Chinese search, not a typo. The IPC
+    // side uses the same floor; keep them in step.
+    if (q.length < 1) {
       setRefsHits([])
       return
     }
+    // Clearing the timer only stops a request that has not been sent. One
+    // already in flight can still come back after the word has changed, so
+    // each response is checked against the query that asked for it.
+    let live = true
     const t = setTimeout(() => {
-      void window.api.searchRefs(q).then((r) => {
-        setRefsHits(Array.isArray(r) ? r : [])
-      })
+      void window.api
+        .searchRefs(q)
+        .then((r) => {
+          if (!live || normaliseQuery(query) !== q) return
+          setRefsHits(Array.isArray(r) ? r : [])
+        })
+        .catch(() => undefined)
     }, REFERENCE_SEARCH_DEBOUNCE_MS)
-    return () => clearTimeout(t)
+    return () => {
+      live = false
+      clearTimeout(t)
+    }
   }, [scope, query])
 
   /** Page to open the reader at.  The nonce re-triggers a jump to the same
@@ -741,6 +771,11 @@ export default function App() {
   }
 
   const applySearch = (s: SavedSearch) => {
+    // A saved search is a question about the catalogue table. Restoring it
+    // has to bring that table back, or the highlighted name and its count
+    // describe a list that is not on screen.
+    setScope('all')
+    setView(LIBRARY)
     setQuery(s.query)
     setFolderId(s.folderId)
     // Before `filters` existed only the star switch survived a save, while
@@ -1066,7 +1101,9 @@ export default function App() {
     if (next === 'body') {
       setView({ kind: 'fulltext' })
       if (!ftQuery.trim()) setFtQuery(query.trim())
-      void window.api.ftStatus().then(setFtStat)
+      void window.api.ftStatus().then(setFtStat).catch(() => undefined)
+    } else if (next === 'references') {
+      setView(LIBRARY)
     } else {
       setView((v) => (v.kind === 'fulltext' ? LIBRARY : v))
     }
@@ -2052,24 +2089,7 @@ export default function App() {
           title="拖动改变文件夹栏宽度，双击复位"
         />
 
-        {scope === 'references' ? (
-          <RefsView
-            query={query}
-            hits={refsHits}
-            docs={docs}
-            building={refsBuilding}
-            progress={refsProgress}
-            status={refsStatus}
-            error={refsError}
-            onBuild={() => void buildRefs()}
-            onClose={() => onScope('all')}
-            onOpen={(d, p) => {
-              setSelId(d.id)
-              setRightTab(d.localPdf ? 'pdf' : 'details')
-              setJump({ page: p, nonce: Date.now() })
-            }}
-          />
-        ) : view.kind === 'add' ? (
+        {view.kind === 'add' ? (
           <AddByIdView
             docs={docs}
             onClose={() => setView(LIBRARY)}
@@ -2448,7 +2468,31 @@ export default function App() {
             cards are for reading one paper at a time.  Both are wanted, so the
             query is what decides, and clearing the box gives the table back.
           */}
-          {query.trim() ? (
+          {scope === 'references' ? (
+            // Only the library pane belongs to the references scope. Every
+            // other view (add, import, trash, dupes, annotations, fulltext)
+            // keeps its own entry point, so choosing them cannot be swallowed
+            // by a scope that has no view of its own.
+            <RefsView
+              query={query}
+              hits={refsHits}
+              docs={docs}
+              building={refsBuilding}
+              progress={refsProgress}
+              status={refsStatus}
+              error={refsError}
+              onBuild={() => void buildRefs()}
+              onClose={() => {
+                setView(LIBRARY)
+                onScope('all')
+              }}
+              onOpen={(d, p) => {
+                setSelId(d.id)
+                setRightTab(d.localPdf ? 'pdf' : 'details')
+                setJump({ page: p, nonce: Date.now() })
+              }}
+            />
+          ) : query.trim() ? (
             <SearchResults
               docs={filtered}
               query={query}
