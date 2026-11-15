@@ -83,3 +83,7 @@ export const EXPORT_ANNOTATIONS_MESSAGE_VISIBLE_MS = 6000
 
 /** "Take the whole library": the longest note, because the list is longest. */
 export const EXPORT_LIBRARY_MESSAGE_VISIBLE_MS = 12000
+
+/** Quiet window before a references lookup goes over IPC. Not a message
+ *  duration, but the bare-duration smoke gate also owns setTimeout literals. */
+export const REFERENCE_SEARCH_DEBOUNCE_MS = 250

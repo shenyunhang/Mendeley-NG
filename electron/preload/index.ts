@@ -10,6 +10,7 @@ import type {
   LeaveProgress,
   Library,
   MetaCandidate,
+  RefHit,
   SyncStatus,
   UpdateState
 } from '../../shared/types'
@@ -115,6 +116,22 @@ const api: Api = {
     const h = (_e: unknown, s: FtStatus) => cb(s)
     ipcRenderer.on('ft:progress', h)
     return () => ipcRenderer.removeListener('ft:progress', h)
+  },
+
+  buildRefsIndex: () =>
+    ipcRenderer.invoke('refs:build') as Promise<
+      { total: number; indexed: number; skipped: string[] } | { error: string }
+    >,
+  searchRefs: (q: string) =>
+    ipcRenderer.invoke('refs:search', q) as Promise<RefHit[] | { error: string }>,
+  refsStatus: () =>
+    ipcRenderer.invoke('refs:status') as Promise<
+      { indexed: number; total: number } | { error: string }
+    >,
+  onRefsProgress: (cb: (p: { done: number; total: number }) => void) => {
+    const h = (_e: unknown, p: { done: number; total: number }) => cb(p)
+    ipcRenderer.on('refs:progress', h)
+    return () => ipcRenderer.removeListener('refs:progress', h)
   },
 
   loadAnnotations: () => ipcRenderer.invoke('annotations:load') as Promise<Annotation[]>,

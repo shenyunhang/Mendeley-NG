@@ -161,6 +161,7 @@ import { buildTree, isSelfOrDescendant } from '../../src/lib/tree'
 import { clampScale, posToRect } from '../../src/lib/pdfgeom'
 import { gridTemplate } from '../../src/lib/columns'
 import { markAll } from '../../src/lib/match'
+import { scopeHay } from '../../src/lib/searchScope'
 import { splitPersonName } from '../../src/lib/splitPersonName'
 import { uniquePdfPath, writeUniquePdf } from '../../shared/uniquePdfPath'
 
@@ -880,6 +881,52 @@ export async function runSmoke() {
     keyCost.every((x) => x >= 0) && Math.max(...keyCost) < 100,
     keyCost
   )
+
+  // The scope selector is a native select inside the search box: a bar-level
+  // child would add a gap, a second input would break every querySelector
+  // that assumes the search box is the only one, and a card would add a layer
+  // to the Esc stack. Check all three without changing any state.
+  const scopeInfo = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(()=>{const s=document.querySelector(".search-wrap select.scope-select");'
+      + 'return JSON.stringify({present:!!s,'
+      + 'options:s?[...s.options].map(o=>o.value):[],'
+      + 'value:s?s.value:null,'
+      + 'inputs:document.querySelectorAll(".toolbar input").length})})()'
+    )
+  ) as { present: boolean; options: string[]; value: string | null; inputs: number }
+  log('search scope selector', scopeInfo)
+  expect(
+    'the scope selector offers five ranges without adding a second input',
+    scopeInfo.present === true &&
+      scopeInfo.options.length === 5 &&
+      scopeInfo.options[0] === 'all' &&
+      ['title', 'abstract', 'body', 'references'].every((k) =>
+        scopeInfo.options.includes(k)
+      ) &&
+      scopeInfo.value !== null &&
+      scopeInfo.options.includes(scopeInfo.value) &&
+      scopeInfo.inputs === 1,
+    scopeInfo
+  )
+  // And the rule behind it: a word that lives in the abstract must be found
+  // by all/abstract but not by title-only. This is the behaviour a select
+  // that silently did nothing would leave untested.
+  const scopeSample = {
+    id: 'scope-sample',
+    title: 'Deep Learning for Cats',
+    abstract: 'We study feline vision',
+    source: 'Journal of Small Mammals'
+  } as Parameters<typeof scopeHay>[0]
+  expect(
+    'a title-only search cannot find a word that lives in the abstract',
+    scopeHay(scopeSample, 'all').includes('feline') &&
+      scopeHay(scopeSample, 'abstract').includes('feline') &&
+      !scopeHay(scopeSample, 'title').includes('feline') &&
+      !scopeHay(scopeSample, 'abstract').includes('deep learning for cats'),
+    { all: scopeHay(scopeSample, 'all') }
+  )
+
   await w.webContents.executeJavaScript(
     '(()=>{const i=document.querySelector(".toolbar input[placeholder^=\'搜索\']");'
     + 'const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,"value").set;'

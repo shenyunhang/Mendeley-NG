@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   Annotation,
   Doc,
+  RefHit,
   SavedSearch,
   SavedView,
   UpdateState
@@ -15,6 +16,12 @@ import { createBatchGate } from './lib/batchGate'
 import { runBatch } from './lib/batch'
 import { useOverlayStack } from './lib/hooks/useOverlayStack'
 import { savedSearchMatches } from './lib/savedSearch'
+import {
+  isMetadataScope,
+  normaliseQuery,
+  scopeHay,
+  type SearchScope
+} from './lib/searchScope'
 import { createViewGeneration } from './lib/viewGeneration'
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
@@ -28,6 +35,7 @@ import DocTable from './components/DocTable'
 import SearchResults from './components/SearchResults'
 import MenuButton from './components/MenuButton'
 import FullTextView from './components/FullTextView'
+import RefsView from './components/RefsView'
 import {
   SORT_DEFAULT_DIR,
   TITLE_ORDER,
@@ -47,6 +55,7 @@ import {
   FOLDER_NOOP_MESSAGE_VISIBLE_MS,
   IMPORT_FINISHED_MESSAGE_VISIBLE_MS,
   RENAME_RESULT_MESSAGE_VISIBLE_MS,
+  REFERENCE_SEARCH_DEBOUNCE_MS,
   STARTUP_UPDATE_CHECK_DELAY_MS,
   UPDATE_INSTALL_DELAY_MS
 } from './lib/timing'
@@ -83,32 +92,10 @@ import { LIBRARY, viewAfterReadingToggle, type View } from './lib/view'
 
 
 /**
- * Everything the search box looks at, in one lower-cased string.  Shared
- * with saved searches so a saved filter matches exactly what it saved.
- *
- * It covers what a reader actually remembers about a paper: the abstract
- * they read, the tag they gave it, the note they wrote.  Searching only
- * title / authors / journal / key / doi meant a paper could not be found by
- * anything the user themselves had entered, which is the source of "I know
- * I wrote something about this".
+ * The haystack rule now lives in src/lib/searchScope.ts, where the scope can
+ * narrow it. `all` is byte-for-byte what this inline function used to build,
+ * so saved searches and the filter counts keep answering the same question.
  */
-function hay(d: Doc, note?: string): string {
-  return [
-    d.title,
-    d.source,
-    d.citation_key,
-    d.doi,
-    d.abstract,
-    d.type,
-    (d.authors ?? []).map((a) => `${a.first_name ?? ''} ${a.last_name ?? ''}`).join(' '),
-    (d.keywords ?? []).join(' '),
-    (d.tags ?? []).join(' '),
-    note ?? ''
-  ]
-    .join(' ')
-    .toLowerCase()
-}
-
 export default function App() {
   const [folderId, setFolderId] = useState<string | null>(null)
   /**
@@ -119,6 +106,16 @@ export default function App() {
    */
   const [renameReq, setRenameReq] = useState<{ id: string; n: number } | null>(null)
   const [query, setQuery] = useState('')
+  /** What the search box may look at. One value for the whole window, so the
+   *  toolbar selector and the middle pane can never disagree about it. */
+  const [scope, setScope] = useState<SearchScope>('all')
+  /** References are read from the tail of each PDF in the main process. This
+   *  list is a view of that index, not of the in-memory haystack. */
+  const [refsHits, setRefsHits] = useState<RefHit[]>([])
+  const [refsBuilding, setRefsBuilding] = useState(false)
+  const [refsProgress, setRefsProgress] = useState<{ done: number; total: number } | null>(null)
+  const [refsStatus, setRefsStatus] = useState<{ indexed: number; total: number } | null>(null)
+  const [refsError, setRefsError] = useState<string | null>(null)
   const { selId, setSelId, pinned, setPinned, multi, setMulti, lastIdx } = useSelection()
   const [rightTab, setRightTab] = useState<'pdf' | 'details'>('details')
   const [err, setErr] = useState<string | null>(null)
@@ -249,6 +246,63 @@ export default function App() {
     // the panel is searched only while it is the one on screen, and that is
     // the view's answer to give, not the search's
   } = useFullText(view.kind === 'fulltext')
+
+  /** References are indexed on demand. The first pass reads the last pages of
+   *  every local PDF, so it reports progress instead of blocking an invoke. */
+  const buildRefs = useCallback(async () => {
+    setRefsBuilding(true)
+    setRefsError(null)
+    try {
+      const r = await window.api.buildRefsIndex()
+      if ('error' in r) {
+        setRefsError(r.error)
+      } else {
+        const s = await window.api.refsStatus()
+        if (!('error' in s)) setRefsStatus(s)
+      }
+    } catch (e) {
+      setRefsError(String(e))
+    } finally {
+      setRefsBuilding(false)
+      setRefsProgress(null)
+    }
+  }, [])
+
+  useEffect(() => window.api.onRefsProgress((p) => setRefsProgress(p)), [])
+
+  useEffect(() => {
+    if (scope !== 'references') return
+    let live = true
+    void window.api.refsStatus().then((s) => {
+      if (!live || 'error' in s) return
+      setRefsStatus(s)
+      if (s.indexed === 0 && s.total > 0) void buildRefs()
+    })
+    return () => {
+      live = false
+    }
+  }, [scope, buildRefs])
+
+  // Debounced: a references lookup goes through IPC, and starting one for
+  // every keystroke would leave answers arriving out of order.
+  useEffect(() => {
+    if (scope !== 'references') {
+      setRefsHits([])
+      return
+    }
+    const q = normaliseQuery(query)
+    if (q.length < 2) {
+      setRefsHits([])
+      return
+    }
+    const t = setTimeout(() => {
+      void window.api.searchRefs(q).then((r) => {
+        setRefsHits(Array.isArray(r) ? r : [])
+      })
+    }, REFERENCE_SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [scope, query])
+
   /** Page to open the reader at.  The nonce re-triggers a jump to the same
    *  page on the same document, which a bare number could not. */
   const [jump, setJump] = useState<{ page: number; nonce: number } | null>(null)
@@ -509,9 +563,9 @@ export default function App() {
    */
   const haystack = useMemo(() => {
     const m = new Map<string, string>()
-    for (const d of docs) m.set(d.id, hay(d, noteMap[d.id]))
+    for (const d of docs) m.set(d.id, scopeHay(d, scope, noteMap[d.id]))
     return m
-  }, [docs, noteMap])
+  }, [docs, noteMap, scope])
 
   /**
    * What has to happen before there is anything to look at, or null when
@@ -561,7 +615,7 @@ export default function App() {
    * is the whole difference.
    */
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const q = normaliseQuery(query)
     let out = docs
     for (const k of filters) out = out.filter(FILTER_TEST[k])
     if (folderId) {
@@ -591,7 +645,7 @@ export default function App() {
    * before it is pressed rather than by pressing it.
    */
   const filterCounts = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const q = normaliseQuery(query)
     let base = docs
     if (folderId) {
       const ids = new Set(tree.subtree.get(folderId) ?? [folderId])
@@ -857,7 +911,7 @@ export default function App() {
   // index that no longer points at the paper it was set on.
   useEffect(() => {
     lastIdx.current = null
-  }, [query, folderId, filters, sort])
+  }, [query, folderId, filters, sort, scope])
 
   /**
    * Selection follows the file manager the user already knows: shift-click
@@ -987,6 +1041,8 @@ export default function App() {
     setQuery('')
     setFtQuery('')
     setActiveSearch(null)
+    setScope((s) => (s === 'body' ? 'all' : s))
+    setRefsHits([])
     setView((v) => (v.kind === 'fulltext' ? LIBRARY : v))
     // focus goes back to the box: the reader was typing in it a moment ago and
     // a click on the × leaves nothing focused at all otherwise
@@ -999,6 +1055,21 @@ export default function App() {
   const onQuery = (v: string) => {
     setQuery(v)
     setActiveSearch(null)
+  }
+
+  /** The scope and the middle pane are one decision. Choosing the PDF body
+   *  puts the full-text panel on screen; leaving it must not strand the
+   *  selector saying "body" over a library table. */
+  const onScope = (next: SearchScope) => {
+    setScope(next)
+    setActiveSearch(null)
+    if (next === 'body') {
+      setView({ kind: 'fulltext' })
+      if (!ftQuery.trim()) setFtQuery(query.trim())
+      void window.api.ftStatus().then(setFtStat)
+    } else {
+      setView((v) => (v.kind === 'fulltext' ? LIBRARY : v))
+    }
   }
 
   /**
@@ -1031,7 +1102,7 @@ export default function App() {
           its title or abstract, and the answer is in the same toolbar.  Saying
           so is worth more than the count of what did not match.
         */}
-        {query.trim() && view.kind !== 'fulltext' ? (
+        {query.trim() && view.kind !== 'fulltext' && isMetadataScope(scope) ? (
           <p className="sub">
             搜的是书目字段：标题、作者、期刊、摘要、标签和你写的笔记。
             要搜 PDF 正文，点工具栏的「全文」
@@ -1045,7 +1116,7 @@ export default function App() {
         ) : null}
       </div>
     )
-  }, [docs.length, query, folderId, folders, filters, view.kind, ftStat, clearFilters])
+  }, [docs.length, query, folderId, folders, filters, view.kind, ftStat, clearFilters, scope])
 
   const { message: batchMsg, flash: flashBatch, show: showBatch } = useFlashMessage()
 
@@ -1802,7 +1873,15 @@ export default function App() {
           void writeConfig({ citeStyle: s })
         }}
         view={view}
-        onView={setView}
+        onView={(v) => {
+          // The 全文 button is another way into the body scope; keep the
+          // selector in step with it rather than showing two answers at once.
+          if (v.kind === 'fulltext') setScope('body')
+          else if (view.kind === 'fulltext') setScope('all')
+          setView(v)
+        }}
+        scope={scope}
+        onScope={onScope}
         query={query}
         onQuery={onQuery}
         ftQuery={ftQuery}
@@ -1973,7 +2052,24 @@ export default function App() {
           title="拖动改变文件夹栏宽度，双击复位"
         />
 
-        {view.kind === 'add' ? (
+        {scope === 'references' ? (
+          <RefsView
+            query={query}
+            hits={refsHits}
+            docs={docs}
+            building={refsBuilding}
+            progress={refsProgress}
+            status={refsStatus}
+            error={refsError}
+            onBuild={() => void buildRefs()}
+            onClose={() => onScope('all')}
+            onOpen={(d, p) => {
+              setSelId(d.id)
+              setRightTab(d.localPdf ? 'pdf' : 'details')
+              setJump({ page: p, nonce: Date.now() })
+            }}
+          />
+        ) : view.kind === 'add' ? (
           <AddByIdView
             docs={docs}
             onClose={() => setView(LIBRARY)}

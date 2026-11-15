@@ -303,6 +303,13 @@ export interface FtHit {
   snippet: string
 }
 
+/** One hit inside a document's cached References section. */
+export interface RefHit {
+  docId: string
+  page: number
+  snippet: string
+}
+
 /** A named column layout for the document table. */
 export interface SavedView {
   id: string

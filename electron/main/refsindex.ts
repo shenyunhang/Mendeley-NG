@@ -1,0 +1,324 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { app } from 'electron'
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { atomicWriteJson } from '../../shared/atomicJson'
+import { isRefHead } from '../../src/lib/refly'
+import type { Doc, RefHit } from '../../shared/types'
+import { dataDir, loadLibrary } from './store'
+
+/**
+ * A small index of the trailing References section of every local PDF.
+ *
+ * It answers "search the references" from the main process: one JSON table on
+ * disk, keyed by document id, holding the text after the References heading
+ * plus the file's mtime/size so a build only re-reads papers that changed.
+ * Nothing here runs in the renderer, so pdf.js is the legacy Node build and
+ * the same worker the full-text index uses.
+ */
+
+/** How many pages at the end of a PDF may carry the reference list. */
+const TAIL_PAGES = 20
+/** How long one PDF may take before it is abandoned (and its worker stopped). */
+const DOC_TIMEOUT_MS = 20_000
+/** Characters of context on either side of a hit in a snippet (~160 total). */
+const SNIPPET_HALF = 80
+/** Nobody reads more than this many hits. */
+const MAX_HITS = 200
+
+interface RefEntry {
+  mtime: number
+  size: number
+  text: string
+  /** 1-based page the References heading was found on; 0 when there is none. */
+  page: number
+}
+
+interface RefsCache {
+  version: 1
+  entries: Record<string, RefEntry>
+}
+
+const cacheFile = () => path.join(dataDir(), 'references.json')
+const emptyCache = (): RefsCache => ({ version: 1, entries: {} })
+
+/**
+ * The parsed table is held in memory: searchRefs runs on every keystroke and
+ * re-reading / re-parsing the whole file for each letter is exactly the cost
+ * the full-text index avoids with its cached blob.  A fresh import (app start,
+ * a test module) loads it from disk once; a build refreshes it in place.
+ */
+let cache: RefsCache | null = null
+
+function isEntry(x: unknown): x is RefEntry {
+  if (!x || typeof x !== 'object') return false
+  const e = x as RefEntry
+  return (
+    typeof e.mtime === 'number' && Number.isFinite(e.mtime) &&
+    typeof e.size === 'number' && Number.isFinite(e.size) &&
+    typeof e.text === 'string' &&
+    typeof e.page === 'number' && Number.isFinite(e.page)
+  )
+}
+
+/** A broken, half-written or wrong-version cache is treated as empty, never
+ *  partly trusted: one bad entry must not poison the whole search. */
+function loadCache(): RefsCache {
+  if (cache) return cache
+  try {
+    const raw = JSON.parse(fs.readFileSync(cacheFile(), 'utf-8')) as unknown
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('shape')
+    const x = raw as RefsCache
+    if (x.version !== 1 || !x.entries || typeof x.entries !== 'object' || Array.isArray(x.entries)) {
+      throw new Error('shape')
+    }
+    const entries: Record<string, RefEntry> = {}
+    for (const [id, e] of Object.entries(x.entries)) {
+      if (isEntry(e)) entries[id] = e
+    }
+    cache = { version: 1, entries }
+  } catch {
+    cache = emptyCache()
+  }
+  return cache
+}
+
+type PdfDoc = Awaited<ReturnType<typeof pdfjs.getDocument>['promise']>
+
+/**
+ * pdf.js in the main process needs a real worker file next to the bundle (see
+ * HANDOFF 8.1 / 4 and scripts/copy-worker.mjs).  fulltext.ts configures the
+ * same shared `GlobalWorkerOptions` singleton on start-up, so in the app this
+ * is a no-op; the guarded fallback keeps this module able to run on its own
+ * (and harmless under a mocked Electron in the unit tests).
+ */
+function ensureWorker() {
+  try {
+    if (pdfjs.GlobalWorkerOptions?.workerSrc) return
+    const candidates = [
+      path.join(__dirname, 'pdf.worker.mjs'),
+      path.join(app.getAppPath(), 'out', 'main', 'pdf.worker.mjs'),
+      path.join(app.getAppPath(), 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.worker.mjs')
+    ]
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(c).href
+        return
+      }
+    }
+  } catch {
+    /* no app yet / mocked pdf.js: the app's start-up config covers it */
+  }
+}
+
+/** Destroying a pdf.js document is what actually stops its worker.  One door
+ *  for the normal exit and for a document abandoned by the timeout, so neither
+ *  path can leave a worker behind. */
+function cleanupDoc(doc: PdfDoc | null): Promise<void> | undefined {
+  return doc?.destroy().catch(() => undefined)
+}
+
+interface TextItem {
+  str?: string
+  hasEOL?: boolean
+}
+
+/**
+ * pdf.js hands a line over as several runs and marks its end with `hasEOL`.
+ * Words split across runs are put back together with a space only where one
+ * is needed, so "Back" + "propagation" stays two searchable words instead of
+ * becoming "Backpropagation", and a heading is still one line for isRefHead.
+ */
+function linesOfPage(items: TextItem[]): string[] {
+  const out: string[] = []
+  let cur = ''
+  for (const it of items) {
+    const s = typeof it.str === 'string' ? it.str : ''
+    if (s) {
+      if (cur && !/\s$/.test(cur) && !/^\s/.test(s) && /\w$/.test(cur) && /^\w/.test(s)) cur += ' '
+      cur += s
+    }
+    if (it.hasEOL) {
+      const t = cur.trim()
+      if (t) out.push(t)
+      cur = ''
+    }
+  }
+  if (cur.trim()) out.push(cur.trim())
+  return out
+}
+
+interface Extracted {
+  text: string
+  page: number
+  /** whether a References heading was located at all */
+  found: boolean
+}
+
+/**
+ * Read at most the last TAIL_PAGES pages and take everything after the FIRST
+ * References heading found scanning forwards.  Nothing is invented: a paper
+ * with no heading yields an empty string and the caller records it as skipped.
+ * The text is stored whitespace-collapsed, so searchRefs' offsets stay aligned
+ * with a lower-cased `includes` scan.
+ */
+async function extract(file: string): Promise<Extracted> {
+  ensureWorker()
+  // held in a box so TypeScript does not narrow it to null inside the timer.
+  const box: { doc: PdfDoc | null } = { doc: null }
+  let stopped = false
+  let timer: NodeJS.Timeout | undefined
+
+  const parse = async (): Promise<Extracted> => {
+    // pdf.js's Node stream reads a file:// URL straight off disk (PDFNodeStream),
+    // so no whole-file read into memory is needed here.
+    const d = await pdfjs.getDocument({
+      url: pathToFileURL(file).href,
+      useSystemFonts: false
+    }).promise
+    // The timer may have fired while getDocument was still resolving.  By then
+    // finally has run against an empty box, so this document has to be
+    // destroyed here or a PDF that times out during open leaks its worker.
+    if (stopped) {
+      await cleanupDoc(d)
+      throw new Error('timed out')
+    }
+    box.doc = d
+    const first = Math.max(1, d.numPages - TAIL_PAGES + 1)
+    let page = 0
+    const lines: string[] = []
+    let collecting = false
+    for (let n = first; n <= d.numPages; n++) {
+      let rows: string[] = []
+      try {
+        const p = await d.getPage(n)
+        const tc = await p.getTextContent()
+        rows = linesOfPage(tc.items as unknown as TextItem[])
+        p.cleanup?.()
+      } catch {
+        // one unreadable page is not carrying the list; the rest still count
+        rows = []
+      }
+      if (!collecting) {
+        const k = rows.findIndex(isRefHead)
+        if (k >= 0) {
+          collecting = true
+          page = n
+          lines.push(...rows.slice(k + 1))
+        }
+      } else {
+        lines.push(...rows)
+      }
+    }
+    return { text: lines.join(' ').replace(/\s+/g, ' ').trim(), page, found: collecting }
+  }
+
+  try {
+    const got = await Promise.race([
+      parse(),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          stopped = true
+          void box.doc?.destroy().catch(() => undefined)
+          box.doc = null // the normal exit must not destroy it a second time
+          resolve(null)
+        }, DOC_TIMEOUT_MS)
+      })
+    ])
+    return got ?? { text: '', page: 0, found: false }
+  } finally {
+    if (timer) clearTimeout(timer)
+    await cleanupDoc(box.doc)
+  }
+}
+
+/** Which documents the cache is about: every one with a local PDF that is
+ *  still on disk. */
+function candidates(): Doc[] {
+  const docs = loadLibrary()?.docs ?? []
+  return docs.filter((d) => d.localPdf && fs.existsSync(d.localPdf))
+}
+
+export async function buildRefsIndex(
+  onProgress?: (p: { done: number; total: number }) => void
+): Promise<{ total: number; indexed: number; skipped: string[] }> {
+  const c = loadCache()
+  const list = candidates()
+  const total = list.length
+  const skipped: string[] = []
+  let done = 0
+  const step = () => onProgress?.({ done, total })
+
+  for (const d of list) {
+    const file = d.localPdf as string
+    let st: fs.Stats
+    try {
+      st = fs.statSync(file)
+    } catch {
+      done++
+      step()
+      skipped.push(`${d.id}: 文件不在原处`)
+      continue
+    }
+    const mtime = Math.floor(st.mtimeMs)
+    const prev = c.entries[d.id]
+    // Same moment and same length: the cached section is this file's section.
+    if (prev && prev.mtime === mtime && prev.size === st.size) {
+      done++
+      step()
+      continue
+    }
+    try {
+      const got = await extract(file)
+      if (!got.found || !got.text) {
+        // Cache the empty result too, so a paper with no list is not re-read
+        // on every run; the reason travels back in `skipped`.
+        c.entries[d.id] = { mtime, size: st.size, text: '', page: got.page }
+        skipped.push(`${d.id}: 未找到 References`)
+      } else {
+        c.entries[d.id] = { mtime, size: st.size, text: got.text, page: got.page }
+      }
+    } catch (e) {
+      // One unreadable paper is recorded and left WITHOUT a cache entry, so the
+      // next run retries it; the rest of the library still gets read.
+      skipped.push(`${d.id}: ${String(e)}`)
+    }
+    done++
+    step()
+  }
+
+  // Every write is atomic; a process killed mid-write leaves the old table.
+  atomicWriteJson(cacheFile(), c)
+  const indexed = Object.values(c.entries).filter((e) => e.text).length
+  return { total, indexed, skipped }
+}
+
+function snippetAt(text: string, at: number, len: number): string {
+  const from = Math.max(0, at - SNIPPET_HALF)
+  const to = Math.min(text.length, at + len + SNIPPET_HALF)
+  const body = text.slice(from, to).replace(/\s+/g, ' ').trim()
+  return (from > 0 ? '…' : '') + body + (to < text.length ? '…' : '')
+}
+
+export function searchRefs(query: string): RefHit[] {
+  const needle = query.trim().toLowerCase().replace(/\s+/g, ' ')
+  if (needle.length < 2) return []
+  const c = loadCache()
+  const hits: RefHit[] = []
+  for (const docId of Object.keys(c.entries).sort()) {
+    const e = c.entries[docId]!
+    if (!e.text) continue
+    const at = e.text.toLowerCase().indexOf(needle)
+    if (at < 0) continue
+    hits.push({ docId, page: e.page, snippet: snippetAt(e.text, at, needle.length) })
+    if (hits.length >= MAX_HITS) break
+  }
+  return hits
+}
+
+export function refsStatus(): { indexed: number; total: number } {
+  const c = loadCache()
+  const indexed = Object.values(c.entries).filter((e) => e.text).length
+  return { indexed, total: candidates().length }
+}

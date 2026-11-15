@@ -60,6 +60,23 @@
   flex: 1 1 auto;
   min-width: 0;
 }
+/* The scope selector sits inside the search box's own flex item. As a
+   bar-level child it would add a gap of its own and push the far-end font and
+   theme buttons off the row; in here it only costs the input some width. It is
+   a select rather than a card so it adds no layer to the Esc stack either. */
+.search-wrap > .scope-select {
+  flex: 0 0 auto;
+  width: 84px;
+  min-width: 0;
+  margin-right: 6px;
+  padding: 4px 2px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--fg);
+  cursor: pointer;
+}
 /* the × is nearly invisible until the box is aimed at: a mark drawn at full
    strength would be the brightest thing on the bar while meaning "nothing
    is being searched for" */

@@ -18,6 +18,7 @@ import type {
   LeaveProgress,
   Library,
   MetaCandidate,
+  RefHit,
   SyncStatus,
   UpdateState
 } from '../shared/types'
@@ -87,6 +88,13 @@ export interface Api {
   ftClear: () => Promise<FtStatus>
   ftSearch: (q: string) => Promise<FtHit[]>
   onFtProgress: (cb: (s: FtStatus) => void) => () => void
+  /** Build / refresh the trailing-References index and report progress. */
+  buildRefsIndex: () => Promise<
+    { total: number; indexed: number; skipped: string[] } | { error: string }
+  >
+  searchRefs: (q: string) => Promise<RefHit[] | { error: string }>
+  refsStatus: () => Promise<{ indexed: number; total: number } | { error: string }>
+  onRefsProgress: (cb: (p: { done: number; total: number }) => void) => () => void
   loadAnnotations: () => Promise<Annotation[]>
   pullAnnotations: (docId: string) => Promise<CloudAnnotation[]>
   pushAnnotations: (

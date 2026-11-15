@@ -207,6 +207,7 @@ src/
   lib/hooks/useOverlayStack.ts  设置面板与三张工具条卡片的状态 + 一次 Esc 关一层
   lib/                  与 React 无关的纯规则，可直接在 Node 里 import
   lib/overlayStack.ts   浮层优先级的纯规则 topOverlay
+  lib/searchScope.ts    搜索范围枚举、标签与 scopeHay 纯规则
   lib/configWrite.ts    渲染层所有配置写入的统一入口
   lib/batch.ts          批量动作的进度节流与失败名单，不碰 React
   styles.css            样式唯一入口，只有一串按原顺序排列的 @import
@@ -605,6 +606,33 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   被列进 `tsconfig.node.json` 白名单，node 工程就报一串 DOM 类型错误。
 - 需要输入一律用 `AskDialog`；`window.confirm` 可用。
 - 冒烟里取消路径要真点「取消」，别用 `window.confirm = () => false` 打桩。
+
+### 8.11 搜索范围与参考文献
+
+- 范围只有一份枚举 `src/lib/searchScope.ts` 的 `SearchScope`：
+  `all / title / abstract / body / references`。`scopeHay(d, 'all', note)` 必须与旧
+  `hay()` 逐字节一致（已保存搜索的计数、筛选计数和冒烟都靠它），`title` / `abstract`
+  只取那一个字段但仍用同样的 `join(' ').toLowerCase()`；`body` / `references`
+  不走书目 haystack，由各自的视图回答，所以 `scopeHay` 对它们仍返回全字段，
+  免得文献表在切过去时整张变空。
+- 范围控件是 `search-wrap` **内部**的原生 `<select>`，不是工具栏直属子元素、不是
+  第二个 `<input>`、也不是浮层卡片。三者分别会：多一个 gap 把字号/主题挤出一行、
+  打穿冒烟里 `document.querySelector(".toolbar input")` 的唯一性假设、或给
+  `overlayStack.ts` 的优先级和 `overlay-stack.test.ts` 的 16 种组合再添一层。
+- `body` 就是已有的全文视图：选它切 `view.kind === 'fulltext'` 并把 `query` 单向复制成
+  `ftQuery`；「全文」按钮也反向把 `scope` 设成 `body`，两处不能各说各话。
+  清空搜索时把 `body` 复位成 `all`，别让下拉写着「PDF 正文」而中间是文献表。
+- `references` 走 `electron/main/refsindex.ts`：只读每篇 PDF **末尾最多 20 页**，
+  用 `src/lib/refly.ts` 的 `isRefHead` 找 References 标题，把之后的文本存进
+  `<userData>/library/references.json`（`{version:1, entries:{[docId]:{mtime,size,text,page}}}`）。
+  按 `mtime+size` 增量，单篇失败记 `skipped` 继续；`refs:build` 推 `refs:progress`，
+  `refs:search` / `refs:status` 是同步小结果。**全文索引只取前几页，搜不到参考文献**，
+  两套索引不要合并，也不要去改 `fulltext.ts` 的格式。
+- 首次选 `references` 且索引为空时自动建一次，渲染层查询按 250ms 防抖；
+  `buildRefsIndex` 的 IPC 是长任务，进度必须显示，别让一次等待看起来像卡死。
+- 范围目前是**会话内状态**，没有写进 `SavedSearch` / `AppConfig`。要持久化时
+  `SavedSearch.scope` 必须可选并兼容旧配置（照 `s.filters?.filter(` 的写法），
+  且别动冒烟锁住的 `filters: [...filters]` / `savedSearchMatches(` 等源码串。
 
 ---
 

@@ -16,6 +16,7 @@ import { findDuplicates } from '../lib/dupes'
 import { parseAny, type Entry } from '../lib/import'
 import type { ColKey, SortKey } from '../lib/columns'
 import type { ListFilter } from '../lib/filters'
+import { SCOPE_LABEL, SEARCH_SCOPES, type SearchScope } from '../lib/searchScope'
 import { LIBRARY, type View } from '../lib/view'
 import { updateLine } from '../lib/updateText'
 
@@ -66,6 +67,10 @@ interface Props {
   onView: (v: View) => void
   query: string
   onQuery: (q: string) => void
+  /** Which fields this search is limited to. A native select, not a card:
+   *  it adds no second input to the bar and no layer to the Esc stack. */
+  scope: SearchScope
+  onScope: (s: SearchScope) => void
   ftQuery: string
   onFtQuery: (q: string) => void
   /** End the search: empty the box and come back out of full-text mode.
@@ -418,6 +423,19 @@ export default function Toolbar(p: Props) {
       {/* the box and its × are one flex item on purpose: two of them would add
           a gap of their own and push the buttons at the far end of the bar */}
       <div className="search-wrap">
+        <select
+          className="scope-select"
+          value={p.scope}
+          onChange={(e) => p.onScope(e.target.value as SearchScope)}
+          title="选择这次搜索只查哪个范围"
+          aria-label="搜索范围"
+        >
+          {SEARCH_SCOPES.map((s) => (
+            <option key={s} value={s}>
+              {SCOPE_LABEL[s]}
+            </option>
+          ))}
+        </select>
         <input
           className="search"
           ref={p.searchRef}

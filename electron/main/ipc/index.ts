@@ -2,6 +2,7 @@ import { registerDocsIpc } from './docs'
 import { registerFilesIpc } from './files'
 import { registerLibraryIpc } from './library'
 import { registerMarksIpc } from './marks'
+import { registerRefsIpc } from './refs'
 import { registerSystemIpc } from './system'
 
 /**
@@ -23,6 +24,7 @@ export function registerIpc() {
   registerSystemIpc()
   registerDocsIpc()
   registerMarksIpc()
+  registerRefsIpc()
   registerFilesIpc()
 }
 
