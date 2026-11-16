@@ -405,7 +405,7 @@ export class Mendeley {
  *  while the next launch still returned the older userData token first, so
  *  the new token never took effect and nothing said why.  The override is now
  *  both the first place looked and the only place written. */
-export function tokenDest(): string {
+function tokenDest(): string {
   return process.env.MENDELEY_TOKEN_PATH ||
     path.join(app.getPath('userData'), 'token.json')
 }

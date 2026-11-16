@@ -10,23 +10,17 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+import { root, electronBin, cleanEnv, propagateExit } from './_shared.mjs'
 
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'))
-const bin = process.platform === 'win32'
-  ? path.join(root, 'node_modules/electron/dist/electron.exe')
-  : path.join(root, 'node_modules/electron/dist/electron')
+const bin = electronBin()
 
 if (!fs.existsSync(path.join(root, 'out/main/index.js'))) {
   console.error('out/ 不存在，先跑 npm run build')
   process.exit(1)
 }
 
-const env = { ...process.env }
-delete env.ELECTRON_RUN_AS_NODE
-delete env.NODE_OPTIONS
+const env = cleanEnv()
 
 // A smoke run must not spend four minutes reading every PDF, and must not
 // touch the real full-text index, so it gets its own throwaway one and a
@@ -41,5 +35,5 @@ if (process.argv.includes('--smoke')) {
 
 const args = [root, ...process.argv.slice(2)]
 const child = spawn(bin, args, { stdio: 'inherit', env, cwd: root })
-child.on('close', (code) => process.exit(code ?? 0))
+propagateExit(child)
 console.error('launching', path.basename(bin), pkg.version)

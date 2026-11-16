@@ -75,12 +75,13 @@ EndNote XML）、笔记、标注和 PDF 写进一个文件夹，附一份说明�
 
 ```bash
 npm install
-npm run build      # 产出 out/
-npm start          # 启动
-npm run dev        # 热重载开发
-npm test           # 纯 Node 单元测试
-npm run typecheck  # main/preload 与 renderer 双侧类型检查
-npm run dist       # 打包 Windows NSIS 安装包
+npm run build         # 产出 out/
+npm run verify:build  # 校验 out/ 产物（CI 与 release 共用同一份脚本）
+npm start             # 启动
+npm run dev           # 热重载开发
+npm test              # 纯 Node 单元测试
+npm run typecheck     # main/preload 与 renderer 双侧类型检查
+npm run dist          # 打包 Windows NSIS 安装包
 ```
 
 `npm start` 走的是 `scripts/start.mjs` 而不是直接 `electron .`：某些 shell
@@ -247,7 +248,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 复制引文 | 六种样式（作者（年份）/ 全作者 / 编号 / 完整条目 / BibTeX key / BibTeX 条目），Ctrl+Shift+C |
 | 检查更新 | 一键从 GitHub Releases 拉新版、下载、安装并重启 |
 | 安装包签名 | CI 已接好，配上证书即签名；`npm run signcheck` 可自查是否签上 |
-| 提交前检查 | 每次 push / PR 由 `.github/workflows/ci.yml` 依次跑 `npm run typecheck`、`npm test`、`npm run build`；打 tag 打包前另有一道同样的类型与单测门禁；`npm run smoke` 要真实库和可见窗口，只在本地跑 |
+| 提交前检查 | 每次 push / PR 由 `.github/workflows/ci.yml` 依次跑 `npm run typecheck`、`npm test`、`npm run build`、`npm run verify:build`；打 tag 打包前另有一道同样的类型与单测门禁；两份 workflow 的产物校验共用 `scripts/verify-build.mjs`，不会各写一份而漂移；`npm run smoke` 要真实库和可见窗口，只在本地跑 |
 
 ### 附带（保留，但不占工具栏主位）
 
@@ -306,17 +307,23 @@ src/
   lib/configWrite.ts       渲染层所有配置写入的统一入口
 shared/                    三端共享：类型、规则常量、原子写、安全策略、分页与队列
   pathPolicy.ts            协议白名单、导出路径、外链与配置输入的校验规则
-tests/                     Vitest 单测：shared 规则 / 渲染层纯函数 / 安全边界
-scripts/                   启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
+tests/                     Vitest 单测：shared 规则 / 渲染层纯函数 / 安全边界 / 重构差分
+scripts/
+  _shared.mjs              脚本共用：仓库根、Electron 路径、环境清理、UA
+  verify-build.mjs         产物校验（ci.yml 与 release.yml 共用这一份）
+  ...                      启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
 docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
+analysis/                  四角度深度分析：架构实现 / 演化 / 第一性原理与巧思（各含 md + 自包含 html）
 .github/workflows/
-  ci.yml                   每次 push / PR 跑 typecheck + test + build
+  ci.yml                   每次 push / PR 跑 typecheck + test + build + verify:build
   release.yml              推 v* tag 时先验 typecheck + test，再构建安装包并挂到 Release
 vitest.config.ts           单测只收 tests/**/*.test.ts，环境为 node
 electron.vite.config.ts    main / preload / renderer 三段构建配置
 ```
 
-完整的分层说明在 HANDOFF 第 3 节。这棵树的用途是让人一眼看出
+完整的分层说明在 HANDOFF 第 3 节；想读带代码证据的架构、演化史与第一性原理推导，
+看 `analysis/` 下的三份报告（各有 Markdown 与可直接双击打开的自包含 HTML）。
+这棵树的用途是让人一眼看出
 **哪一层能改状态、哪一层只是纯规则**——纯规则层不碰 React / DOM，
 所以单测和冒烟都能直接喂假时钟、手控 promise 去测它。
 
@@ -407,6 +414,7 @@ cp scripts/hooks/post-commit .git/hooks/post-commit && chmod +x .git/hooks/post-
 npm test                   # 纯 Node 单元测试：shared 规则、渲染层纯函数、安全边界
 npm run typecheck          # 双侧类型检查；npx tsc --noEmit 跑的是空配置，不算
 npm run build              # 先构建：smoke 不替你构建，跑的是 out/ 里那一版
+npm run verify:build       # 校验 out/：chunk 可解析、worker 在、index.js 引用的 chunk 在
 npm run smoke              # 真实库 + 真实 PDF 的端到端自检
 npm run smoke -- --no-sync # 用本地缓存，跳过同步
 ```
@@ -415,9 +423,11 @@ npm run smoke -- --no-sync # 用本地缓存，跳过同步
 所以它能进 CI，也是那些被主进程和渲染层共用的纯规则唯一的自动化回归。
 `npm run typecheck` 是唯一真正做类型检查的入口：根 `tsconfig.json` 是 `files: []` +
 `references`，`npx tsc --noEmit` 等于跑空。`.github/workflows/ci.yml` 会在每次
-push / PR 依次跑 `typecheck`、`test` 和 `build`，`release.yml` 在打包前也补了前两道——
-tag 可以指向任意提交，不能假定它走过 CI。**冒烟仍不放进 CI**——它要开真实窗口读真实库
-和 PDF，还量按键那一帧的主线程耗时，托管 runner 给不出诚实的答案。
+push / PR 依次跑 `typecheck`、`test`、`build` 和 `verify:build`，`release.yml` 在打包前也补了
+前两道与同一道产物校验——tag 可以指向任意提交，不能假定它走过 CI。产物校验是
+`scripts/verify-build.mjs` 一份脚本，两个 workflow 都只调它；本地 `npm run verify:build`
+跑的是同一段逻辑。**冒烟仍不放进 CI**——它要开真实窗口读真实库和 PDF，还量按键那一帧
+的主线程耗时，托管 runner 给不出诚实的答案。
 
 `--smoke` 跑的是**真实库和真实 PDF**：拉库、开隐藏窗口、逐条断言，日志用
 `[smoke] PASS` / `[smoke] FAIL` 打点，最后一行出现 `all checks passed` 才算过。

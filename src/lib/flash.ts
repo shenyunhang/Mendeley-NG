@@ -30,7 +30,7 @@ export interface FlashClock {
   clear: (handle: unknown) => void
 }
 
-export const realClock: FlashClock = {
+const realClock: FlashClock = {
   set: (fn, ms) => setTimeout(fn, ms),
   clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>)
 }

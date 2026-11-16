@@ -12,7 +12,7 @@ import { mergeRectsIntoLines } from './rectLines'
  */
 
 /** Rects covering the current browser selection, in 0..1 page coordinates. */
-export function rectsInLayer(layer: HTMLElement): Rect[] {
+function rectsInLayer(layer: HTMLElement): Rect[] {
   const sel = window.getSelection()
   if (!layer || !sel || sel.isCollapsed || !sel.rangeCount) return []
   const box = layer.getBoundingClientRect()

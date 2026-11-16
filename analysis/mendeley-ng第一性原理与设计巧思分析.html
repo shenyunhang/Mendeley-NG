@@ -1,0 +1,355 @@
+<!doctype html>
+
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mendeley NG 第一性原理与设计巧思分析</title>
+<style>
+:root{
+  --bg:#f3f5f4; --surface:#ffffff; --surface-subtle:#f7f8f7;
+  --ink:#17201c; --muted:#68736d; --line:#dfe4e1; --line-strong:#cbd3ce;
+  --green:#156b4a; --green-dark:#0e5238; --green-soft:#e7f2ec;
+  --red:#b83b35; --red-soft:#f8e9e7; --amber:#9a6418; --amber-soft:#f8eedc;
+  --blue:#356a91; --blue-soft:#e7eff5;
+  --code-bg:#0f1a16; --code-ink:#d9e6df;
+  --mono:ui-monospace,SFMono-Regular,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  color:var(--ink); background:var(--bg);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;line-height:1.7;font-size:15px}
+a{color:var(--green);text-decoration:none}
+a:hover{text-decoration:underline}
+.layout{display:grid;grid-template-columns:250px minmax(0,1fr);min-height:100vh}
+/* ---------- 侧边 TOC ---------- */
+.toc{position:sticky;top:0;height:100vh;overflow-y:auto;background:#17231e;color:#edf4f0;padding:22px 16px;border-right:1px solid #25362e}
+.toc .brand{display:flex;align-items:center;gap:11px;padding:0 6px 22px}
+.toc .brand-mark{display:grid;place-items:center;width:38px;height:38px;background:#e7f2ec;color:var(--green-dark);font-weight:800;border-radius:8px;font-size:12px;letter-spacing:.5px}
+.toc .brand strong{display:block;font-size:14px}
+.toc .brand span{display:block;margin-top:2px;color:#97a89f;font-size:11px}
+.toc nav{display:grid;gap:2px}
+.toc a{display:block;padding:7px 10px;border-radius:6px;color:#aebdb5;font-size:13px;border-left:2px solid transparent;transition:.15s}
+.toc a:hover{color:#fff;background:rgba(255,255,255,.06);text-decoration:none}
+.toc a.active{color:#fff;background:#274337;border-left-color:#4fbf8d}
+.toc a.l2{padding-left:24px;font-size:12.5px;color:#8fa29a}
+.toc .toc-label{padding:14px 10px 6px;font-size:10.5px;letter-spacing:1.5px;color:#6f8379;text-transform:uppercase}
+main{min-width:0}
+/* ---------- Hero ---------- */
+.hero{background:linear-gradient(135deg,#0e5238 0%,#14573f 45%,#1d3b30 100%);color:#edf4f0;padding:56px 0 44px}
+.hero .wrap{max-width:940px;margin:0 auto;padding:0 32px}
+.hero .kicker{display:inline-flex;align-items:center;gap:8px;font-size:12px;letter-spacing:2px;color:#9dcdb6;text-transform:uppercase;font-weight:600}
+.hero .kicker::before{content:"";width:26px;height:2px;background:#4fbf8d}
+.hero h1{margin:14px 0 10px;font-size:32px;line-height:1.25}
+.hero p{margin:0;color:#b9c9c1;max-width:74ch;font-size:15px}
+.hero .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}
+.hero .chip{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);padding:6px 12px;border-radius:999px;font-size:12px;color:#d8e5de}
+.hero .chip b{color:#fff;font-weight:600}
+.hero .conclusion{margin-top:24px;padding:16px 18px;border-radius:10px;background:rgba(255,255,255,.07);border-left:3px solid #4fbf8d;font-size:14px;color:#cfe0d7}
+/* ---------- 正文 ---------- */
+.content{max-width:940px;margin:0 auto;padding:48px 32px 90px}
+section{margin-top:52px}
+section:first-child{margin-top:0}
+h2{font-size:24px;margin:0 0 6px;display:flex;align-items:center;gap:12px}
+h2 .sec-no{font-size:13px;font-weight:700;color:#fff;background:var(--green);width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none}
+h3{font-size:17.5px;margin:34px 0 10px;color:#14352a}
+h4{font-size:15px;margin:22px 0 8px;color:#0e5238}
+p{margin:10px 0;color:#2c3731}
+.lead{border-left:3px solid var(--green);padding:10px 16px;background:var(--green-soft);border-radius:0 8px 8px 0;font-size:14.5px;color:#173b2d;margin:14px 0}
+/* ---------- 代码框 ---------- */
+.codebox{margin:16px 0;border-radius:10px;overflow:hidden;border:1px solid #1c2d25;background:var(--code-bg);box-shadow:0 6px 18px rgba(20,40,32,.12)}
+.codebox .bar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:#14221c;border-bottom:1px solid #22352c;color:#7f9a8e;font-size:11.5px}
+.codebox .bar .dot{width:9px;height:9px;border-radius:50%}
+.codebox .bar .dot:nth-child(1){background:#f0635c}.codebox .bar .dot:nth-child(2){background:#e2b25c}.codebox .bar .dot:nth-child(3){background:#5fc98a}
+.codebox .bar .fname{margin-left:6px;font-family:var(--mono);color:#9fb6ab}
+.codebox pre{margin:0;padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:12.8px;line-height:1.65;color:var(--code-ink)}
+.codebox pre code{font-family:inherit;background:none;color:inherit;padding:0}
+.tok-c{color:#6d8a7e;font-style:italic}
+.tok-s{color:#e6c97a}
+.tok-k{color:#7fd6a8;font-weight:600}
+.tok-n{color:#86c5e8}
+.tok-f{color:#d9a7f0}
+.tok-p{color:#c88fd8}
+/* ---------- 表格 ---------- */
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px;background:var(--surface);border-radius:10px;overflow:hidden;box-shadow:0 2px 10px rgba(28,41,34,.06)}
+th{background:#eef3f0;color:#24402f;text-align:left;padding:10px 14px;font-size:12.5px;letter-spacing:.3px;border-bottom:1px solid var(--line)}
+td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td code,li code,p code{font-family:var(--mono);font-size:12px;background:#e9efec;border:1px solid #dbe2de;border-radius:5px;padding:1.5px 6px;color:#0e5238}
+/* ---------- 卡片 / Callout ---------- */
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:16px 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:0 2px 10px rgba(28,41,34,.05)}
+.card h4{margin:0 0 8px}
+.card p{margin:6px 0;font-size:13.5px}
+.card .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.5px;padding:3px 9px;border-radius:999px;margin-bottom:8px}
+.callout{border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;border:1px solid}
+.callout.info{background:var(--blue-soft);border-color:#c9dbe8;color:#234a66}
+.callout.warn{background:var(--amber-soft);border-color:#e8d9b8;color:#6d4712}
+.callout.ok{background:var(--green-soft);border-color:#c4e0d1;color:#14543a}
+.callout.red{background:var(--red-soft);border-color:#ecc9c6;color:#7c2b27}
+.callout .t{font-weight:700;display:block;margin-bottom:4px}
+/* ---------- 分层图 ---------- */
+.layers{display:grid;gap:0;margin:20px 0;border:1px solid var(--line-strong);border-radius:14px;overflow:hidden;background:var(--surface)}
+.layer{padding:16px 20px;border-top:1px solid var(--line)}
+.layer:first-child{border-top:none}
+.layer .lname{font-weight:700;font-size:15px;display:flex;align-items:center;gap:10px}
+.layer .lname .badge{font-size:10.5px;font-weight:800;letter-spacing:1px;padding:3px 8px;border-radius:6px}
+.layer .ldesc{font-size:13px;color:var(--muted);margin-top:4px}
+.layer .lfiles{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.layer .lfiles span{font-family:var(--mono);font-size:11.5px;background:#f0f3f1;border:1px solid var(--line);border-radius:6px;padding:3px 8px;color:#33453c}
+.l-base{background:#e7f2ec}.l-domain{background:#fff}.l-agent{background:#e7eff5}
+.badge-base{background:#c4e0d1;color:#14543a}.badge-domain{background:#e8d9b8;color:#6d4712}.badge-agent{background:#c9dbe8;color:#234a66}
+/* ---------- 流程图 ---------- */
+.flow{display:grid;gap:10px;margin:18px 0}
+.flow .step{display:grid;grid-template-columns:46px 1fr auto;gap:14px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.flow .idx{width:46px;height:46px;border-radius:11px;display:grid;place-items:center;font-weight:800;font-size:16px;color:#fff}
+.flow .step .st{font-weight:700;font-size:14px}
+.flow .step .sd{font-size:12.8px;color:var(--muted)}
+.flow .side{font-family:var(--mono);font-size:11px;color:#3f5249;background:#eef2ef;border-radius:7px;padding:4px 9px;white-space:nowrap}
+.flow .join{text-align:center;color:var(--green);font-weight:700;font-size:13px;letter-spacing:3px}
+/* ---------- 时间线 ---------- */
+.master-tl{position:relative;margin:24px 0;padding-left:34px}
+.master-tl::before{content:"";position:absolute;left:13px;top:8px;bottom:8px;width:3px;background:linear-gradient(#156b4a,#356a91)}
+.master-tl .mt{position:relative;margin:0 0 14px}
+.master-tl .mt .dot{position:absolute;left:-32px;top:8px;width:15px;height:15px;border-radius:50%;background:#fff;border:3px solid var(--green)}
+.master-tl .mt .ph{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.master-tl .mt .ph .badge{font-size:11px;font-weight:800;letter-spacing:1px;padding:3px 10px;border-radius:6px}
+.master-tl .mt .ph .date{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.master-tl .mt .ph .commit{font-family:var(--mono);font-size:11.5px;color:#4a5c53;background:#eef2ef;border-radius:6px;padding:2px 8px}
+.master-tl .mt .ph .title{font-weight:700;font-size:15px}
+.master-tl .mt .desc{font-size:13px;color:#3a4a42;margin-top:3px}
+.b-a{background:#e7f2ec;color:#14543a}.b-b{background:#dcefe4;color:#14543a}.b-c{background:#f8eedc;color:#6d4712}
+.b-d{background:#f3e8c9;color:#6d4712}.b-e{background:#e7eff5;color:#234a66}.b-f{background:#e8d9b8;color:#6d4712}
+.b-g{background:#c9dbe8;color:#234a66}.b-h{background:#d9c9e8;color:#4a2a66}
+/* ---------- 巧思可折叠卡 ---------- */
+.clever{display:grid;gap:14px;margin:14px 0}
+.cv{background:var(--surface);border:1px solid var(--line);border-radius:13px;overflow:hidden;box-shadow:0 2px 10px rgba(28,41,34,.05)}
+.cv .cv-h{display:grid;grid-template-columns:44px 1fr auto;gap:14px;align-items:center;padding:13px 18px;background:#fafbfa;border-bottom:1px solid var(--line);cursor:pointer;user-select:none}
+.cv .cv-n{width:44px;height:44px;border-radius:11px;display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff}
+.cv .cv-t{font-weight:800;font-size:14.5px;line-height:1.4}
+.cv .cv-f{font-family:var(--mono);font-size:11px;color:var(--muted);background:#eef2ef;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.cv .cv-b{display:none;padding:6px 18px 16px}
+.cv.open .cv-b{display:block}
+.cv .cv-b p{font-size:13.6px;color:#33423b}
+.cv .cv-b .why{margin-top:10px;padding:10px 14px;border-radius:9px;background:var(--green-soft);border-left:3px solid var(--green);font-size:13px;color:#173b2d}
+.cv .toggle{color:var(--muted);font-size:18px;transition:.2s}
+.cv.open .toggle{transform:rotate(45deg)}
+/* ---------- 双栏 / 列表 / 响应式 ---------- */
+.dual{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}
+.check li{margin:6px 0;list-style:none;padding-left:28px;position:relative}
+.check li::before{content:"✓";position:absolute;left:2px;top:0;color:var(--green);font-weight:800}
+@media(max-width:860px){
+  .layout{grid-template-columns:1fr}
+  .toc{display:none}
+  .hero h1{font-size:25px}
+  .dual{grid-template-columns:1fr}
+  .cv .cv-h{grid-template-columns:40px 1fr}
+  .cv .cv-f{display:none}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="brand">
+      <div class="brand-mark">NG</div>
+      <div><strong>第一性原理与巧思</strong><span>Mendeley NG · 报告三</span></div>
+    </div>
+    <nav id="tocNav"></nav>
+  </aside>
+
+  <main>
+    <header class="hero">
+      <div class="wrap">
+        <div class="kicker">Analysis · 第一性原理</div>
+        <h1>Mendeley NG 第一性原理与设计巧思分析</h1>
+        <p>回到不可再分的基本事实，推导哪些设计是必然的；逐层深挖 14 项巧思并解释「为什么必然」。</p>
+        <div class="meta">
+          <span class="chip">分析对象 <b>D:/mendeley-ng</b></span>
+          <span class="chip">分析日期 <b>2026-11-16</b></span>
+          <span class="chip">方法 <b>基本事实 → 必然设计 → 代码证据</b></span>
+        </div>
+        <div class="conclusion"><b>结论先行：</b>根本问题是「一个终将失效的外部服务，要持续喂养一份必须永远可读、可搜、可带走的本地库」。四条基本事实几乎逐条决定了代码形状；14 项巧思覆盖 5 层，把它们在表示、写入、审计、解释、演化五个维度上解到可执行。</div>
+      </div>
+    </header>
+
+    <div class="content">
+<section id="p1"><h2><span class="sec-no">1</span>根本问题与四条基本事实</h2><div class="callout info"><span class="t">根本问题（一句话）</span><b>一个终将失效的外部服务（Mendeley API / 被冻结的 1.19.8 客户端），要可靠地喂养一份必须永远可读、可搜、可带走的本地文献库。</b> <code>README.md:10-27</code>：云端是同步源不是宿主；API 关掉、token 过期或断网时屏幕上的库照常能用，但也诚实承认「暂时仍要依赖它的 API」。这个「既依赖又不能依赖」的张力是所有设计的来源。</div><div class="grid2"><div class="card"><span class="tag">基本事实</span><h4>A · 本体论 / 工程论：磁盘是唯一真相</h4><p>状态必须能从磁盘重新推导，进程内快照一律不可信。<br><b>推翻：</b>「同步 = 用云端答案覆盖本地缓存」「把配置/阅读位置缓存在闭包里省一次读」。外部还有第二个窗口、恢复流程、手改文件。</p></div><div class="card"><span class="tag">基本事实</span><h4>B · 认知论：跨 IPC 一切都是输入</h4><p>危险集合不是可枚举的清单。<br><b>推翻：</b>「开了 contextIsolation 就安全」「列出 file:/javascript: 过滤掉就行」——隔离的是代码，不是载荷。</p></div><div class="card"><span class="tag">基本事实</span><h4>C · 工程论：PDF 文本昂贵且有损</h4><p>offset 必须与它描述的文本在同一份、同一次写里度量。<br><b>推翻：</b>「用文件字节偏移就行」「先 lowercase 再算长度无妨」。一个汉字 3 字节但 1 个 code unit；İ 小写后变成两个 code unit。</p></div><div class="card"><span class="tag">基本事实</span><h4>D · 认知论 / 时间：异步结果属于出发时的世界</h4><p>promise 不可取消，作废只能靠「归属标记 + 代次」。<br><b>推翻：</b>「clearTimeout 就取消了请求」「把 state 清空就等于取消」「值没变就说明答案还有效」。</p></div></div><div class="callout warn"><span class="t">事实验证</span><code>e419fda</code> 提交信息是 B 的原始表述；<code>HANDOFF.md:266-269</code> 记 A 的事故（阅读位置缓存让 load 与 set 答案不一致）；<code>fulltext.ts:575-577</code> 记 C 的 U+0130；<code>viewGeneration.ts:23-32</code> 用 <code>generation++</code> 而非值比较实现 D。</div></section>
+<section id="p2"><h2><span class="sec-no">2</span>从基本事实推导必然设计</h2><table><thead><tr><th>推导</th><th>必然出现的机制</th><th>代码证据</th></tr></thead><tbody><tr><td>A：云端答案只是提议 → 必须有一层裁决 → 写盘前重读磁盘</td><td><code>reconcileSyncWrite</code> 四快照 + <code>syncQueue</code> + <code>saveConfig({...loadConfig()})</code></td><td><code>libraryReconcile.ts:24-29</code>、<code>library.ts:103-116</code></td></tr><tr><td>B：载荷不可信 → 白名单而非黑名单 → 新增字段强制审查</td><td><code>pathPolicy</code> 四函数 + <code>satisfies Record&lt;keyof AppConfig,true&gt;</code> + <code>const api: Api</code></td><td><code>pathPolicy.ts:109-174</code>、<code>preload/index.ts:22</code></td></tr><tr><td>C：抽取昂贵 → 增量、可中断、可续跑 → 索引必须自描述</td><td><code>bytes</code> 锚点 + truncate 与 entry 表同次落盘 + mtime/size + checkpoint</td><td><code>fulltext.ts:515-521</code>、<code>refsindex.ts:303-326</code></td></tr><tr><td>D：结果不可取消 → 每个答案贴标签 → 作废只推进代次</td><td><code>documentScope</code> / <code>latestSearch</code> / <code>pdfcache</code> 三套代次 + StaleFlight</td><td><code>documentScope.ts:62-70</code>、<code>pdfcache.ts:90-103</code></td></tr><tr><td>A+C：本地库必须能整体带走 → 每类数据都要通用格式出口</td><td>「带走整个库」一次写书目/笔记/标注/PDF + 说明文件</td><td><code>export.ts:98-110</code>：笔记是本库唯一无处可去的数据</td></tr></tbody></table><div class="callout ok"><span class="t">检验标准</span>一个设计若不服务 A/B/C/D 之一，就是装饰。按这把尺子，项目里几乎所有「反常」写法（不用 SQLite 而用五个 JSON、索引不原地覆盖而追加、宁可多读一次盘也不缓存）都能找到归属；真正属于债的部分被 <code>HANDOFF.md</code> 主动登记为待拆区间。</div></section>
+<section id="p3"><h2><span class="sec-no">3</span>代码巧思全景（14 项，覆盖 5 层）</h2><p class="lead">点击每张卡片展开代码证据与「为什么必然」。全部代码片段逐字抄自仓库。</p><h3>层一 · 存储 / 持久化层</h3><div class="clever"><div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--green)">1</span><span class="cv-t">四快照三方裁决：云端答案只是「提议」</span><span class="cv-f">shared/libraryReconcile.ts:24-29,50-57</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">shared/libraryReconcile.ts:24-29,50-57</span></div><pre><code data-lang="ts">export interface SyncReconcile&lt;T extends { id: string }&gt; {
+  started: T[]        // 拉取开始时的缓存
+  proposed: T[]       // 拉取算出的答案
+  current: T[] | null // 写盘前重读的文件
+  trashedIds: Set&lt;string&gt;
+}
+// 字段级三方合并：本地改过、云端没改的字段归本地
+if (!same(ov, bv) &amp;&amp; same(tv, bv)) out[key] = ov</code></pre></div><p>一次拉取可跑数分钟，期间用户打星标、改文件夹、移入回收站、导入 PDF。裁决保证在途本地编辑不被覆盖、已删除的不复活、本地新增的不被云端答案丢掉。</p><div class="why"><b>为什么必然：</b>服务事实 A。云端是同步源不是宿主，它的回答<b>没有资格</b>直接写盘；只有把 <code>current</code> 也纳入输入，磁盘事实才有一票。<code>2d4757c</code> 的「回收站论文复活」证明省略会真的丢数据。</div></div></div><div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--green)">2</span><span class="cv-t">flag:'wx' 把「判空」与「占名」合成一次原子操作</span><span class="cv-f">shared/uniquePdfPath.ts:42-47</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">shared/uniquePdfPath.ts:42-47</span></div><pre><code data-lang="ts">for (const candidate of pdfCandidates(dir, wanted)) {
+  try {
+    fs.writeFileSync(candidate, buf, { flag: 'wx' })
+    return candidate
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e</code></pre></div><p>导入 PDF 自动取 <code> (2).pdf</code>，不覆盖先到的那篇；只有 EEXIST 才试下一个，其它错误交调用方。</p><div class="why"><b>为什么必然：</b>服务事实 A。本地 PDF 是不可重建的资产（云端附件可再下载）。<code>existsSync</code> + <code>writeFileSync</code> 两步会让两个并发导入同时通过检查——这是「进程内快照不可信」在文件系统上的版本。</div></div></div><div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--green)">3</span><span class="cv-t">tmp + rename 原子写，并把例外写进约定</span><span class="cv-f">shared/atomicJson.ts:7-11</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">shared/atomicJson.ts:7-11</span></div><pre><code data-lang="ts">export function atomicWriteJson(file: string, value: unknown, space?: number | string) {
+  const tmp = file + '.tmp'
+  fs.writeFileSync(tmp, JSON.stringify(value, null, space), 'utf-8')
+  fs.renameSync(tmp, file)
+}</code></pre></div><p>进程写到一半被杀只留旧的完整文件。<code>token.json</code> 与 <code>saveConfig</code> 是<b>刻意例外</b>：前者 rename 会丢 inode 权限，后者受 <code>smoke.ts:11402-11404</code> 源码串断言守护。</p><div class="why"><b>为什么必然：</b>服务事实 A。原子写是「磁盘事实可信」的最低门槛；显式登记例外并用断言锁住，等于承认没有一条规则能覆盖全部场景，同时不让例外变成无人知晓的旁路。</div></div></div><div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--green)">4</span><span class="cv-t">没有 schema 版本，但用「结构失败即无缓存」挡住损坏</span><span class="cv-f">electron/main/store.ts + HANDOFF.md:701</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">electron/main/store.ts + HANDOFF.md:701</span></div><pre><code data-lang="ts">// 五个 JSON：library / annotations / config / notes / reading
+// 结构校验失败一律当成「无缓存」，随后一次完整同步重建</code></pre></div><p>读到不认识的结构不猜、不修，直接当作没缓存。代价是损坏现场零保留。</p><div class="why"><b>为什么必然：</b>服务事实 A，且是<b>诚实的取舍</b>：比「尽力解析半份缓存然后写回一份更错的」更符合「状态不撒谎」。<code>HANDOFF.md</code> 主动把这条登记为限制而非遗漏。</div></div></div></div><h3>层二 · 协议与信任边界层</h3><div class="clever"><div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--blue)">5</span><span class="cv-t">satisfies 让「忘了决定」变成编译错误</span><span class="cv-f">shared/pathPolicy.ts:103-130,149-174</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">shared/pathPolicy.ts:103-130,149-174</span></div><pre><code data-lang="ts">} satisfies Record&lt;keyof AppConfig, true&gt;
+const FORBIDDEN = new Set(['__proto__', 'constructor', 'prototype'])
+export function safeConfigPatch(raw: unknown): Partial&lt;AppConfig&gt; {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  for (const key of Object.keys(raw)) {
+    if (FORBIDDEN.has(key) || !(key in CONFIG_KEYS)) continue</code></pre></div><p><code>config:set</code> 只接受白名单键与类型；未知键、__proto__ 类键、非有限数值、非法 theme 一律丢弃。新增配置字段却没决定是否可写，是<b>类型错误</b>而不是静默忽略。</p><div class="why"><b>为什么必然：</b>服务事实 B。黑名单永远追不上新危险，白名单 + 编译期穷尽检查把「漏审」从运行时事故前移成构建失败——全项目最漂亮的一条「用类型系统守住自己」。</div></div></div><div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--blue)">6</span><span class="cv-t">只放行 http/https，并整批拒绝越界路径</span><span class="cv-f">shared/pathPolicy.ts:49-56,62-70,87-100</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">shared/pathPolicy.ts:49-56,62-70,87-100</span></div><pre><code data-lang="ts">if (p.isAbsolute(rel) || p.parse(rel).root) return null
+const joined = p.resolve(root, rel)
+return isPathWithin(root, joined, platform) ? joined : null</code></pre></div><p><code>export:leave</code> 的每个 name / to 先解析到所选目录内，任一越界<b>整批拒绝</b>；<code>../</code>、绝对路径、盘符相对、UNC、NUL 全拒收。<code>canServePdf</code> 只服务 pdfDir 根内或已登记附件。</p><div class="why"><b>为什么必然：</b>服务事实 B，且平台参数可注入（<code>platform = host()</code>），使 Windows 大小写/反斜杠语义能在任意 runner 被 49 个安全用例穷举——<b>可信性本身也要可验证</b>。</div></div></div><div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--blue)">7</span><span class="cv-t">唯一 Api 契约 + 显式类型注解，而不是 satisfies</span><span class="cv-f">preload/index.ts:17-23,219-223</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">preload/index.ts:17-23,219-223</span></div><pre><code data-lang="ts">/** `satisfies` would allow extra methods to appear here without the
+ *  renderer ever hearing about them, so the annotation is explicit. */
+const api: Api = {
+  loadLibrary: () =&gt; ipcRenderer.invoke('library:load') as Promise&lt;Library | …&gt;,
+…
+contextBridge.exposeInMainWorld('api', api)
+export type { Api }</code></pre></div><p>64 个方法全部带 <code>as Promise&lt;T&gt;</code>；contextBridge 只暴露一个 api 对象，ipcRenderer 从不外泄；<code>window.d.ts</code> 单独放 declare global。</p><div class="why"><b>为什么必然：</b>服务事实 B + A 的「一份规则」推论。历史两份手写 Api 已漂移过（openExternal: void vs Promise）；显式注解连「多出一个方法」都拦住，而 satisfies 不会。</div></div></div><div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--blue)">8</span><span class="cv-t">具名失败两道门，空 catch 无法伪装成决定</span><span class="cv-f">shared/failures.ts:24-37,48-83</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">shared/failures.ts:24-37,48-83</span></div><pre><code data-lang="ts">export function ignoreFailure(reason: FailureReason, _error?: unknown): void {
+  tally(reason, 'ignored')
+}
+export function reportFailure(reason: FailureReason, _error?: unknown): void {
+  tally(reason, 'reported')
+  if (sink) sink(reason, 'reported')
+  else console.warn('[mendeley-ng] ' + reason)
+}</code></pre></div><p>ignoreFailure 用于可选读/清理，reportFailure 用于「本地已成功但副作用没落盘」；两者都计数，后者可见，FailureReason 是字面量联合类型。</p><div class="why"><b>为什么必然：</b>服务事实 A（本地成功、云写失败不能假装无事）+ B（调用点不能自己发明静默失败）。<code>sink</code> 让冒烟能审计「这一轮吞了哪些失败」。</div></div></div></div><h3>层三 · 索引 / 度量层</h3><div class="clever"><div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--amber)">9</span><span class="cv-t">at 与 byteAt 双锚点，m.bytes 与 entry 表同次落盘</span><span class="cv-f">electron/main/fulltext.ts:137-148,506-521</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">electron/main/fulltext.ts:137-148,506-521</span></div><pre><code data-lang="ts"> * Offsets in the table are counted in UTF-16 code units and the file is
+ * measured in bytes, and the two are not convertible without reading the
+ * whole thing — one Chinese character is three bytes but one code unit.
+const next = { at: anchor.at + g.text.length, byteAt: anchor.byteAt + buf.length }
+m.bytes = next.byteAt</code></pre></div><p>索引是<b>追加 + 改指向</b>，不原地覆盖；truncate 到 fresh.bytes 与空 entry 表在同一次 saveMeta 落地，回收上次中断留下的「已写未登记」文本。</p><div class="why"><b>为什么必然：</b>服务事实 C，且是最硬的一条。若把 code unit 当字节用，<code>docAt</code> 二分查找会把命中归到别人的论文上——<b>索引错了比没有索引更糟</b>（HANDOFF.md:425）。</div></div></div><div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--amber)">10</span><span class="cv-t">作废原因分 format/budget，busy 时用 deferred</span><span class="cv-f">electron/main/fulltext.ts:95-106,303-308,854</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">electron/main/fulltext.ts:95-106,303-308,854</span></div><pre><code data-lang="ts">if (busy) { deferred = 'budget'; return true }
+voided = m.version === 2 &amp;&amp; m.pages !== pages ? 'budget' : 'format'
+if (busy) {
+  for (const d of want) if (!pending.some((p) =&gt; p.id === d.id)) pending.push(d)
+  return 0
+}</code></pre></div><p>运行中改页数/清空不能立刻替换模块级 meta（否则六分钟跑完却报「从未建过」），改为 finally 里 applyDeferred()；并发 build/append 会写到同一 offset，故用 busy 闸门 + pending 队列，两个 finally 都 drain。</p><div class="why"><b>为什么必然：</b>服务事实 C + D。索引是长任务且不可回滚，「立刻生效」的取消会让内存表与磁盘互相说谎；deferred 把<b>作废</b>也变成一个有归属、有时机的事件。</div></div></div><div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--amber)">11</span><span class="cv-t">mtime+size 增量 + 每 20 篇 checkpoint + 结束时 prune</span><span class="cv-f">electron/main/refsindex.ts:269-276,303-356</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">electron/main/refsindex.ts:269-276,303-356</span></div><pre><code data-lang="ts">if (prev &amp;&amp; prev.mtime === mtime &amp;&amp; prev.size === st.size) { advance(); continue }
+if (done % CHECKPOINT_EVERY === 0) save()
+const live = new Set(list.map((d) =&gt; d.id))
+for (const id of Object.keys(c.entries)) if (!live.has(id)) delete c.entries[id]</code></pre></div><p>PDF 不变就不重读；无 References 的空结果也缓存；进程被杀仍保留绝大部分工作；已回收/解绑的论文不能继续用旧文本回答搜索。</p><div class="why"><b>为什么必然：</b>服务事实 C（抽文本要起 pdf.js worker）+ A（索引不能描述一份已不存在的库）。没有 prune，<code>indexed</code> 会大于 <code>total</code>，显示层就会说谎。</div></div></div><div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--amber)">12</span><span class="cv-t">RefEntry.hay 归一化副本：匹配与切片段用同一份文本</span><span class="cv-f">electron/main/refsindex.ts:43-50,382-395</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">electron/main/refsindex.ts:43-50,382-395</span></div><pre><code data-lang="ts">// Taking the offset from a lower-cased string and cutting the original
+// breaks on characters whose lower case is longer (U+0130); folding
+// whitespace on the fly would shift every hit after the first one.
+const hay = e.hay ?? normaliseQuery(e.text)
+let from = 0
+while (hits.length &lt; MAX_HITS &amp;&amp; perDoc &lt; MAX_HITS_PER_DOC) {
+  const at = hay.indexOf(needle, from)
+  if (at &lt; 0) break
+  hits.push({ docId, page: e.page, snippet: snippetAt(hay, at, needle.length) })
+  from = at + Math.max(1, needle.length)   // 单字查询不死循环</code></pre></div><p>hay 可选，旧缓存没有它时回退到 normaliseQuery(e.text)，<b>不要求重建索引</b>；Math.max(1,…) 防单字查询死循环。</p><div class="why"><b>为什么必然：</b>服务事实 C，最精细的一处。同时解决「转码长度变化导致偏移整体错位」与「边折叠边扫描让第二个命中之后全错」，并用可选字段实现<b>向后兼容的 schema 演进</b>——对照巧思 4 的「无迁移」，这是另一种更轻的答案。</div></div></div></div><h3>层四 · 异步与展示层</h3><div class="clever"><div class="cv"><div class="cv-h"><span class="cv-n" style="background:#7a4b8f">13</span><span class="cv-t">三套代次 + StaleFlight：作废靠编号，不靠清空</span><span class="cv-f">src/lib/pdfcache.ts:90-125 等</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">src/lib/pdfcache.ts:90-125 等</span></div><pre><code data-lang="ts">const gen = this.generation
+const p = draw().then((c) =&gt; {
+  if (gen !== this.generation) throw new StaleFlight(key)
+  ...
+})
+// clear() 只递增代次，不试图停掉已发出的 promise</code></pre></div><p><code>clear()</code> 停不了在飞的 promise，于是递增 generation 让所有等待者走既有失败路径；documentScope 给每个值贴 docId、给每次读贴代次；latestSearch 的 cancel 只推进代次<b>不写 state</b>；viewGeneration 用 generation++ 而非值比较。</p><div class="why"><b>为什么必然：</b>服务事实 D，解决 <code>HANDOFF.md:601</code> 那句「清 state 停不了已经发出的 promise」。三处各自实现代次而非抽公共类，是因为归属标签不同（缓存 key / docId / question），强行统一会丢语义。</div></div></div><div class="cv"><div class="cv-h"><span class="cv-n" style="background:#7a4b8f">14</span><span class="cv-t">topOverlay 纯规则 + runBatch 只登记成功 id</span><span class="cv-f">src/lib/overlayStack.ts:32-39, batch.ts:25-33</span><span class="toggle">+</span></div><div class="cv-b"><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">src/lib/overlayStack.ts:32-39, batch.ts:25-33</span></div><pre><code data-lang="ts">export function topOverlay(layers: OverlayLayers): OverlayLayer | null {
+  if (layers.settings) return 'settings'
+  if (layers.columns) return 'columns'
+  if (layers.sort) return 'sort'
+  if (layers.filters) return 'filters'
+  return null
+}
+try { await run(items[i]!); ok++ } catch { failed.push(name(items[i]!)) }</code></pre></div><p>一次 Esc 只关最上面一层（返回 true 让调用方在 reader/多选分支前停住）；批量动作没有事务，只把真正成功的 id 登记进 undo，失败名单具名报给用户。</p><div class="why"><b>为什么必然：</b>服务事实 A（按失败名单反推 undo 会误伤同名记录）+ 一条工程推论「可解释性优先」。优先级做成纯规则，让「新增卡片必须决定插在哪」有 16 种组合的单测兜住。</div></div></div></div><h3>层五 · 工具与验证层（补充）</h3><table><thead><tr><th>位置</th><th>巧思</th><th>服务于</th></tr></thead><tbody><tr><td><code>shared/paged.ts:32-46</code></td><td>双终止条件（newIds===0、next===marker）：服务器忽略 marker 时既不重复写几千行也不无限请求</td><td>事实 B 的外部版本</td></tr><tr><td><code>scripts/start.mjs:27-29</code></td><td>剔除 ELECTRON_RUN_AS_NODE / NODE_OPTIONS：IDE 终端会让 electron.exe 退化成纯 Node，主进程死在 app.whenReady()</td><td>运行环境不可信</td></tr><tr><td><code>smoke.ts:298-303</code> + <code>index.ts:103-108</code></td><td>配置快照在<b>读到配置的那一刻</b>写入模块作用域（不是结束时），崩溃路径也会 restore：自检不能动真实数据</td><td>事实 A</td></tr></tbody></table></section>
+<section id="p4"><h2><span class="sec-no">4</span>巧思 → 基本事实映射表（闭环）</h2><table><thead><tr><th>巧思</th><th>层</th><th>A 磁盘真相</th><th>B 输入不可信</th><th>C 抽取有损</th><th>D 异步归属</th><th>防住 / 支撑了什么</th></tr></thead><tbody><tr><td>1 四快照三方裁决</td><td>存储</td><td>●</td><td></td><td></td><td>◐</td><td>在途编辑被覆盖、回收站论文复活</td></tr><tr><td>2 flag:'wx' 占名</td><td>存储</td><td>●</td><td></td><td></td><td></td><td>并发导入互相覆盖 PDF</td></tr><tr><td>3 tmp+rename 原子写</td><td>存储</td><td>●</td><td></td><td></td><td></td><td>写到一半被杀留下半份 JSON</td></tr><tr><td>4 结构失败即无缓存</td><td>存储</td><td>●</td><td></td><td></td><td></td><td>解析半份缓存再写回更错的</td></tr><tr><td>5 satisfies 编译期穷尽</td><td>协议</td><td></td><td>●</td><td></td><td></td><td>新增配置字段被静默忽略</td></tr><tr><td>6 白名单 + 整批拒绝</td><td>协议</td><td></td><td>●</td><td></td><td></td><td>任意路径读取 / 导出越界 / 危险 scheme</td></tr><tr><td>7 唯一 Api 契约</td><td>协议</td><td>◐</td><td>●</td><td></td><td></td><td>两份契约漂移、Promise&lt;any&gt;</td></tr><tr><td>8 具名失败两道门</td><td>协议</td><td>●</td><td>●</td><td></td><td></td><td>无声的静默失败</td></tr><tr><td>9 at/byteAt 双锚点</td><td>索引</td><td>◐</td><td></td><td>●</td><td></td><td>命中被归到别人的论文</td></tr><tr><td>10 deferred + busy 队列</td><td>索引</td><td>◐</td><td></td><td>●</td><td>●</td><td>长任务被中途取消后半份索引</td></tr><tr><td>11 mtime+size + prune</td><td>索引</td><td>●</td><td></td><td>●</td><td></td><td>重复抽文本、已删论文仍被搜到</td></tr><tr><td>12 RefEntry.hay 副本</td><td>索引</td><td>◐</td><td></td><td>●</td><td></td><td>U+0130 偏移错位、多命中偏移全错</td></tr><tr><td>13 三套代次 + StaleFlight</td><td>展示</td><td></td><td></td><td></td><td>●</td><td>旧位图 / 旧词结果盖住新词</td></tr><tr><td>14 topOverlay + 成功 id</td><td>展示</td><td>●</td><td></td><td></td><td>◐</td><td>Esc 关两层、undo 误伤</td></tr></tbody></table><div class="callout ok"><span class="t">读法</span>A 与 C 两列几乎撑起存储层和索引层，B 撑起协议层，D 撑起展示层。这不是巧合——<b>每一层之所以长成那个样子，是因为它主要对抗的是哪一条不可靠性</b>。（● 主要服务，◐ 次要服务）</div></section>
+<section id="p5"><h2><span class="sec-no">5</span>代价与边界（直面缺陷）</h2><div class="callout warn"><span class="t">① 约束强度从「不可能错」降级为「错了会被拦住」</span><code>safeConfigPatch</code> 挡得住未知键，挡不住白名单内值语义上是错的（pdfDir 指向不存在的目录）；<code>reconcileSyncWrite</code> 依赖「写盘前重读」这一次读与写之间不再有第二个写入者——<code>HANDOFF.md:679-681</code> 承认原子写不是并发安全的。</div><div class="callout warn"><span class="t">② 通用性换来的性能代价与页数取舍</span>默认只索引每篇前 3 页：<code>fulltext.ts:60-64</code> 记着 5245 篇全页约 293 MB / 前三页约 60 MB。这是<b>能力取舍不是缺陷</b>，代价是搜不到时必须说清「读了多少页、这不等于库里没有」，且改页数会丢索引。</div><div class="callout warn"><span class="t">③ 开放词汇的语义治理成本</span>BibTeX 没有独立类型名的网页/专利/程序只能写成 <code>@misc</code>，导回变成 <code>generic</code>；DOC_TYPES 白名单之外的值显示「（未设）」而不是顶成第一项。项目选择<b>诚实告知而不是假装无损</b>。</div><div class="callout red"><span class="t">④ 可验证性本身有未覆盖区间</span><code>fulltext.ts</code> 索引状态机与 <code>App.tsx</code> 剩余状态簇仍主要靠 smoke 的源码串断言和真实库自检守着（<code>HANDOFF.md:695-698</code>）；smoke 因需要真实窗口无法进 CI，最重的一层回归只能本地跑。</div><div class="callout red"><span class="t">⑤ 一份规则的纪律还没铺满所有调用点</span><code>HANDOFF.md:616-621</code> 明令「别再让某个范围自己写一遍 trim().toLowerCase()」，但 <code>TrashView.tsx:38</code>、<code>NotesView.tsx:54</code>、<code>FolderTree.tsx:88</code>、<code>AddByIdView.tsx:28</code> 仍各写一份；<code>SearchResults.tsx:104</code> 甚至漏了折叠空白，导致「能命中却不高亮」。<b>规则存在 ≠ 所有调用点都接上了</b>——这正是本次优化重构要处理的第一类问题。</div></section>
+<section id="p6"><h2><span class="sec-no">6</span>综合结论</h2><p class="lead">这些巧思不是炫技，而是把「一个终将失效的外部服务要喂养一份永远可读的本地库」这件事，在<b>表示</b>（单一 View + payload、归一化副本）、<b>写入</b>（四快照裁决、原子写、双锚点、checkpoint）、<b>审计</b>（具名失败门、索引自审、差分回归）、<b>解释</b>（空态说明读了多少页、批量报失败名单、format/budget 各说各话）、<b>演化</b>（编译期穷尽的白名单、可选 hay 兼容旧缓存、纯规则先配单测再改接线）五个维度分别解到了可执行。</p><div class="callout ok"><span class="t">一句话还原系统的第一性原理</span><b>因为外部服务不可靠、跨进程输入不可信、PDF 文本昂贵且有损、异步结果不可取消，所以这个系统选择让磁盘做唯一的裁判，让所有规则只留一份且可测，让每一次写入都能被重读与解释，让每一个在途答案都带着它出发时的标签。</b></div><p>剩下没解完的，不是「架构不对」，而是这份纪律还没铺满所有调用点。因此本次全面优化重构的方向不是重写架构，而是：<b>删掉没有归属的攻击面、把漂移的调用点接回唯一规则、把故障显式化、给未覆盖的纯逻辑补上单测、把重复的构建脚本收成一处</b>——每一项都配可验证的断言，遵守 <code>HANDOFF.md:300-301</code>「抽共享规则前先逐值差分」的既定方法。</p></section>
+<div class="callout ok"><span class="t">重构后记（2026-11-16）</span>第 5 节第 5 条指出的「规则存在 ≠ 所有调用点都接上了」是本轮重构的主线：四个检索 UI 与结果卡片已统一到 <code>normaliseQuery</code>，绕过事实 B 的任意路径读取通道已删除，refs 的拒绝不再被空吞。四条基本事实与 14 项巧思的结论不变。详见 <code>analysis/优化重构说明.md</code>。</div>
+      <footer style="margin-top:70px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><span>Mendeley NG 第一性原理与设计巧思分析报告 · 分析日期 2026-11-16</span><span><a href="./mendeley-ng架构实现分析.html">架构实现</a> · <a href="./mendeley-ng架构演化分析.html">演化分析</a> · <a href="./mendeley-ng第一性原理与设计巧思分析.html">第一性原理与巧思</a></span></footer>
+    </div>
+  </main>
+</div>
+
+<script>
+/* ---------- 目录生成 + scrollspy ---------- */
+(function(){
+  var nav = document.getElementById('tocNav');
+  var sections = document.querySelectorAll('section[id]');
+  var html = '<div class="toc-label">目录</div>';
+  sections.forEach(function(s){
+    var no = s.querySelector('.sec-no');
+    var t = s.querySelector('h2');
+    if(!t) return;
+    var label = (no ? no.textContent + ' · ' : '') + t.textContent.replace(no ? no.textContent : '', '').trim();
+    html += '<a href="#' + s.id + '" data-target="' + s.id + '">' + label + '</a>';
+    s.querySelectorAll('h3').forEach(function(h3){
+      var id = s.id + '-' + h3.textContent.replace(/\s+/g,'').slice(0,8);
+      h3.id = id;
+      html += '<a class="l2" href="#' + id + '" data-target="' + id + '">' + h3.textContent + '</a>';
+    });
+  });
+  nav.innerHTML = html;
+  var links = nav.querySelectorAll('a');
+  var map = {};
+  links.forEach(function(a){ map[a.dataset.target] = a; });
+  var targets = [];
+  document.querySelectorAll('h2[id],h3[id],section[id]').forEach(function(el){ if(el.id) targets.push(el); });
+  window.addEventListener('scroll', function(){
+    var pos = window.scrollY + 90, current = null;
+    for(var i=0;i<targets.length;i++){
+      if(targets[i].offsetTop <= pos) current = targets[i];
+    }
+    links.forEach(function(a){ a.classList.remove('active'); });
+    if(current && map[current.id]) map[current.id].classList.add('active');
+  }, {passive:true});
+})();
+
+/* ---------- 巧思卡展开 ---------- */
+(function(){
+  document.querySelectorAll('.cv .cv-h').forEach(function(header){
+    header.addEventListener('click', function(){
+      header.parentElement.classList.toggle('open');
+    });
+  });
+})();
+
+/* ---------- 轻量代码高亮（Python / YAML） ---------- */
+(function(){
+  var KEYWORDS = new Set(("def class return import from if elif else for in not and or raise with try except lambda "+
+    "yield pass break continue global nonlocal del assert async await is None True False self super").split(' '));
+  var YAML_KEYS = new Set(("schema name version description objects relations functions actions properties type required "+
+    "from to ref runtime implementation model property_definitions object_types relation_types interaction_policies "+
+    "presentation_tools available_on context_input requires confirmation handler icon inputs effects summary params "+
+    "status details role code amount period date datetime string number boolean json money open mutable source "+
+    "id_field config database kind display_name type_policy mutability data_source instructions acyclic from_types "+
+    "to_types default message create_object update_object delete_object create_relation update_relation delete_relation").split(' '));
+  function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function colorize(code, lang){
+    var out = '', i = 0, n = code.length;
+    var isYaml = lang === 'yaml';
+    while(i < n){
+      var c = code[i];
+      if(c === '#' && (i === 0 || code[i-1] === '\n')){
+        var j = code.indexOf('\n', i); if(j === -1) j = n;
+        out += '<span class="tok-c">' + esc(code.slice(i, j)) + '</span>'; i = j; continue;
+      }
+      if(c === '"' || c === "'"){
+        var q = c, j = i + 1;
+        while(j < n){ if(code[j] === q){ j++; break; } if(code[j] === '\\') j++; j++; }
+        out += '<span class="tok-s">' + esc(code.slice(i, j)) + '</span>'; i = j; continue;
+      }
+      if(/[0-9]/.test(c) || (c === '-' && /[0-9]/.test(code[i+1]||''))){
+        var j = i; while(j < n && /[0-9.\-]/.test(code[j])) j++;
+        out += '<span class="tok-n">' + esc(code.slice(i, j)) + '</span>'; i = j; continue;
+      }
+      if(/[A-Za-z_\u4e00-\u9fa5]/.test(c)){
+        var j = i; while(j < n && /[A-Za-z0-9_\u4e00-\u9fa5]/.test(code[j])) j++;
+        var word = code.slice(i, j);
+        var next = code[j] || '';
+        if(isYaml && next === ':' && YAML_KEYS.has(word)) out += '<span class="tok-k">' + esc(word) + '</span>';
+        else if(!isYaml && KEYWORDS.has(word)) out += '<span class="tok-k">' + esc(word) + '</span>';
+        else if(/^[A-Z]/.test(word)) out += '<span class="tok-f">' + esc(word) + '</span>';
+        else out += esc(word);
+        i = j; continue;
+      }
+      if(c === '(' || c === ')' || c === '[' || c === ']' || c === '{' || c === '}'){
+        out += '<span class="tok-p">' + c + '</span>'; i++; continue;
+      }
+      out += esc(c); i++;
+    }
+    return out;
+  }
+  document.querySelectorAll('pre code[data-lang]').forEach(function(el){
+    el.innerHTML = colorize(el.textContent, el.dataset.lang);
+  });
+})();
+</script>
+</body>
+</html>

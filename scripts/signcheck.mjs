@@ -13,8 +13,12 @@
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { root } from './_shared.mjs'
 
-const dist = path.resolve('dist')
+// Resolve from the repository, not process.cwd(): `npm run signcheck` is
+// normally run from the root, but calling the script directly from elsewhere
+// used to look in the wrong directory and report "no dist/ directory".
+const dist = path.join(root, 'dist')
 
 let files = []
 try {

@@ -1,3 +1,4 @@
+import { clampToRange } from './clamp'
 import { DEFAULT_FT_PAGES } from './types'
 
 /**
@@ -28,7 +29,10 @@ export const FULL_TEXT_MAX_PAGES = 50
  */
 export function clampFullTextPages(n: unknown): number {
   const whole = Math.floor(Number(n)) || DEFAULT_FT_PAGES
-  return Math.max(FULL_TEXT_MIN_PAGES, Math.min(FULL_TEXT_MAX_PAGES, whole))
+  // The plain clamp is shared/clamp.ts's rule, not a second copy of it. The
+  // bounds and the default stay here because only this module knows what a
+  // page budget means; the "how to clamp" part belongs to the one rule.
+  return clampToRange(whole, FULL_TEXT_MIN_PAGES, FULL_TEXT_MAX_PAGES)
 }
 
 /**

@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Doc } from '../../shared/types'
 import { isListBlank } from '../lib/listBlank'
 import { matchDoc, type DocMatch, type Part } from '../lib/match'
+import { normaliseQuery } from '../lib/searchScope'
 
 interface Props {
   docs: Doc[]
@@ -101,7 +102,11 @@ export default function SearchResults({
    * them per card makes a scroll free after the first pass, because the
    * cache outlives the render that filled it.
    */
-  const q = query.trim()
+  // The list is filtered with normaliseQuery, which folds whitespace. Passing
+  // the raw trimmed query here made a term typed with two spaces match the
+  // list but leave every card without a <mark> or a field snippet. Matching
+  // and marking must be driven by the same normalised query as the filter.
+  const q = normaliseQuery(query)
   const matchAt = useMemo(() => {
     const cache = new Map<string, DocMatch>()
     return (i: number): DocMatch => {

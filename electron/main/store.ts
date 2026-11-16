@@ -31,7 +31,7 @@ export const DEFAULT_PDF_DIR = path.join(
   'Downloaded'
 )
 
-export const DEFAULT_FONT_SIZE = 15
+const DEFAULT_FONT_SIZE = 15
 
 export function loadConfig(): Config {
   const fallback = { pdfDir: DEFAULT_PDF_DIR, fontSize: DEFAULT_FONT_SIZE }

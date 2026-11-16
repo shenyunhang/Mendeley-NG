@@ -32,7 +32,7 @@ const ENDNOTE_TYPE: Record<string, string> = {
 
 /** EndNote XML.  The schema is loose, so every field is optional and looked
  *  up by tag name rather than by path. */
-export function parseEndnoteXml(text: string): Entry[] {
+function parseEndnoteXml(text: string): Entry[] {
   let doc: Document
   try {
     doc = new DOMParser().parseFromString(text, 'application/xml')

@@ -107,6 +107,7 @@ DPI 靠 Chromium 按系统 scale factor 缩放 CSS 像素，不加任何 DPI 补
 ```bash
 npm install
 npm run build              # 产出 out/；不替 smoke 构建
+npm run verify:build       # 校验 out/ 产物；CI 与 release 共用这一份脚本
 npm start                  # 启动，走 scripts/start.mjs
 npm run dev                # 热重载
 npm run typecheck          # main/preload 与 renderer 双侧检查
@@ -137,7 +138,10 @@ npm run demo               # 造虚构库，重生成 README 的四张截图
    和索引驱动换成桩，捕获 `ipcMain.handle` 注册的 handler 后直接调用——测的是
    channel 回答什么（含失败形态），不是源码里有没有那一行。
 3. `npm run build` 产出 `out/`。`scripts/start.mjs` 只检查 `out/main/index.js` 在不在，
-   然后直接起 Electron，所以忘了构建跑的是上一版，而且会**安静地全绿**。
+   然后直接起 Electron，所以忘了构建跑的是上一版，而且会**安静地全绿**。构建之后跑
+   `npm run verify:build`：它逐个 `node --check` 主进程与 smoke chunk、确认 worker 在且
+   大于 100 KB、确认 `index.js` 引用的 chunk 真实存在，并核对 `build` / `dist` 的接线。
+   同一份 `scripts/verify-build.mjs` 被 `ci.yml` 与 `release.yml` 调用，两处门禁不会漂移。
 4. `npm run smoke` 用真实库和真实 PDF，开隐藏窗口逐条断言，日志以
    `[smoke] PASS` / `[smoke] FAIL` 打点，最后出现 `all checks passed` 才算过。
    断言数会变，口径是
@@ -153,8 +157,11 @@ npm run demo               # 造虚构库，重生成 README 的四张截图
   `git fetch origin refs/tags/<tag>:refs/tags/<tag>` 作第二道保险，失败时打印
   `show-ref --tags`，别让日志只剩一个 exit 1。
 - `.github/workflows/ci.yml` 在每次 push / PR 依次跑 `typecheck`、`npm test`、`build`，
-  再验一遍 `out/`：逐个 `node --check` 主进程与全部 smoke chunk、确认
-  `pdf.worker.mjs` 大于 100 KB、确认 `index.js` 里 require 的 chunk 文件真实存在。
+  再调 `node scripts/verify-build.mjs` 验一遍 `out/`：逐个 `node --check` 主进程与全部
+  smoke chunk、确认 `out/preload/index.js` 与 `out/renderer/index.html` 在、确认
+  `pdf.worker.mjs` 大于 100 KB、确认 `index.js` 里 require 的 chunk 文件真实存在，
+  并核对 `build` 仍含 `copy-worker`、`dist` 仍委托 `npm run build`。这份校验以前在两个
+  workflow 里各内联一份 39 行 `node -e`，改一处忘另一处就会让两道门禁给出不同答案。
 - `.github/workflows/release.yml` 在 `v*` tag（或手动触发）打包前先跑
   `npm run typecheck && npm test`，再做同一道产物检查，并拒绝版本与
   `package.json` / `package-lock.json` 不一致或不是 annotated 的 tag；手动触发
@@ -218,8 +225,14 @@ tests/                   Vitest 单测：shared / renderer-pure / security / ref
                          main-ipc-system / main-ipc-files（Electron 用替身，捕获 handler）
                          main-library / main-marks（同步 pull、标注与阅读位置的接线）
                          library-sync / overlay-stack（抽出的纯规则）
-scripts/                 启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
+                         pure-modules（export / importText / updateText / doctypes 的纯 Node 用例）
+                         refactor-2026-11-16（页数与归一化的逐值差分 + 源码串护栏）
+scripts/
+  _shared.mjs           脚本共用：仓库根、Electron 路径、环境清理、UA
+  verify-build.mjs      产物校验，ci.yml 与 release.yml 只调这一份
+  ...                   启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
 docs/screenshots/        README 的四张图，由 npm run demo 生成
+analysis/                四角度深度分析：架构实现 / 演化 / 第一性原理与巧思（md + 自包含 html）
 .github/workflows/       ci.yml（类型 / 单测 / 构建 / 产物）、release.yml（打包与发布）
 vitest.config.ts         test 只收 tests/**/*.test.ts，环境为 node
 electron.vite.config.ts  main / preload / renderer 三段构建配置
@@ -276,6 +289,11 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - 安装包不进 git，走 GitHub Release 分发；版本 bump 单独一个 commit，
   `package.json` 与 `package-lock.json` 的 `version` 必须与 tag 一致。
   tag 必须是 annotated（`-a`），轻量 tag 不会触发 release workflow。
+- `scripts/_shared.mjs` 是所有脚本的公共底座：仓库根（从 `import.meta.url` 算，不看 cwd）、
+  Electron 二进制、`cleanEnv()`（剔除 `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS`）、`UA`。
+  新增脚本不要再抄这四样。`UA` 在 `shared/userAgent.ts` 里还有一份 TS 字面量（CJS 主进程
+  不能直接 import `.mjs`），`tests/refactor-2026-11-16.test.ts` 逐字比对两份，改一边忘
+  另一边会红。`scripts/verify-build.mjs` 是产物校验的唯一实现，两个 workflow 只调它。
 
 ### 图标与截图
 
@@ -315,7 +333,10 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 所有路径与输入校验集中在 `shared/pathPolicy.ts`，平台参数可注入以便确定性测试：
 
 - `mendeley://pdf/<path>` 只服务 `pdfDir` 根内的文件，或 `library.json` 里已登记的
-  `localPdf` 附件（`canServePdf`）。别把这个协议当成第二个文件 API。
+  `localPdf` 附件（`canServePdf`）。别把这个协议当成第二个文件 API。**不要新增任何
+  「传一个路径进来、直接 `fs.readFileSync` 返回字节」的 IPC 通道**：那种通道绕过
+  `pathPolicy` 且渲染层无法证明路径是自己的 PDF。曾有一个注册了却无人调用的
+  `pdf:read`，已删除；`tests/refactor-2026-11-16.test.ts` 有源码串护栏防它回来。
 - `export:leave` 的每个 `files[].name` 与 `copies[].to` 先经 `resolveInside` 解析到所选
   目录内，任何一个越界就整批拒绝；`../`、绝对路径、盘符相对名、UNC 与 NUL 都拒收。
   复制源 `from` 不限制，导出的是用户自己的 PDF。
@@ -619,7 +640,12 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   逐字节一致」，现已改为「等于旧 hay() 再折叠空白」：这是**有意放宽**，
   因为输入带两个空格时旧书目表搜不到、参考文献却能搜到。别再让某个范围
   自己写一遍 `trim().toLowerCase()`。`fulltext.ts` 的 `ftSearch` 本来就折叠空白，
-  不用改它（它有 smoke 计数断言）。
+  不用改它（它有 smoke 计数断言）。**所有检索 UI 现在都接这一份规则**：
+  `SearchResults` / `TrashView` / `NotesView` / `FolderTree` / `AddByIdView`，
+  且 hay 与 needle 同一份归一化（只改 needle 不改 hay 会造出「折叠后反而搜不到」）。
+  `SearchResults` 以前用 `query.trim()`，于是双空格查询能进列表却没有 `<mark>`；
+  `tests/refactor-2026-11-16.test.ts` 有「旧写法确实不高亮」的对照与源码串护栏。
+  折叠空白是有意放宽，动手前按 §4 测试纪律先做逐值差分。
 - 范围控件是 `search-wrap` **内部**的原生 `<select>`，不是工具栏直属子元素、不是
   第二个 `<input>`、也不是浮层卡片。三者分别会：多一个 gap 把字号/主题挤出一行、
   打穿冒烟里 `document.querySelector(".toolbar input")` 的唯一性假设、或给
@@ -651,8 +677,10 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   单字查询（`MIN_QUERY = 1`）是正常中文检索，渲染层那道 `q.length < 1` 要与它一致。
 - 渲染层的 refs 查询必须带 `live` 守卫和 `.catch`：清 timer 只挡住还没发出的请求，
   慢 IPC 回来会拿旧词结果盖住新词。`refs:search` / `refs:status` 返回 `{error}`
-  时要进 `refsError` 显示在面板上，**不能**用 `Array.isArray(r) ? r : []`
-  把故障伪装成「没找到」。
+  或直接 reject 都要进 `refsError` 显示在面板上，**不能**用
+  `Array.isArray(r) ? r : []` 或空的 `.catch(() => undefined)` 把故障伪装成
+  「没找到」。后者曾让面板留着旧命中且一句话不说；现在两条 catch 都带
+  `live`（搜索那条还比对了归一化后的词）再写 `refsError`。
 - `RefEntry.hay` 是 `normaliseQuery(text)` 的副本，**匹配与切片段都在它上面做**：
   从 `toLowerCase()` 的串取偏移、却去切原串，遇到 `İ`（小写变两个 code unit）
   会整体偏掉；边折叠边找也会让第二个命中之后的偏移全错。字段可选，旧缓存
@@ -694,6 +722,8 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   顺序就是层叠顺序：改动时先按顺序拼接与 `HEAD` 逐字节比对，别为了归类去重排。
 - 主进程侧 `system`、PDF 写入、同步 pull、标注与阅读位置四类都有行为单测；
   渲染层浮层优先级有纯规则单测（Esc 逐层关闭的 UI 行为仍由 smoke 实测）。
+  `export.ts` / `importText.ts` / `updateText.ts` / `doctypes.ts` 的纯规则在
+  `tests/pure-modules.test.ts` 里补了纯 Node 用例（此前只靠 smoke 或完全没测）。
   `fulltext.ts` 索引状态机与 `App.tsx` 剩余状态簇仍只靠 smoke 的源码串断言
   和真实库自检守着；这两处是接下来唯一还没拆的高耦合区间。
 - 主窗口 `sandbox: false`（授权窗口是 `true`）：preload 只用 Electron API，

@@ -15,11 +15,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
-import { fileURLToPath } from 'node:url'
-
-const UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-  '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+import { root, UA } from './_shared.mjs'
 
 const REDIRECT = 'http://localhost:8080/'
 const TOKEN_URL = 'https://api.mendeley.com/oauth/token'
@@ -31,7 +27,7 @@ if (!clientId || !clientSecret) {
   process.exit(1)
 }
 
-const out = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'token.json')
+const out = path.join(root, 'token.json')
 if (fs.existsSync(out)) {
   console.error(`${out} 已存在，先删掉或改名再重跑`)
   process.exit(1)
@@ -58,21 +54,27 @@ if (!code) {
 
 // Cloudflare in front of api.mendeley.com answers error 1010 to anything that
 // does not look like a browser, /oauth/token included.
-const res = await fetch(TOKEN_URL, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    Authorization:
-      'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
-    'User-Agent': UA,
-    Accept: '*/*'
-  },
-  body: new URLSearchParams({
-    grant_type: 'authorization_code',
-    code,
-    redirect_uri: REDIRECT
-  }).toString()
-})
+let res
+try {
+  res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization:
+        'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
+      'User-Agent': UA,
+      Accept: '*/*'
+    },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: REDIRECT
+    }).toString()
+  })
+} catch (e) {
+  console.error('换 token 失败：网络请求异常', String(e))
+  process.exit(1)
+}
 
 const text = await res.text()
 if (!res.ok) {
@@ -80,7 +82,13 @@ if (!res.ok) {
   process.exit(1)
 }
 
-const tok = JSON.parse(text)
+let tok
+try {
+  tok = JSON.parse(text)
+} catch (e) {
+  console.error('换 token 失败：响应不是 JSON', String(e), text.slice(0, 200))
+  process.exit(1)
+}
 tok.client_id = clientId
 tok.client_secret = clientSecret
 fs.writeFileSync(out, JSON.stringify(tok, null, 2), 'utf-8')

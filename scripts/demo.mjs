@@ -14,9 +14,7 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+import { root, electronBin, cleanEnv, propagateExit } from './_shared.mjs'
 const demoDir = path.join(root, '.demo')
 const libDir = path.join(demoDir, 'library')
 const pdfDir = path.join(demoDir, 'pdfs')
@@ -360,14 +358,9 @@ fs.writeFileSync(
 )
 console.log('[demo] library', docs.length, 'docs', folders.length, 'folders', written, 'pdfs')
 
-const bin =
-  process.platform === 'win32'
-    ? path.join(root, 'node_modules/electron/dist/electron.exe')
-    : path.join(root, 'node_modules/electron/dist/electron')
+const bin = electronBin()
 
-const env = { ...process.env }
-delete env.ELECTRON_RUN_AS_NODE
-delete env.NODE_OPTIONS
+const env = cleanEnv()
 // the demo builds its own index, in its own directory, out of its own PDFs
 env.MENDELEY_FT_DIR = path.join(demoDir, 'ft')
 env.MENDELEY_DEMO_OUT = outDir
@@ -377,4 +370,4 @@ const child = spawn(
   [root, '--demo', `--user-data-dir=${demoDir}`],
   { stdio: 'inherit', env, cwd: root }
 )
-child.on('close', (code) => process.exit(code ?? 0))
+propagateExit(child)

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Doc, MetaCandidate } from '../../shared/types'
+import { normaliseQuery } from '../lib/searchScope'
 
 interface Props {
   docs: Doc[]
@@ -25,7 +26,10 @@ function splitQueries(text: string): string[] {
 function alreadyHave(c: MetaCandidate, docs: Doc[]): boolean {
   const doi = c.patch.identifiers?.doi
   const arxiv = c.patch.identifiers?.arxiv
-  const norm = (s: string) => s.trim().toLowerCase()
+  // Identifier equality uses the same normalisation as every search term,
+  // so a DOI pasted with a stray tab or a doubled space does not look like a
+  // paper the library does not have.
+  const norm = normaliseQuery
   if (doi) {
     const d = norm(doi)
     if (docs.some((x) => norm(x.identifiers?.doi ?? x.doi ?? '') === d)) return true

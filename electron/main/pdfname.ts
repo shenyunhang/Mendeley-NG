@@ -1,10 +1,6 @@
 import { DEFAULT_PDF_TEMPLATE } from '../../shared/types'
 import type { Doc } from '../../shared/types'
 
-/** Placeholders a naming template can use.  Kept next to the function that
- *  expands them so the two cannot drift apart. */
-export const PDF_NAME_FIELDS = ['title', 'year', 'authors', 'journal', 'key', 'type', 'doi']
-
 /** Name a downloaded PDF from a template.  Segments left empty by a missing
  *  field are dropped rather than leaving a run of dangling separators, so
  *  `{authors} - {year} - {title}` on a paper with no year does not produce

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { Annotation, Doc } from '../../shared/types'
+import { normaliseQuery } from '../lib/searchScope'
 
 interface Props {
   /** Every annotation in the store, not just the open document's. */
@@ -51,16 +52,16 @@ export default function NotesView({
   }, [docs])
 
   const rows = useMemo<Row[]>(() => {
-    const s = q.trim().toLowerCase()
+    const s = normaliseQuery(q)
     const out: Row[] = []
     for (const a of anns) {
       const doc = byId.get(a.docId)
       const page = a.pos?.[0]?.page ?? a.page ?? 1
       if (onlyNotes && !(a.note || a.text)) continue
       if (s) {
-        const hay = [label(a), a.note ?? '', a.text ?? '', doc?.title ?? '', doc?.source ?? '']
-          .join(' ')
-          .toLowerCase()
+        const hay = normaliseQuery(
+          [label(a), a.note ?? '', a.text ?? '', doc?.title ?? '', doc?.source ?? ''].join(' ')
+        )
         if (!hay.includes(s)) continue
       }
       out.push({ a, doc, page })

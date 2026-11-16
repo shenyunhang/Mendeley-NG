@@ -1,0 +1,332 @@
+<!doctype html>
+
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mendeley NG 架构演化分析</title>
+<style>
+:root{
+  --bg:#f3f5f4; --surface:#ffffff; --surface-subtle:#f7f8f7;
+  --ink:#17201c; --muted:#68736d; --line:#dfe4e1; --line-strong:#cbd3ce;
+  --green:#156b4a; --green-dark:#0e5238; --green-soft:#e7f2ec;
+  --red:#b83b35; --red-soft:#f8e9e7; --amber:#9a6418; --amber-soft:#f8eedc;
+  --blue:#356a91; --blue-soft:#e7eff5;
+  --code-bg:#0f1a16; --code-ink:#d9e6df;
+  --mono:ui-monospace,SFMono-Regular,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  color:var(--ink); background:var(--bg);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;line-height:1.7;font-size:15px}
+a{color:var(--green);text-decoration:none}
+a:hover{text-decoration:underline}
+.layout{display:grid;grid-template-columns:250px minmax(0,1fr);min-height:100vh}
+/* ---------- 侧边 TOC ---------- */
+.toc{position:sticky;top:0;height:100vh;overflow-y:auto;background:#17231e;color:#edf4f0;padding:22px 16px;border-right:1px solid #25362e}
+.toc .brand{display:flex;align-items:center;gap:11px;padding:0 6px 22px}
+.toc .brand-mark{display:grid;place-items:center;width:38px;height:38px;background:#e7f2ec;color:var(--green-dark);font-weight:800;border-radius:8px;font-size:12px;letter-spacing:.5px}
+.toc .brand strong{display:block;font-size:14px}
+.toc .brand span{display:block;margin-top:2px;color:#97a89f;font-size:11px}
+.toc nav{display:grid;gap:2px}
+.toc a{display:block;padding:7px 10px;border-radius:6px;color:#aebdb5;font-size:13px;border-left:2px solid transparent;transition:.15s}
+.toc a:hover{color:#fff;background:rgba(255,255,255,.06);text-decoration:none}
+.toc a.active{color:#fff;background:#274337;border-left-color:#4fbf8d}
+.toc a.l2{padding-left:24px;font-size:12.5px;color:#8fa29a}
+.toc .toc-label{padding:14px 10px 6px;font-size:10.5px;letter-spacing:1.5px;color:#6f8379;text-transform:uppercase}
+main{min-width:0}
+/* ---------- Hero ---------- */
+.hero{background:linear-gradient(135deg,#0e5238 0%,#14573f 45%,#1d3b30 100%);color:#edf4f0;padding:56px 0 44px}
+.hero .wrap{max-width:940px;margin:0 auto;padding:0 32px}
+.hero .kicker{display:inline-flex;align-items:center;gap:8px;font-size:12px;letter-spacing:2px;color:#9dcdb6;text-transform:uppercase;font-weight:600}
+.hero .kicker::before{content:"";width:26px;height:2px;background:#4fbf8d}
+.hero h1{margin:14px 0 10px;font-size:32px;line-height:1.25}
+.hero p{margin:0;color:#b9c9c1;max-width:74ch;font-size:15px}
+.hero .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}
+.hero .chip{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);padding:6px 12px;border-radius:999px;font-size:12px;color:#d8e5de}
+.hero .chip b{color:#fff;font-weight:600}
+.hero .conclusion{margin-top:24px;padding:16px 18px;border-radius:10px;background:rgba(255,255,255,.07);border-left:3px solid #4fbf8d;font-size:14px;color:#cfe0d7}
+/* ---------- 正文 ---------- */
+.content{max-width:940px;margin:0 auto;padding:48px 32px 90px}
+section{margin-top:52px}
+section:first-child{margin-top:0}
+h2{font-size:24px;margin:0 0 6px;display:flex;align-items:center;gap:12px}
+h2 .sec-no{font-size:13px;font-weight:700;color:#fff;background:var(--green);width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none}
+h3{font-size:17.5px;margin:34px 0 10px;color:#14352a}
+h4{font-size:15px;margin:22px 0 8px;color:#0e5238}
+p{margin:10px 0;color:#2c3731}
+.lead{border-left:3px solid var(--green);padding:10px 16px;background:var(--green-soft);border-radius:0 8px 8px 0;font-size:14.5px;color:#173b2d;margin:14px 0}
+/* ---------- 代码框 ---------- */
+.codebox{margin:16px 0;border-radius:10px;overflow:hidden;border:1px solid #1c2d25;background:var(--code-bg);box-shadow:0 6px 18px rgba(20,40,32,.12)}
+.codebox .bar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:#14221c;border-bottom:1px solid #22352c;color:#7f9a8e;font-size:11.5px}
+.codebox .bar .dot{width:9px;height:9px;border-radius:50%}
+.codebox .bar .dot:nth-child(1){background:#f0635c}.codebox .bar .dot:nth-child(2){background:#e2b25c}.codebox .bar .dot:nth-child(3){background:#5fc98a}
+.codebox .bar .fname{margin-left:6px;font-family:var(--mono);color:#9fb6ab}
+.codebox pre{margin:0;padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:12.8px;line-height:1.65;color:var(--code-ink)}
+.codebox pre code{font-family:inherit;background:none;color:inherit;padding:0}
+.tok-c{color:#6d8a7e;font-style:italic}
+.tok-s{color:#e6c97a}
+.tok-k{color:#7fd6a8;font-weight:600}
+.tok-n{color:#86c5e8}
+.tok-f{color:#d9a7f0}
+.tok-p{color:#c88fd8}
+/* ---------- 表格 ---------- */
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px;background:var(--surface);border-radius:10px;overflow:hidden;box-shadow:0 2px 10px rgba(28,41,34,.06)}
+th{background:#eef3f0;color:#24402f;text-align:left;padding:10px 14px;font-size:12.5px;letter-spacing:.3px;border-bottom:1px solid var(--line)}
+td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td code,li code,p code{font-family:var(--mono);font-size:12px;background:#e9efec;border:1px solid #dbe2de;border-radius:5px;padding:1.5px 6px;color:#0e5238}
+/* ---------- 卡片 / Callout ---------- */
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:16px 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:0 2px 10px rgba(28,41,34,.05)}
+.card h4{margin:0 0 8px}
+.card p{margin:6px 0;font-size:13.5px}
+.card .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.5px;padding:3px 9px;border-radius:999px;margin-bottom:8px}
+.callout{border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;border:1px solid}
+.callout.info{background:var(--blue-soft);border-color:#c9dbe8;color:#234a66}
+.callout.warn{background:var(--amber-soft);border-color:#e8d9b8;color:#6d4712}
+.callout.ok{background:var(--green-soft);border-color:#c4e0d1;color:#14543a}
+.callout.red{background:var(--red-soft);border-color:#ecc9c6;color:#7c2b27}
+.callout .t{font-weight:700;display:block;margin-bottom:4px}
+/* ---------- 分层图 ---------- */
+.layers{display:grid;gap:0;margin:20px 0;border:1px solid var(--line-strong);border-radius:14px;overflow:hidden;background:var(--surface)}
+.layer{padding:16px 20px;border-top:1px solid var(--line)}
+.layer:first-child{border-top:none}
+.layer .lname{font-weight:700;font-size:15px;display:flex;align-items:center;gap:10px}
+.layer .lname .badge{font-size:10.5px;font-weight:800;letter-spacing:1px;padding:3px 8px;border-radius:6px}
+.layer .ldesc{font-size:13px;color:var(--muted);margin-top:4px}
+.layer .lfiles{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.layer .lfiles span{font-family:var(--mono);font-size:11.5px;background:#f0f3f1;border:1px solid var(--line);border-radius:6px;padding:3px 8px;color:#33453c}
+.l-base{background:#e7f2ec}.l-domain{background:#fff}.l-agent{background:#e7eff5}
+.badge-base{background:#c4e0d1;color:#14543a}.badge-domain{background:#e8d9b8;color:#6d4712}.badge-agent{background:#c9dbe8;color:#234a66}
+/* ---------- 流程图 ---------- */
+.flow{display:grid;gap:10px;margin:18px 0}
+.flow .step{display:grid;grid-template-columns:46px 1fr auto;gap:14px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.flow .idx{width:46px;height:46px;border-radius:11px;display:grid;place-items:center;font-weight:800;font-size:16px;color:#fff}
+.flow .step .st{font-weight:700;font-size:14px}
+.flow .step .sd{font-size:12.8px;color:var(--muted)}
+.flow .side{font-family:var(--mono);font-size:11px;color:#3f5249;background:#eef2ef;border-radius:7px;padding:4px 9px;white-space:nowrap}
+.flow .join{text-align:center;color:var(--green);font-weight:700;font-size:13px;letter-spacing:3px}
+/* ---------- 时间线 ---------- */
+.master-tl{position:relative;margin:24px 0;padding-left:34px}
+.master-tl::before{content:"";position:absolute;left:13px;top:8px;bottom:8px;width:3px;background:linear-gradient(#156b4a,#356a91)}
+.master-tl .mt{position:relative;margin:0 0 14px}
+.master-tl .mt .dot{position:absolute;left:-32px;top:8px;width:15px;height:15px;border-radius:50%;background:#fff;border:3px solid var(--green)}
+.master-tl .mt .ph{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.master-tl .mt .ph .badge{font-size:11px;font-weight:800;letter-spacing:1px;padding:3px 10px;border-radius:6px}
+.master-tl .mt .ph .date{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.master-tl .mt .ph .commit{font-family:var(--mono);font-size:11.5px;color:#4a5c53;background:#eef2ef;border-radius:6px;padding:2px 8px}
+.master-tl .mt .ph .title{font-weight:700;font-size:15px}
+.master-tl .mt .desc{font-size:13px;color:#3a4a42;margin-top:3px}
+.b-a{background:#e7f2ec;color:#14543a}.b-b{background:#dcefe4;color:#14543a}.b-c{background:#f8eedc;color:#6d4712}
+.b-d{background:#f3e8c9;color:#6d4712}.b-e{background:#e7eff5;color:#234a66}.b-f{background:#e8d9b8;color:#6d4712}
+.b-g{background:#c9dbe8;color:#234a66}.b-h{background:#d9c9e8;color:#4a2a66}
+/* ---------- 巧思可折叠卡 ---------- */
+.clever{display:grid;gap:14px;margin:14px 0}
+.cv{background:var(--surface);border:1px solid var(--line);border-radius:13px;overflow:hidden;box-shadow:0 2px 10px rgba(28,41,34,.05)}
+.cv .cv-h{display:grid;grid-template-columns:44px 1fr auto;gap:14px;align-items:center;padding:13px 18px;background:#fafbfa;border-bottom:1px solid var(--line);cursor:pointer;user-select:none}
+.cv .cv-n{width:44px;height:44px;border-radius:11px;display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff}
+.cv .cv-t{font-weight:800;font-size:14.5px;line-height:1.4}
+.cv .cv-f{font-family:var(--mono);font-size:11px;color:var(--muted);background:#eef2ef;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.cv .cv-b{display:none;padding:6px 18px 16px}
+.cv.open .cv-b{display:block}
+.cv .cv-b p{font-size:13.6px;color:#33423b}
+.cv .cv-b .why{margin-top:10px;padding:10px 14px;border-radius:9px;background:var(--green-soft);border-left:3px solid var(--green);font-size:13px;color:#173b2d}
+.cv .toggle{color:var(--muted);font-size:18px;transition:.2s}
+.cv.open .toggle{transform:rotate(45deg)}
+/* ---------- 双栏 / 列表 / 响应式 ---------- */
+.dual{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}
+.check li{margin:6px 0;list-style:none;padding-left:28px;position:relative}
+.check li::before{content:"✓";position:absolute;left:2px;top:0;color:var(--green);font-weight:800}
+@media(max-width:860px){
+  .layout{grid-template-columns:1fr}
+  .toc{display:none}
+  .hero h1{font-size:25px}
+  .dual{grid-template-columns:1fr}
+  .cv .cv-h{grid-template-columns:40px 1fr}
+  .cv .cv-f{display:none}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="brand">
+      <div class="brand-mark">NG</div>
+      <div><strong>架构演化分析</strong><span>Mendeley NG · 报告二</span></div>
+    </div>
+    <nav id="tocNav"></nav>
+  </aside>
+
+  <main>
+    <header class="hero">
+      <div class="wrap">
+        <div class="kicker">Analysis · 演化分析</div>
+        <h1>Mendeley NG 基础层与领域模型演化分析</h1>
+        <p>从 322 个提交还原这套架构是怎么长出来的，以提交与 diff 为证据，不臆测。</p>
+        <div class="meta">
+          <span class="chip">依据 <b>322 提交</b></span>
+          <span class="chip">跨度 <b>2026-10-30 → 11-16</b></span>
+          <span class="chip">方法 <b>全量 log + 关键提交 diff</b></span>
+        </div>
+        <div class="conclusion"><b>结论先行：</b>不是「功能堆到不能再堆于是重构」，而是一条反复把手抄规则下沉到 shared/、把混在入口的职责迁到独立模块的收敛曲线。三次范式级切换，每一次都由领域里踩到的具体坑反向驱动基础层长出新能力。</div>
+      </div>
+    </header>
+
+    <div class="content">
+<section id="e1"><h2><span class="sec-no">1</span>演化时间线总览</h2><p class="lead">322 个提交，2026-10-30 → 2026-11-16，18 天，单分支 <code>main</code>。约 110 个提交是 <code>Release v0.1.X</code> 版本 bump，其余绝大多数不是「新增能力」，而是「把已在两处、三处写过的同一条规则收成一处」。</p><div class="master-tl"><div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-a">A</span><span class="date">2026-10-30</span><span class="commit">25fb08b</span><span class="title">奠基与功能铺开（55 提交）</span></div><div class="desc">单体 index.ts 337 行 + App.tsx 350 行；当天膨胀到 index.ts 5602 行，v0.1.3→v0.1.11</div></div><div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-b">B</span><span class="date">2026-10-31</span><span class="commit">32d661a</span><span class="title">体验打磨与索引韧性（58）</span></div><div class="desc">索引可中断、空态解释、format/budget 作废、大小写先于度量</div></div><div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-c">C</span><span class="date">2026-11-01</span><span class="commit">d58d7ce</span><span class="title">自审与量化（43）</span></div><div class="desc">审计索引文件本身、单实例锁、按键主线程耗时</div></div><div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-d">D</span><span class="date">2026-11-02</span><span class="commit">af4f4c3</span><span class="title">决定性拆包（53）</span></div><div class="desc">主进程拆六域、抽四个 hook、八个布尔收敛成单一 View</div></div><div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-e">E</span><span class="date">2026-11-03</span><span class="commit">426f06e</span><span class="title">状态新鲜度（23）</span></div><div class="desc">不再回写启动时读到的配置；README/HANDOFF 重写</div></div><div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-f">F</span><span class="date">2026-11-04</span><span class="commit">d0b839b</span><span class="title">状态簇继续外移（8）</span></div><div class="desc">useSelection / usePaneWidths / useExport</div></div><div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-g">G</span><span class="date">2026-11-05~06</span><span class="commit">ab086b5</span><span class="title">共享规则运动（44）</span></div><div class="desc">页数预算、clamp、位图尺寸、延时、文案、失败门逐个下沉到 shared/</div></div><div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-h">H</span><span class="date">2026-11-07</span><span class="commit">2d4757c</span><span class="title">正确性与第五轮评审（21）</span></div><div class="desc">三方裁决、/files 分页、15 项缺陷一次性修完</div></div><div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-a">I</span><span class="date">2026-11-08</span><span class="commit">e419fda</span><span class="title">信任边界与单测地基（5）</span></div><div class="desc">硬化 IPC + Vitest 3561 行 + CI/release 门禁</div></div><div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-b">J</span><span class="date">2026-11-09</span><span class="commit">8736d7e</span><span class="title">可验证性收尾（8）</span></div><div class="desc">拆 smoke/CSS、handler 行为测试、浮层栈纯规则、视口附近重绘</div></div><div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-c">K</span><span class="date">2026-11-10</span><span class="commit">f6ca764</span><span class="title">发布门禁修补（1）</span></div><div class="desc">annotated tag 判定前先 fetch tag 对象</div></div><div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-d">L</span><span class="date">2026-11-16</span><span class="commit">ba932c0</span><span class="title">字段级检索（3）</span></div><div class="desc">参考文献索引、归一化统一、返回全部命中</div></div></div><table><thead><tr><th>日期</th><th>提交数</th><th>阶段</th><th>主导动作</th></tr></thead><tbody><tr><td>10-30</td><td>55</td><td>A</td><td>一个单体 index.ts + 一个 App.tsx，从 v0.1.3 冲到 v0.1.11</td></tr><tr><td>10-31</td><td>58</td><td>B</td><td>全文索引可中断、空态解释、图标迭代</td></tr><tr><td>11-01</td><td>43</td><td>C</td><td>单实例锁、索引文件自审、性能测量</td></tr><tr><td>11-02</td><td>53</td><td>D</td><td>主进程拆包 / hook 抽取 / 单一 View 范式切换</td></tr><tr><td>11-05~06</td><td>44</td><td>G</td><td><b>共享规则运动</b>：shared/ 从 1 个文件长到 16 个</td></tr><tr><td>11-08~09</td><td>13</td><td>I/J</td><td>单测地基、行为测试、smoke/CSS 有序拆分</td></tr></tbody></table></section>
+<section id="e2"><h2><span class="sec-no">2</span>阶段详解：从单体到可验证结构</h2><h3>阶段 A｜初始提交就是 10016 行的完整应用</h3><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">git show 25fb08b --stat（节选）</span></div><pre><code data-lang="yaml">electron/main/index.ts         337   ← 入口 + 同步 + 四十多个 IPC + 窗口，全在一起
+src/App.tsx                    350   ← 全部状态与 JSX
+src/styles.css                 303   ← 全部样式
+shared/types.ts                 73   ← 领域模型（当时只有 73 行）
+27 files changed, 10016 insertions(+)</code></pre></div><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">git show 25fb08b:electron/main/index.ts（开头）</span></div><pre><code data-lang="ts">import { BrowserWindow, app, dialog, ipcMain, net, protocol, screen, shell } from 'electron'
+import fs from 'node:fs'
+import { Mendeley, findToken, importTokenFrom } from './mendeley'
+…
+async function sync(full: boolean) {
+  const c = ensureClient()
+  const folders = await c.allFolders()
+  const docs = await c.allDocuments((n) =&gt; status({ phase: 'documents', done: n, … }))</code></pre></div><h3>阶段 B/C｜缺陷驱动出索引状态机</h3><div class="grid2"><div class="card"><span class="tag">阶段 B</span><h4>32d661a · Make building the full-text index survivable</h4><p>可中断索引的起点，后来长出 <code>bytes</code> 锚点、<code>truncate</code> 与 entry 表同次 saveMeta。</p></div><div class="card"><span class="tag">阶段 B</span><h4>0dd0934 · Make an index that was interrupted still answer questions</h4><p>半份索引也要能回答，而不是报「从未建过」。</p></div><div class="card"><span class="tag">阶段 B</span><h4>4b47bfc · Say why an index from an older version has to be built again</h4><p>format / budget 两种作废原因各说各话的由来。</p></div><div class="card"><span class="tag">阶段 C</span><h4>d58d7ce · Audit the index itself, not just the rows it produces</h4><p>验证对象从「搜索结果」换成「索引文件本身」。</p></div></div><h3>阶段 E｜磁盘事实第一次被明确编码</h3><div class="callout ok"><span class="t">426f06e + 1ad07a9</span><i>Stop a sync from writing back the config it read when it started</i> / <i>Ask the app what it has rather than what it had a moment ago</i>。同步结束时 <code>saveConfig({ ...loadConfig(), lastSync })</code> 重新读盘，而不是复用函数开头的 <code>cfg</code>（<code>electron/main/library.ts:116</code>）。</div><h3>阶段 G｜共享规则运动（最密集的下沉期）</h3><table><thead><tr><th>提交</th><th>把什么收成一份</th></tr></thead><tbody><tr><td><code>ab086b5</code></td><td>页数预算的边界 / 默认值 / 夹取 → <code>shared/fullTextPages.ts</code></td></tr><tr><td><code>14c7f13</code></td><td>六处夹取 → <code>shared/clamp.ts</code></td></tr><tr><td><code>3178d14</code></td><td>四处位图尺寸规则 → <code>shared/bitmapPixelSize.ts</code></td></tr><tr><td><code>1ef32ea</code></td><td>查找与选区共用的行拼接合并 → <code>src/lib/rectLines.ts</code></td></tr><tr><td><code>a24279a</code> / <code>d2ee5a3</code></td><td>八处延时 / 十四处消息时长具名化</td></tr><tr><td><code>e024a9b</code></td><td>所有静默失败 → <code>shared/failures.ts</code> 的具名两道门</td></tr><tr><td><code>1525235</code></td><td>复制与导出共用的 citation key stem</td></tr></tbody></table><h3>阶段 I｜e419fda 一次提交换掉验证范式</h3><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">git show --stat e419fda（节选）</span></div><pre><code data-lang="yaml">shared/pathPolicy.ts          174 +++
+src/window.d.ts                20 +++
+src/lib/configWrite.ts         32 +++
+tests/renderer-pure.test.ts  2032 +++
+tests/security.test.ts        240 +++
+tests/shared.test.ts         1289 +++
+vitest.config.ts               17 +++
+31 files changed, 4642 insertions(+), 137 deletions(-)</code></pre></div><div class="callout warn"><span class="t">提交信息里的论点</span><i>Renderer-supplied paths, URLs and config values were trusted at the process boundary … Context isolation isolates code, it does not validate payloads.</i> 同一提交还修掉「两份手写 Api 已漂移」和「每次生产启动都打包整个 smoke 套件」。</div></section>
+<section id="e3"><h2><span class="sec-no">3</span>决定性重构深挖</h2><h3>af4f4c3｜5602 行单体拆成六域</h3><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">git show --stat af4f4c3</span></div><pre><code data-lang="yaml">electron/main/index.ts       | 5602 +-----------------------------------------   ← 删 5585 行
+electron/main/ipc/{docs,files,index,library,marks,system}.ts |  604 ++++
+electron/main/smoke.ts       | 4383 +++++++++++++++++++++++++++++++++++++
+electron/main/{demo,ftops,instance,library,perf,window}.ts  |  762 ++++
+19 files changed, 5860 insertions(+), 5585 deletions(-)</code></pre></div><table><thead><tr><th>旧位置（index.ts 内）</th><th>新位置</th><th>职责变化</th></tr></thead><tbody><tr><td>四十多个扁平 <code>ipcMain.handle</code></td><td><code>ipc/{library,system,docs,marks,files}.ts</code></td><td>按域分组，新增通道不再问「插在列表哪里」</td></tr><tr><td><code>sync()</code> / <code>ensureClient()</code> / <code>attachPdfs</code></td><td><code>library.ts</code> + <code>pdfindex.ts</code></td><td>同步编排从启动逻辑剥离</td></tr><tr><td>窗口创建 / bounds 记忆</td><td><code>window.ts</code></td><td>只管窗口</td></tr><tr><td>单实例锁 / 第二次点击</td><td><code>instance.ts</code></td><td>抽出纯函数 <code>wantsSingleInstance(argv)</code>，可测</td></tr><tr><td><code>protocol.handle</code> / 启动分支</td><td>留在 <code>index.ts</code></td><td>入口只剩 142 行，头注释改成 <i>The entry point, and nothing else.</i></td></tr><tr><td>混在入口末尾的 4383 行冒烟</td><td><code>smoke.ts</code></td><td>独立文件；后由 e419fda 改成动态 import 独立 chunk</td></tr></tbody></table><h3>f864926｜八个布尔标志 → 一个带 payload 的 View 联合类型</h3><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">git show f864926:src/lib/view.ts（节选）</span></div><pre><code data-lang="ts">/**
+ * The middle of the window used to be decided by a chain of eight
+ * ternaries — `adding ? … : importing ? … : ftMode ? …` — each one a
+ * separate piece of state that happened to be non-null. That is modes
+ * piled on top of each other, not a view: nothing says what is on screen
+ * now, only what was turned on last …
+ * A screen that is not showing is not merely hidden, it does not exist.
+ */
+export type View =
+  | { kind: 'library' } | { kind: 'fulltext' }
+  | { kind: 'import'; entries: Entry[] } | { kind: 'add' }
+  | { kind: 'dupes'; groups: DupeGroup[] }
+  | { kind: 'trash'; docs: Doc[] }
+  | { kind: 'annotations'; anns: Annotation[] }</code></pre></div><div class="callout ok"><span class="t">范式切换的本质</span>从「状态 = 若干独立标志」变成「状态 = 一个代数数据类型」：payload 随视图走，视图不显示时数据就不存在，从类型层面消除了 stale 副本。后续 <code>ba89d99</code>（reading 成为独立 View）、<code>c0d575c</code>（<code>viewAfterReadingToggle</code>）都是同一范式延伸。</div><h3>e419fda｜契约收敛的两行 diff</h3><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">git show e419fda -- electron/preload/index.ts</span></div><pre><code data-lang="yaml">-  openExternal: (url: string) =&gt; ipcRenderer.invoke('shell:openExternal', url),
++  openExternal: (url: string) =&gt;
++    ipcRenderer.invoke('shell:openExternal', url) as Promise&lt;{ ok: boolean; error?: string }&gt;,
+…
+-export type Api = typeof api
++export type { Api }</code></pre></div><h3>8736d7e｜有序拆分，不是按主题重排</h3><div class="callout info"><span class="t">构建布局反向约束源码结构</span><code>styles.css</code> 从 1919 行变成 12 行 <code>@import</code>，分片「逐字切出、规则顺序不可重排」（改动时先拼接与 HEAD 逐字节比对）。<code>smoke-*.ts</code> 只能用静态 import、必须与 <code>smoke.ts</code> 同级——主进程用 <code>__dirname</code> 定位 preload / renderer / 仓库根，chunk 多一层目录会让路径全失效。</div></section>
+<section id="e4"><h2><span class="sec-no">4</span>领域需求反向驱动基础层</h2><p class="lead">这是「基础层如何被炼成」的关键信号：新能力不是先设计好再等调用，而是领域里踩了坑之后被下沉进 <code>shared/</code>，并同时开放扩展点。每一次都是「具体事故 → 纯规则下沉 → 差分/行为测试锁定 → HANDOFF 补一条约定」。</p><div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">git show ab086b5 -- electron/main/fulltext.ts src/App.tsx</span></div><pre><code data-lang="yaml">-let pages = 3
++let pages = DEFAULT_FT_PAGES
++import { clampFullTextPages } from '../../shared/fullTextPages'
+-  const next = Math.max(1, Math.min(50, Math.floor(Number(n)) || 3))
++  const next = clampFullTextPages(n)
+// src/App.tsx
+-  const next = Math.max(1, Math.min(50, Math.floor(n) || DEFAULT_FT_PAGES))
++  const next = clampFullTextPages(n)</code></pre></div><table><thead><tr><th>提交</th><th>领域里的事故</th><th>下沉出的基础层能力</th><th>扩展点 / 守护</th></tr></thead><tbody><tr><td><code>ab086b5</code></td><td>默认 3 抄在三处，改默认值要改三个文件，界面与索引可能给出不同答案</td><td><code>shared/fullTextPages.ts</code>：边界+默认值+夹取一份</td><td>190 输入差分断言 + 一条「旧规则确实会不一致」对照</td></tr><tr><td><code>f073acd</code></td><td>5399 个附件被看成 200：marker 传成 document_id，服务器永远回第一页</td><td><code>shared/filePages.ts</code> + <code>shared/paged.ts</code> 双终止条件</td><td><code>observe</code> 包装 + <code>fetchPage</code> 注入插槽</td></tr><tr><td><code>2d4757c</code></td><td>同步在途移入回收站的论文被写回来，增量合并让它一直留到全量拉取</td><td><code>shared/libraryReconcile.ts</code> 四快照三方裁决</td><td>不碰磁盘/网络/Electron/React；587e439 升级为字段级合并</td></tr><tr><td><code>ba932c0</code></td><td>双空格查询：书目表搜不到、参考文献却能搜到；İ 小写后偏移整体错位</td><td><code>normaliseQuery</code> 折叠空白；<code>RefEntry.hay</code> 归一化副本</td><td>hay 可选，旧缓存不用重建；HANDOFF 同步改写契约为「有意放宽」</td></tr><tr><td><code>e024a9b</code></td><td>无名字的空 catch 散落各处，无法与「有意忽略」区分</td><td><code>shared/failures.ts</code> 具名两道门 + sink 审计</td><td><code>FailureReason</code> 字面量联合，用类型系统防止被绕过</td></tr></tbody></table><div class="callout ok"><span class="t">最典型的句子</span><code>ab086b5</code> 提交信息：<i>Changing the default meant editing three files, and missing one would make the value the Settings panel writes differ from the value the main process falls back to for the same config entry.</i> 后续 <code>f6fdac6</code>、<code>92b194b</code> 继续把第三、第四个调用点「吸」进同一份规则。</div></section>
+<section id="e5"><h2><span class="sec-no">5</span>演化规律总结</h2><h3>维度对比表（演化前 vs 演化后）</h3><table><thead><tr><th>#</th><th>维度</th><th>演化前（10-30）</th><th>演化后（11-16）</th></tr></thead><tbody><tr><td>1</td><td>入口职责</td><td><code>index.ts</code> 5602 行：启动+同步+40 个 IPC+冒烟</td><td><code>index.ts</code> 142 行，六域注册器 + 独立 smoke</td></tr><tr><td>2</td><td>视图表示</td><td>8 个布尔标志 + 三元链，payload 与标志并列</td><td>单一 <code>View</code> 联合类型，payload 随视图走</td></tr><tr><td>3</td><td>跨进程契约</td><td>两份手写 Api，已漂移（<code>openExternal: void</code>）</td><td>唯一 <code>global.d.ts</code> + <code>const api: Api</code> 编译期校验</td></tr><tr><td>4</td><td>规则位置</td><td>夹取/页数/UA/归一化在调用点手抄 2~5 份</td><td><code>shared/</code> 16 个纯规则模块</td></tr><tr><td>5</td><td>信任边界</td><td>mendeley://pdf 可取任意本地文件、export 可越界</td><td>全部输入经 pathPolicy；<code>satisfies</code> 让漏审配置成为编译错误</td></tr><tr><td>6</td><td>回归手段</td><td>12k 行真实窗口冒烟（唯一），不能进 CI</td><td>519 个纯 Node Vitest + CI/release 双门禁</td></tr><tr><td>7</td><td>并发正确性</td><td>并行同步互踩水印；在途编辑被覆盖；分页死循环</td><td>syncQueue + 四快照裁决 + paged 双终止条件</td></tr><tr><td>8</td><td>失败语义</td><td>无名字的空 catch 散落各处</td><td>FAILURE 字面量联合 + 两道具名门 + sink 审计</td></tr><tr><td>9</td><td>新增领域成本</td><td>往 index.ts 列表末尾插一个 handle</td><td>判断属于哪个 ipc/*.ts；新配置键被编译期强制审查</td></tr><tr><td>10</td><td>文档与代码</td><td>HANDOFF 是功能清单</td><td>按主题写「改这些地方之前先读」，记录坑与判据</td></tr></tbody></table><h3>四股驱动力量</h3><div class="grid2"><div class="card"><span class="tag">驱动</span><h4>① 范式觉醒（最高效）</h4><p><code>f864926</code> 把「模式堆叠」换成带 payload 的联合类型；<code>e419fda</code> 把「隔离=安全」改写成「隔离只隔离代码」。不是加功能，是换掉问题的定义。</p></div><div class="card"><span class="tag">驱动</span><h4>② 领域反向驱动基础层（最高频）</h4><p><code>ab086b5</code>/<code>f073acd</code>/<code>2d4757c</code>/<code>ba932c0</code>：每次都是具体事故 → 纯规则下沉 → 差分测试锁定 → HANDOFF 补约定。<code>shared/</code> 是这么长出来的。</p></div><div class="card"><span class="tag">驱动</span><h4>③ 工具 / 可验证性驱动</h4><p>引入 Vitest 与 CI 后，后续 8 天变成「先补纯规则单测，再改接线」：<code>1fd4437</code> 浮层栈、<code>dd0ec75</code> handler 行为测试、<code>ea5686f</code> 同步与标注接线。有了便宜的回归才敢继续拆。</p></div><div class="card"><span class="tag">驱动</span><h4>④ 文档沉淀后再实现</h4><p><code>d75596a</code> 先记第五轮评审 backlog，<code>02aa9b6</code> 再一次修完 15 项；<code>be15f20</code>/<code>97fb679</code> 把 README/HANDOFF 重写到与当前树一致。文档是设计载体而非事后说明。</p></div></div><div class="callout ok"><span class="t">贯穿全史的判据</span><b>「一份规则」比「一个功能」更值得提交。</b><code>HANDOFF.md:300-301</code> 把方法固化为：抽共享规则前把旧表达式逐行抄进测试、对大批量输入逐值比，并单独证明退化差异真实存在；共享常量不等于共享规则，「怎么夹取」也要收进同一模块。</div></section>
+<section id="e6"><h2><span class="sec-no">6</span>结论</h2><p class="lead">这 18 天不是「从零写了一个应用」，而是「把一个已经能跑的单体，沿着『磁盘事实可信 / 跨进程输入不可信 / 异步结果需要归属标记』三条约束，一层层剥成可验证的结构」。三次范式切换各自解决一类不可靠性：入口拆包解决<b>职责不可辨</b>，<code>View</code> 联合类型解决<b>状态不可信</b>，单测地基解决<b>改动不可验</b>。</p><div class="callout warn"><span class="t">遗留的演化断点（已被主动登记）</span><code>HANDOFF.md:682-698</code>：<code>App.tsx</code> 剩余状态簇、<code>smoke.ts</code> 剩余的 UI 驱动链、<code>fulltext.ts</code> 索引状态机仍主要靠源码串断言守护、五份 JSON 无 schema 版本。它们是「下一轮」的起点，而不是遗漏。</div></section>
+<div class="callout ok"><span class="t">重构后记（2026-11-16）</span>本轮重构继续了第 5.2 节描述的「一份规则被逐步吸走所有调用点」模式：把剩余四个检索 UI、七个脚本的公共底座与两份 workflow 的产物校验接回共享实现，并为每次抽规则补上逐值差分测试。详见 <code>analysis/优化重构说明.md</code>。</div>
+      <footer style="margin-top:70px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><span>Mendeley NG 架构演化分析报告 · 依据 322 个提交</span><span><a href="./mendeley-ng架构实现分析.html">架构实现</a> · <a href="./mendeley-ng架构演化分析.html">演化分析</a> · <a href="./mendeley-ng第一性原理与设计巧思分析.html">第一性原理与巧思</a></span></footer>
+    </div>
+  </main>
+</div>
+
+<script>
+/* ---------- 目录生成 + scrollspy ---------- */
+(function(){
+  var nav = document.getElementById('tocNav');
+  var sections = document.querySelectorAll('section[id]');
+  var html = '<div class="toc-label">目录</div>';
+  sections.forEach(function(s){
+    var no = s.querySelector('.sec-no');
+    var t = s.querySelector('h2');
+    if(!t) return;
+    var label = (no ? no.textContent + ' · ' : '') + t.textContent.replace(no ? no.textContent : '', '').trim();
+    html += '<a href="#' + s.id + '" data-target="' + s.id + '">' + label + '</a>';
+    s.querySelectorAll('h3').forEach(function(h3){
+      var id = s.id + '-' + h3.textContent.replace(/\s+/g,'').slice(0,8);
+      h3.id = id;
+      html += '<a class="l2" href="#' + id + '" data-target="' + id + '">' + h3.textContent + '</a>';
+    });
+  });
+  nav.innerHTML = html;
+  var links = nav.querySelectorAll('a');
+  var map = {};
+  links.forEach(function(a){ map[a.dataset.target] = a; });
+  var targets = [];
+  document.querySelectorAll('h2[id],h3[id],section[id]').forEach(function(el){ if(el.id) targets.push(el); });
+  window.addEventListener('scroll', function(){
+    var pos = window.scrollY + 90, current = null;
+    for(var i=0;i<targets.length;i++){
+      if(targets[i].offsetTop <= pos) current = targets[i];
+    }
+    links.forEach(function(a){ a.classList.remove('active'); });
+    if(current && map[current.id]) map[current.id].classList.add('active');
+  }, {passive:true});
+})();
+
+/* ---------- 巧思卡展开 ---------- */
+(function(){
+  document.querySelectorAll('.cv .cv-h').forEach(function(header){
+    header.addEventListener('click', function(){
+      header.parentElement.classList.toggle('open');
+    });
+  });
+})();
+
+/* ---------- 轻量代码高亮（Python / YAML） ---------- */
+(function(){
+  var KEYWORDS = new Set(("def class return import from if elif else for in not and or raise with try except lambda "+
+    "yield pass break continue global nonlocal del assert async await is None True False self super").split(' '));
+  var YAML_KEYS = new Set(("schema name version description objects relations functions actions properties type required "+
+    "from to ref runtime implementation model property_definitions object_types relation_types interaction_policies "+
+    "presentation_tools available_on context_input requires confirmation handler icon inputs effects summary params "+
+    "status details role code amount period date datetime string number boolean json money open mutable source "+
+    "id_field config database kind display_name type_policy mutability data_source instructions acyclic from_types "+
+    "to_types default message create_object update_object delete_object create_relation update_relation delete_relation").split(' '));
+  function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function colorize(code, lang){
+    var out = '', i = 0, n = code.length;
+    var isYaml = lang === 'yaml';
+    while(i < n){
+      var c = code[i];
+      if(c === '#' && (i === 0 || code[i-1] === '\n')){
+        var j = code.indexOf('\n', i); if(j === -1) j = n;
+        out += '<span class="tok-c">' + esc(code.slice(i, j)) + '</span>'; i = j; continue;
+      }
+      if(c === '"' || c === "'"){
+        var q = c, j = i + 1;
+        while(j < n){ if(code[j] === q){ j++; break; } if(code[j] === '\\') j++; j++; }
+        out += '<span class="tok-s">' + esc(code.slice(i, j)) + '</span>'; i = j; continue;
+      }
+      if(/[0-9]/.test(c) || (c === '-' && /[0-9]/.test(code[i+1]||''))){
+        var j = i; while(j < n && /[0-9.\-]/.test(code[j])) j++;
+        out += '<span class="tok-n">' + esc(code.slice(i, j)) + '</span>'; i = j; continue;
+      }
+      if(/[A-Za-z_\u4e00-\u9fa5]/.test(c)){
+        var j = i; while(j < n && /[A-Za-z0-9_\u4e00-\u9fa5]/.test(code[j])) j++;
+        var word = code.slice(i, j);
+        var next = code[j] || '';
+        if(isYaml && next === ':' && YAML_KEYS.has(word)) out += '<span class="tok-k">' + esc(word) + '</span>';
+        else if(!isYaml && KEYWORDS.has(word)) out += '<span class="tok-k">' + esc(word) + '</span>';
+        else if(/^[A-Z]/.test(word)) out += '<span class="tok-f">' + esc(word) + '</span>';
+        else out += esc(word);
+        i = j; continue;
+      }
+      if(c === '(' || c === ')' || c === '[' || c === ']' || c === '{' || c === '}'){
+        out += '<span class="tok-p">' + c + '</span>'; i++; continue;
+      }
+      out += esc(c); i++;
+    }
+    return out;
+  }
+  document.querySelectorAll('pre code[data-lang]').forEach(function(el){
+    el.innerHTML = colorize(el.textContent, el.dataset.lang);
+  });
+})();
+</script>
+</body>
+</html>

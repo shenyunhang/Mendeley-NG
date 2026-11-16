@@ -113,14 +113,9 @@ export function registerFilesIpc() {
     }
   })
 
-  ipcMain.handle('pdf:read', async (_e, p: string) => {
-    try {
-      const buf = fs.readFileSync(p)
-      return { ok: true, data: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) }
-    } catch (e) {
-      return { ok: false, error: String(e) }
-    }
-  })
+  // There is deliberately no channel that reads an arbitrary renderer-supplied
+  // path: that would bypass shared/pathPolicy.ts entirely. PDFs are served
+  // only through the mendeley:// scheme, which calls canServePdf first.
 
   // Full-text search.  Building the index reads every local PDF, which takes
   // minutes on a large library, so it is started on request and reports

@@ -31,7 +31,7 @@ export interface SearchClock {
   clear: (handle: unknown) => void
 }
 
-export const realSearchClock: SearchClock = {
+const realSearchClock: SearchClock = {
   set: (fn, ms) => setTimeout(fn, ms),
   clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>)
 }

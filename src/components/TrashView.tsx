@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { Doc } from '../../shared/types'
+import { normaliseQuery } from '../lib/searchScope'
 
 interface Props {
   docs: Doc[]
@@ -35,13 +36,13 @@ export default function TrashView({
   const [q, setQ] = useState('')
 
   const rows = useMemo(() => {
-    const s = q.trim().toLowerCase()
+    const s = normaliseQuery(q)
     if (!s) return docs
     return docs.filter((d) =>
-      [d.title, d.source, d.citation_key, (d.authors ?? []).map((a) => a.last_name ?? '').join(' ')]
-        .join(' ')
-        .toLowerCase()
-        .includes(s)
+      normaliseQuery(
+        [d.title, d.source, d.citation_key, (d.authors ?? []).map((a) => a.last_name ?? '').join(' ')]
+          .join(' ')
+      ).includes(s)
     )
   }, [docs, q])
 

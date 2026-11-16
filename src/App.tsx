@@ -291,7 +291,11 @@ export default function App() {
         setRefsStatus(s)
         if (s.indexed === 0 && s.total > 0) void buildRefs()
       })
-      .catch(() => undefined)
+      .catch((e: unknown) => {
+        // A rejected invoke is a fault too, not an empty index. Without this
+        // the panel keeps stale hits and never says anything is wrong.
+        if (live) setRefsError('参考文献索引状态读取失败：' + String(e))
+      })
     return () => {
       live = false
     }
@@ -336,7 +340,13 @@ export default function App() {
           setRefsError(null)
           setRefsHits(r)
         })
-        .catch(() => undefined)
+        .catch((e: unknown) => {
+          // clearTimeout cannot recall an invoke that was already sent, so
+          // check the word again here before writing anything to the panel.
+          if (live && normaliseQuery(query) === q) {
+            setRefsError('参考文献查询失败：' + String(e))
+          }
+        })
     }, REFERENCE_SEARCH_DEBOUNCE_MS)
     return () => {
       live = false

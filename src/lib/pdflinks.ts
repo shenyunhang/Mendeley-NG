@@ -46,7 +46,7 @@ interface RawLink {
  */
 const SAFE = new Set(['http:', 'https:', 'mailto:'])
 
-export function safeUrl(raw?: string): string | undefined {
+function safeUrl(raw?: string): string | undefined {
   if (!raw) return undefined
   try {
     const u = new URL(raw)
@@ -58,7 +58,7 @@ export function safeUrl(raw?: string): string | undefined {
 
 /** pdf.js gives a rectangle as two corners in PDF points, origin bottom left;
  *  the page's own box has its origin at the top. */
-export function linkBox(rect: number[] | undefined, s: Size) {
+function linkBox(rect: number[] | undefined, s: Size) {
   if (!rect || rect.length < 4 || !s.w || !s.h) return null
   const x1 = Math.min(rect[0], rect[2])
   const x2 = Math.max(rect[0], rect[2])
@@ -78,7 +78,7 @@ export function linkBox(rect: number[] | undefined, s: Size) {
  * async.  Papers point at destinations that do not exist often enough that a
  * failure is simply "no link" rather than something to report.
  */
-export async function destPage(
+async function destPage(
   pdf: pdfjs.PDFDocumentProxy,
   dest: unknown
 ): Promise<number | null> {

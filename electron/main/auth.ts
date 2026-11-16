@@ -33,7 +33,7 @@ export type AuthResult = { ok: true } | { ok: false; error: string }
  *  signing in and every one of those has to be left alone. */
 const REDIRECT_ORIGIN = new URL(OAUTH_REDIRECT).origin
 
-export function authorizeUrl(clientId: string): string {
+function authorizeUrl(clientId: string): string {
   return (
     `${AUTH_URL}?client_id=${encodeURIComponent(clientId)}` +
     `&redirect_uri=${encodeURIComponent(OAUTH_REDIRECT)}` +

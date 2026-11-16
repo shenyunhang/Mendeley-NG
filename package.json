@@ -13,6 +13,7 @@
     "perf": "node scripts/start.mjs --perf",
     "demo": "node scripts/demo.mjs",
     "build": "electron-vite build && node scripts/copy-worker.mjs",
+    "verify:build": "node scripts/verify-build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:watch": "vitest",
