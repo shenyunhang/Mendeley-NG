@@ -232,7 +232,7 @@ scripts/
   verify-build.mjs      产物校验，ci.yml 与 release.yml 只调这一份
   ...                   启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
 docs/screenshots/        README 的四张图，由 npm run demo 生成
-analysis/                三份分析报告（架构实现 / 演化 / 第一性原理与巧思，各含 md + 自包含 html）与一份重构说明
+analysis/                三份分析报告（架构实现 / 演化 / 第一性原理与巧思，各含 md + 自包含 html）
 .github/workflows/       ci.yml（类型 / 单测 / 构建 / 产物）、release.yml（打包与发布）
 vitest.config.ts         test 只收 tests/**/*.test.ts，环境为 node
 electron.vite.config.ts  main / preload / renderer 三段构建配置

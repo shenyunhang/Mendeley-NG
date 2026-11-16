@@ -270,4 +270,4 @@ diff 显示两边同时被替换：
 
 遗留的演化断点也很清楚，且都被 `HANDOFF.md:682-698` 主动登记：`App.tsx` 剩余状态簇、`smoke.ts` 剩余的 UI 驱动链、`fulltext.ts` 索引状态机仍主要靠源码串断言守护、五份 JSON 无 schema 版本。
 
-> 相关文档：[架构演化分析 HTML](./mendeley-ng架构演化分析.html) · [架构实现分析](./mendeley-ng架构实现分析.md) · [第一性原理与设计巧思分析](./mendeley-ng第一性原理与设计巧思分析.md) · [优化重构说明](./优化重构说明.md)
+> 相关文档：[架构演化分析 HTML](./mendeley-ng架构演化分析.html) · [架构实现分析](./mendeley-ng架构实现分析.md) · [第一性原理与设计巧思分析](./mendeley-ng第一性原理与设计巧思分析.md)

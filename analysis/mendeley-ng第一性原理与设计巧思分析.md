@@ -323,7 +323,7 @@ A 与 C 两列主要对应存储层与索引层，B 对应协议层，D 对应�
 2. **通用性换来的性能代价与页数取舍**。`shared/fullTextPages.ts` 默认只索引每篇前 3 页：`electron/main/fulltext.ts:60-64` 记着 5245 篇全页约 293 MB / 前三页约 60 MB 的实测，代价是搜不到时必须说清"读了多少页、这不等于库里没有"，且改页数会丢索引（`README.md:277-281`）。
 3. **开放词汇的语义治理成本**。`DOC_TYPES` 白名单之外的值留空显示「（未设）」而不是顶成第一项（`HANDOFF.md:362-363`）；BibTeX 没有独立类型名的网页/专利/程序只能写成 `@misc`，导回会变成 `generic`（`README.md:245`）——这是通用交换格式的固有损失，
 4. **可验证性本身有未覆盖区间**。`fulltext.ts` 索引状态机与 `App.tsx` 剩余状态簇仍主要靠 smoke 的源码串断言和真实库自检守着（`HANDOFF.md:695-698`）；`smoke` 因需要真实窗口而无法进 CI，最重的一层回归只能本地跑。
-5. **一份规则的纪律有维护成本**。`HANDOFF.md:616-621` 明令"别再让某个范围自己写一遍 `trim().toLowerCase()`"，分析时 `TrashView.tsx:38`、`NotesView.tsx:54`、`FolderTree.tsx:88`、`AddByIdView.tsx:28` 各写一份，`SearchResults.tsx:104` 漏了折叠空白导致"能命中却不高亮"。**规则存在 ≠ 所有调用点都接上了**；这四个调用点与结果卡片已统一到 `normaliseQuery`（改动与验证见 [优化重构说明](./优化重构说明.md)）。
+5. **一份规则的纪律有维护成本**。`HANDOFF.md:616-621` 明令"别再让某个范围自己写一遍 `trim().toLowerCase()`"，`TrashView.tsx:38`、`NotesView.tsx:54`、`FolderTree.tsx:88`、`AddByIdView.tsx:28` 各写一份，`SearchResults.tsx:104` 漏了折叠空白导致"能命中却不高亮"。**规则存在 ≠ 所有调用点都接上了**。
 
 ---
 
@@ -335,4 +335,4 @@ A 与 C 两列主要对应存储层与索引层，B 对应协议层，D 对应�
 
 未收敛的部分是**这份纪律还没铺满所有调用点**（第 5 节第 5 条）：漂移的调用点、被空吞的故障、未覆盖的纯逻辑、重复的构建脚本。抽共享规则须遵守 `HANDOFF.md:300-301`「先逐值差分」。
 
-> 相关文档：[第一性原理与设计巧思分析 HTML](./mendeley-ng第一性原理与设计巧思分析.html) · [架构实现分析](./mendeley-ng架构实现分析.md) · [架构演化分析](./mendeley-ng架构演化分析.md) · [优化重构说明](./优化重构说明.md)
+> 相关文档：[第一性原理与设计巧思分析 HTML](./mendeley-ng第一性原理与设计巧思分析.html) · [架构实现分析](./mendeley-ng架构实现分析.md) · [架构演化分析](./mendeley-ng架构演化分析.md)

@@ -248,7 +248,7 @@ mendeley://pdf/<path>（src/components/PdfViewer.tsx）
 
 分层把「云端只是同步源、磁盘才是真相」这条产品约束翻译成可执行的结构：领域层与外部世界打交道并产生「提议」，基础层的纯规则裁决，协议层把不可信输入挡在门外，纯规则层因为无 DOM 而可以被三端共用与被单测穷举。
 
-分析时识别出的六个优化方向（下表描述分析当时的问题，均已落地）；改动与验证见 [优化重构说明](./优化重构说明.md)：
+分析识别出的六个优化方向：
 
 | 方向 | 具体问题 | 风险 |
 | --- | --- | --- |
@@ -259,4 +259,4 @@ mendeley://pdf/<path>（src/components/PdfViewer.tsx）
 | 构建脚本 | `.github/workflows/ci.yml:59-97` 与 `release.yml:107-145` 的 39 行产物校验逐字重复；`scripts/start.mjs` 与 `demo.mjs` 启动样板重复 | 中（抽公共脚本） |
 | 测试缺口 | `export.ts` / `importText.ts` / `updateText.ts` / `doctypes.ts` 有实质纯逻辑但无纯 Node 单测 | 极低（只加测试） |
 
-> 相关文档：[架构实现分析 HTML](./mendeley-ng架构实现分析.html) · [架构演化分析](./mendeley-ng架构演化分析.md) · [第一性原理与设计巧思分析](./mendeley-ng第一性原理与设计巧思分析.md) · [优化重构说明](./优化重构说明.md)
+> 相关文档：[架构实现分析 HTML](./mendeley-ng架构实现分析.html) · [架构演化分析](./mendeley-ng架构演化分析.md) · [第一性原理与设计巧思分析](./mendeley-ng第一性原理与设计巧思分析.md)

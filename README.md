@@ -315,7 +315,7 @@ scripts/
   verify-build.mjs         产物校验（ci.yml 与 release.yml 共用这一份）
   ...                      启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
 docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
-analysis/                  三份分析报告（架构实现 / 演化 / 第一性原理与巧思，各含 md + 自包含 html）与一份重构说明
+analysis/                  三份分析报告（架构实现 / 演化 / 第一性原理与巧思，各含 md + 自包含 html）
 .github/workflows/
   ci.yml                   每次 push / PR 跑 typecheck + test + build + verify:build
   release.yml              推 v* tag 时先验 typecheck + test，再构建安装包并挂到 Release
