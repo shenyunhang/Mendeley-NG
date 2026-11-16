@@ -2,8 +2,8 @@
 
 > **分析对象**：`D:/mendeley-ng`（本地优先的 Mendeley 桌面客户端，Electron 33 + React 18 + pdf.js 4.10）
 > **分析日期**：2026-11-16
-> **分析方法**：逐文件读源码、交叉核对 import 方向、`git log` 全量 322 提交、基线跑通 `typecheck` / `npm test`（519 用例）/ `npm run build`
-> **结论先行**：这是一个**以「磁盘事实是唯一真相」为第一性约束、以「纯规则层可测试化」为组织原则**的分层架构。`shared/` 是无领域依赖的基础规则层，`src/lib/` 是同构纯规则层，`electron/main/` 是有状态的领域实现层，`electron/main/ipc/` 是薄协议层，`src/App.tsx` + `components/` 是展示层；依赖方向严格单向，唯一被允许的"跨层"是主进程显式白名单复用无 DOM 的纯函数。四类结合机制（单一 `Api` 契约、域级注册器聚合、`contextBridge` 白名单、`configWrite` 单入口）把"渲染层不可信输入"关在闸门之外。代价也很明确：`App.tsx` 2720 行、`smoke.ts` 11712 行仍是高耦合区间；五份 JSON 缓存没有 schema 版本与迁移；原子写盘对多进程不安全。
+> **验证**：`typecheck`、550 个单测、`npm run build` 均通过；代码与文档行号为分析时定位
+> **结论先行**：磁盘事实是唯一真相；分层依赖严格单向，纯规则层可三端共用与被单测穷举。代价是 `App.tsx` 2720 行、`smoke.ts` 11712 行仍是高耦合区间，五份 JSON 无 schema 版本与迁移，原子写不是并发安全的。
 
 ---
 
@@ -13,7 +13,7 @@
 
 | 维度 | 事实 | 证据 |
 | --- | --- | --- |
-| 代码量 | TS/TSX 合计 40,433 行；主进程 32 个 `.ts`、渲染层 71 个 `.ts` + 27 个 `.tsx`、shared 16 个 `.ts`、单测 14 个 `.test.ts` | `find … -exec wc -l` |
+| 代码量 | TS/TSX 合计 40,433 行；主进程 32 个 `.ts`、渲染层 71 个 `.ts` + 27 个 `.tsx`、shared 16 个 `.ts`、单测 16 个 `.test.ts` | `find … -exec wc -l` |
 | 运行时依赖 | 只有 `electron-updater`；React / pdf.js / Vite / Vitest 全在 devDependencies（打包时由 electron-vite 内联） | `package.json:23-41` |
 | 构建 | `electron-vite build` 三段（main / preload / renderer）→ `scripts/copy-worker.mjs` 补 pdf.js worker | `package.json:15`、`electron.vite.config.ts` |
 | 验证 | `typecheck`（两个 tsconfig）→ `npm test`（Vitest，纯 Node）→ `npm run build` → `npm run smoke`（真实窗口） | `HANDOFF.md:126-146` |
@@ -30,7 +30,7 @@
 外部        Mendeley REST / Crossref / arXiv / GitHub Releases
 ```
 
-**关键判断**：`shared/` 是真正的基础层（没有任何业务对象的实现，只有规则），`src/lib/` 是"同构纯规则层"——物理上在 `src/` 下，但被主进程、冒烟、单测三处 import。`HANDOFF.md:228-232` 把它写成了约定：*「`App.tsx` 与 `src/lib/hooks/` 持有状态；`src/lib/` 与 `shared/` 是纯规则，不碰 React / DOM，所以主进程、冒烟和单测都能直接喂假时钟与手控 promise 去验证」*。
+`shared/` 是真正的基础层（没有任何业务对象的实现，只有规则），`src/lib/` 是"同构纯规则层"——物理上在 `src/` 下，但被主进程、冒烟、单测三处 import。`HANDOFF.md:228-232` 把它写成了约定：*「`App.tsx` 与 `src/lib/hooks/` 持有状态；`src/lib/` 与 `shared/` 是纯规则，不碰 React / DOM，所以主进程、冒烟和单测都能直接喂假时钟与手控 promise 去验证」*。
 
 ---
 
@@ -72,7 +72,7 @@
 
 ### 2.3 协议层 `electron/main/ipc/` + preload
 
-`ipc/index.ts:22-29` 是聚合器，注释把演化动机写得很清楚：
+`ipc/index.ts:22-29` 是聚合器：
 
 ```ts
 // electron/main/ipc/index.ts:8-20
@@ -121,11 +121,11 @@ export function registerIpc() {
 ]
 ```
 
-`src/lib/annotationMerge.ts:16` 自述 *"Nothing here touches the DOM, React, Electron or the network"*；`HANDOFF.md:603-606` 还专门记了一条雷区：`view.ts` 的 `Entry` 必须直接从 `importText.ts` 取，不能经 `import.ts` 转导出（后者带 `DOMParser`，会把 DOM 类型拉进 node 工程）。**结论：不是失控的反向依赖，是刻意设计的同构纯函数共享层。**
+`src/lib/annotationMerge.ts:16` 自述 *"Nothing here touches the DOM, React, Electron or the network"*；`HANDOFF.md:603-606` 还专门记了一条雷区：`view.ts` 的 `Entry` 必须直接从 `importText.ts` 取，不能经 `import.ts` 转导出（后者带 `DOMParser`，会把 DOM 类型拉进 node 工程）。主进程对 `src/lib/` 的复用由编译配置显式授权且被约束为无 DOM，依赖方向仍单向。
 
 ### 3.2 复用证据（同一基础规则被多个上层使用）
 
-`shared/fullTextPages.ts` 同时被 `electron/main/fulltext.ts:11`（索引构建）、`src/lib/pageBudgetCommit.ts:4`（设置面板）、`src/lib/hooks/useConfig.ts:6`（开机恢复）、`electron/main/smoke-budget.ts:6`（自检）引用；`shared/clamp.ts` 被 6 处引用；`shared/paged.ts` 被 `mendeley.ts` 与 `filePages.ts` 两处不同语义的调用方复用。这正是基础层"不含业务词、被多个上层复用"的判据。
+`shared/fullTextPages.ts` 同时被 `electron/main/fulltext.ts:11`（索引构建）、`src/lib/pageBudgetCommit.ts:4`（设置面板）、`src/lib/hooks/useConfig.ts:6`（开机恢复）、`electron/main/smoke-budget.ts:6`（自检）引用；`shared/clamp.ts` 被 6 处引用；`shared/paged.ts` 被 `mendeley.ts` 与 `filePages.ts` 两处不同语义的调用方复用。
 
 ### 3.3 扩展点
 
@@ -168,7 +168,7 @@ export function registerIpc() {
   → ⑨ 回推 sync:status → 渲染层 useLibrary 合并      electron/main/window.ts
 ```
 
-第 ⑦ 步是整条链路的信任核心：`electron/main/library.ts:103-109` 在写盘前重读磁盘：
+第 ⑦ 步：`electron/main/library.ts:103-109` 在写盘前重读磁盘：
 
 ```ts
 const current = loadLibrary()
@@ -219,7 +219,7 @@ mendeley://pdf/<path>（src/components/PdfViewer.tsx）
 | ② 进程边界 | 路径、URL、导出文件名、配置键类型；`../`、绝对路径、盘符相对、UNC、NUL 整批拒绝 | `shared/pathPolicy.ts:49-56` `resolveInside`、`:62-70` `isSafeExternalUrl`、`:149-174` `safeConfigPatch`；调用点 `ipc/system.ts:116-126`、`:266-276`、`ipc/library.ts:52-64` |
 | ③ 存储一致性 | tmp+rename 原子写；`bytes` 锚点与 entry 表同一次 `saveMeta`；索引作废分 `format`/`budget`；busy 互斥与 pending 队列 | `shared/atomicJson.ts:7-11`、`electron/main/fulltext.ts:515-521`、`:303-308`、`:854-857` |
 | ④ 语义裁决 | 云端提议不能覆盖在途本地编辑；已回收的文献不能复活；并行同步不能互踩水印 | `shared/libraryReconcile.ts:31-75`、`shared/syncQueue.ts:17-23`、`shared/filePages.ts:36-44` |
-| ⑤ 行为回归 | 14 个 Vitest 文件 519 个纯 Node 用例 + 主进程 handler 替身测试；`npm run smoke` 真实窗口端到端；CI / release 两道产物门禁 | `vitest.config.ts:15`、`tests/main-ipc-system.test.ts`、`.github/workflows/ci.yml:59-97` |
+| ⑤ 行为回归 | 16 个 Vitest 文件 550 个纯 Node 用例 + 主进程 handler 替身测试；`npm run smoke` 真实窗口端到端；CI / release 两道产物门禁 | `vitest.config.ts:15`、`tests/main-ipc-system.test.ts`、`scripts/verify-build.mjs` |
 
 **分层在数据侧的体现**：`shared/` 的通用工具（原子写、分页、夹取）不知道"文献"是什么；语义由领域层解释（`filePages.ts` 才知道 marker 是文件 id、`fullTextPages.ts` 才知道默认 3 页）。`HANDOFF.md:324-326` 把这条写成纪律：*「跨 IPC 的规则（页数预算、位图尺寸、夹取、延时、静默失败、路径策略）也只留一份，别在调用点手抄」*。
 
@@ -227,14 +227,14 @@ mendeley://pdf/<path>（src/components/PdfViewer.tsx）
 
 ## 7. 架构评估
 
-### 7.1 优势（每条有代码依据）
+### 7.1 优势
 
-1. **依赖方向干净且被编译配置强制执行**。`shared/` 零反向依赖；主进程复用 `src/lib/` 纯函数必须先进 `tsconfig.node.json` 白名单，而该工程的 `lib` 只有 `ES2022`（无 DOM），任何把 `document`/`window` 带进来的改动立刻编译失败（`HANDOFF.md:603-606` 记了这个坑）。这让"纯规则层"不是口头约定。
-2. **可测试性是架构目标，不是附属品**。`e419fda` 一次提交引入 `shared/pathPolicy.ts` + `vitest.config.ts` + 3 个测试文件（2561 行），把过去只能靠 12k 行真实窗口冒烟验证的规则下沉成 519 个纯 Node 用例；`tests/main-ipc-*.test.ts` 用 `vi.mock('electron')` 捕获 `ipcMain.handle` 后直接调用 channel，测的是「channel 回答什么」而不是「源码里有没有那一行」。
+1. **依赖方向干净且被编译配置强制执行**。`shared/` 零反向依赖；主进程复用 `src/lib/` 纯函数必须先进 `tsconfig.node.json` 白名单，而该工程的 `lib` 只有 `ES2022`（无 DOM），任何把 `document`/`window` 带进来的改动立刻编译失败（`HANDOFF.md:603-606` 记了这个坑）。
+2. `e419fda` 一次提交引入 `shared/pathPolicy.ts` + `vitest.config.ts` + 3 个测试文件（3561 行），把过去只能靠 12k 行真实窗口冒烟验证的规则下沉成纯 Node 用例；`tests/main-ipc-*.test.ts` 用 `vi.mock('electron')` 捕获 `ipcMain.handle` 后直接调用 channel，测的是「channel 回答什么」而不是「源码里有没有那一行」。
 3. **信任边界收在一处**。`contextIsolation:true` 只隔离代码不校验数据——`e419fda` 的提交信息原话是 *"Context isolation isolates code, it does not validate payloads"*。所有不可信输入集中在 `shared/pathPolicy.ts`，且平台参数可注入，`tests/security.test.ts` 49 个用例可在 Linux runner 上验证 Windows 语义。
 4. **一份规则的纪律有回归测试兜底**。`ab086b5` 把页数预算下沉到 `shared/` 时，同时在 `smoke.ts` 写了 190 个输入的旧规则逐值差分断言，并单独证明「旧的两条规则确实会不一致」——`HANDOFF.md:300` 把这套方法固化为约定。
 
-### 7.2 代价（诚实列出）
+### 7.2 代价
 
 1. **两个高耦合区间未拆完**。`src/App.tsx` 2720 行仍持有 `setLib` 状态簇与 Esc 之后的键盘导航；`electron/main/smoke.ts` 11712 行仍有两段 UI 驱动链、读真实库的块、读自身源码的块。`HANDOFF.md:682-690` 明说拆它们要「连带重排冒烟里大量 UI 驱动与接线断言」，属于已知技术债而非疏忽。
 2. **五份 JSON 无 schema 版本与迁移**。`electron/main/store.ts` 结构校验失败一律当成「无缓存」，随后一次写入会覆盖它（`HANDOFF.md:701-702`）。这是用"宁可重建"换实现简单，代价是损坏的缓存无法保留现场。
@@ -246,9 +246,9 @@ mendeley://pdf/<path>（src/components/PdfViewer.tsx）
 
 ## 8. 结论与优化方向
 
-这套架构的核心不是"用了 Electron + React"，而是**把「云端只是同步源、磁盘才是真相」这条产品约束翻译成了可执行的分层**：领域层负责与外部世界打交道并产生「提议」，基础层的纯规则负责裁决，协议层负责把不可信输入挡在门外，纯规则层因为无 DOM 而可以被三端共用与被单测穷举。四个角度里最值得记住的一句是 `af4f4c3` 拆包后 `index.ts` 的头注释：*"The entry point, and nothing else."*
+分层把「云端只是同步源、磁盘才是真相」这条产品约束翻译成可执行的结构：领域层与外部世界打交道并产生「提议」，基础层的纯规则裁决，协议层把不可信输入挡在门外，纯规则层因为无 DOM 而可以被三端共用与被单测穷举。
 
-基于本次分析可立即落地的优化（详见《重构说明》与 `git log`）：
+分析时识别出的六个优化方向（下表描述分析当时的问题，均已落地）；改动与验证见 [优化重构说明](./优化重构说明.md)：
 
 | 方向 | 具体问题 | 风险 |
 | --- | --- | --- |
@@ -259,6 +259,4 @@ mendeley://pdf/<path>（src/components/PdfViewer.tsx）
 | 构建脚本 | `.github/workflows/ci.yml:59-97` 与 `release.yml:107-145` 的 39 行产物校验逐字重复；`scripts/start.mjs` 与 `demo.mjs` 启动样板重复 | 中（抽公共脚本） |
 | 测试缺口 | `export.ts` / `importText.ts` / `updateText.ts` / `doctypes.ts` 有实质纯逻辑但无纯 Node 单测 | 极低（只加测试） |
 
-> **重构后记（2026-11-16）**：本报告是重构前的分析快照。§8 表格中列出的六项待优化方向已在本轮全部落地（删 `pdf:read`、归一化统一、refs 故障显式化、抽共享夹取、合并构建脚本、补齐纯模块单测），详见 [优化重构说明](./优化重构说明.md) 与 git 历史；架构结论本身不变。
-
-> 配套产物：[架构实现分析 HTML](./mendeley-ng架构实现分析.html) · [架构演化分析](./mendeley-ng架构演化分析.md) · [第一性原理与设计巧思分析](./mendeley-ng第一性原理与设计巧思分析.md) · [优化重构说明](./优化重构说明.md)
+> 相关文档：[架构实现分析 HTML](./mendeley-ng架构实现分析.html) · [架构演化分析](./mendeley-ng架构演化分析.md) · [第一性原理与设计巧思分析](./mendeley-ng第一性原理与设计巧思分析.md) · [优化重构说明](./优化重构说明.md)

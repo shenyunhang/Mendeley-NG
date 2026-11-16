@@ -12,8 +12,9 @@
   Mendeley 云端库；云端只是同步源，不是宿主。
 - 文献、PDF、正文索引、高亮、笔记全部落盘，读、搜、标注、导出都不经过网络。
   仍需联网的只有三件事：同步条目、下载 PDF、把高亮推回 `/annotations`。
-- **改完代码按这个顺序跑四道**：`npm run typecheck` → `npm test` → `npm run build`
-  → `npm run smoke`。顺序不能换：smoke 跑的是 `out/` 里那一版，它不替你构建。
+- **改完代码按这个顺序跑**：`npm run typecheck` → `npm test` → `npm run build`
+  → `npm run verify:build` → `npm run smoke`。顺序不能换：smoke 跑的是 `out/`
+  里那一版，它不替你构建；产物校验要读刚构建的 `out/`。
 - 三条分层约定：三端共享的规则只放 `shared/`；与 React 无关的纯规则只放
   `src/lib/`；IPC 契约只在 `src/global.d.ts` 定义一份。
 - 运行时数据都在 `<userData>`（Windows 是 `%APPDATA%\mendeley-ng`）：
@@ -24,7 +25,7 @@
 | 节 | 内容 |
 | --- | --- |
 | 1 | 产品主张、三件事的层级、明确不做的事 |
-| 2 | 跑起来、四道验证、CI 与发布门禁、自检口径 |
+| 2 | 跑起来、本地验证顺序、CI 与发布门禁、自检口径 |
 | 3 | 代码结构与分层约定 |
 | 4 | 工程约定：数据、凭据、仓库、图标、配置写入、测试纪律 |
 | 5 | IPC 与信任边界 |
@@ -124,9 +125,9 @@ npm run demo               # 造虚构库，重生成 README 的四张截图
 完整步骤见 README「获取 token」，或跑
 `node scripts/get-token.mjs <client_id> <client_secret>`。
 
-### 四道验证
+### 本地验证顺序
 
-按 `typecheck` → `npm test` → `build` → `smoke` 的顺序跑，一步都不能省：
+按 `typecheck` → `npm test` → `build` → `verify:build` → `smoke` 的顺序跑，一步都不能省：
 
 1. `npm run typecheck` 是唯一真正做类型检查的入口。根 `tsconfig.json` 是
    `files: []` + `references`，`npx tsc --noEmit` 等于跑空。两个工程分别覆盖主进程与
@@ -138,15 +139,14 @@ npm run demo               # 造虚构库，重生成 README 的四张截图
    和索引驱动换成桩，捕获 `ipcMain.handle` 注册的 handler 后直接调用——测的是
    channel 回答什么（含失败形态），不是源码里有没有那一行。
 3. `npm run build` 产出 `out/`。`scripts/start.mjs` 只检查 `out/main/index.js` 在不在，
-   然后直接起 Electron，所以忘了构建跑的是上一版，而且会**安静地全绿**。构建之后跑
-   `npm run verify:build`：它逐个 `node --check` 主进程与 smoke chunk、确认 worker 在且
+   然后直接起 Electron，所以忘了构建跑的是上一版，而且会**安静地全绿**。
+4. `npm run verify:build` 逐个 `node --check` 主进程与 smoke chunk、确认 worker 在且
    大于 100 KB、确认 `index.js` 引用的 chunk 真实存在，并核对 `build` / `dist` 的接线。
    同一份 `scripts/verify-build.mjs` 被 `ci.yml` 与 `release.yml` 调用，两处门禁不会漂移。
-4. `npm run smoke` 用真实库和真实 PDF，开隐藏窗口逐条断言，日志以
+5. `npm run smoke` 用真实库和真实 PDF，开隐藏窗口逐条断言，日志以
    `[smoke] PASS` / `[smoke] FAIL` 打点，最后出现 `all checks passed` 才算过。
-   断言数会变，口径是
-   `grep -cE "^[[:space:]]*expect\(" electron/main/smoke.ts`，一轮日志的 PASS 会
-   少几条（有分支断言只在数据满足条件时才跑）。不要把具体数字写进文档。
+   断言数会变；只数 `smoke.ts` 的 `expect(` 会漏掉 `smoke-*.ts` 里的 `ctx.expect(`，
+   且有分支断言只在数据满足条件时才跑。不要把具体数字写进文档。
 
 ### CI 与发布门禁
 
@@ -160,8 +160,7 @@ npm run demo               # 造虚构库，重生成 README 的四张截图
   再调 `node scripts/verify-build.mjs` 验一遍 `out/`：逐个 `node --check` 主进程与全部
   smoke chunk、确认 `out/preload/index.js` 与 `out/renderer/index.html` 在、确认
   `pdf.worker.mjs` 大于 100 KB、确认 `index.js` 里 require 的 chunk 文件真实存在，
-  并核对 `build` 仍含 `copy-worker`、`dist` 仍委托 `npm run build`。这份校验以前在两个
-  workflow 里各内联一份 39 行 `node -e`，改一处忘另一处就会让两道门禁给出不同答案。
+  并核对 `build` 仍含 `copy-worker`、`dist` 仍委托 `npm run build`。
 - `.github/workflows/release.yml` 在 `v*` tag（或手动触发）打包前先跑
   `npm run typecheck && npm test`，再做同一道产物检查，并拒绝版本与
   `package.json` / `package-lock.json` 不一致或不是 annotated 的 tag；手动触发
@@ -200,10 +199,11 @@ electron/main/
   auth.ts / lookup.ts   OAuth 窗口、Crossref / arXiv 查元数据
   store.ts / pdfindex.ts / pdfname.ts  本地缓存、文件名匹配、命名模板
   fulltext.ts / ftops.ts 正文索引与驱动层
+  refsindex.ts           参考文献索引
   updater.ts / demo.ts / perf.ts  自更新与两种开发期运行模式
   smoke.ts              冒烟入口：窗口、快照、共享 expect、收尾与配置恢复都留在这里
-  smoke-*.ts            从入口抽出的纯 Node 断言块，只接一个 SmokeCtx，静态 import
-  ipc/                  library / system / docs / marks / files，按域注册
+  smoke-*.ts            六个纯 Node 断言块 + smoke-ctx.ts 的共享类型，静态 import
+  ipc/                  library / system / docs / marks / refs / files，按域注册
 electron/preload/index.ts  contextBridge，按 Api 契约暴露白名单方法
 src/
   App.tsx               组装层：把 hooks 解构出来排进 JSX
@@ -232,7 +232,7 @@ scripts/
   verify-build.mjs      产物校验，ci.yml 与 release.yml 只调这一份
   ...                   启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
 docs/screenshots/        README 的四张图，由 npm run demo 生成
-analysis/                四角度深度分析：架构实现 / 演化 / 第一性原理与巧思（md + 自包含 html）
+analysis/                三份分析报告（架构实现 / 演化 / 第一性原理与巧思，各含 md + 自包含 html）与一份重构说明
 .github/workflows/       ci.yml（类型 / 单测 / 构建 / 产物）、release.yml（打包与发布）
 vitest.config.ts         test 只收 tests/**/*.test.ts，环境为 node
 electron.vite.config.ts  main / preload / renderer 三段构建配置
@@ -335,8 +335,8 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - `mendeley://pdf/<path>` 只服务 `pdfDir` 根内的文件，或 `library.json` 里已登记的
   `localPdf` 附件（`canServePdf`）。别把这个协议当成第二个文件 API。**不要新增任何
   「传一个路径进来、直接 `fs.readFileSync` 返回字节」的 IPC 通道**：那种通道绕过
-  `pathPolicy` 且渲染层无法证明路径是自己的 PDF。曾有一个注册了却无人调用的
-  `pdf:read`，已删除；`tests/refactor-2026-11-16.test.ts` 有源码串护栏防它回来。
+  `pathPolicy` 且渲染层无法证明路径是自己的 PDF。
+  `tests/refactor-2026-11-16.test.ts` 有源码串护栏防止这类通道回来。
 - `export:leave` 的每个 `files[].name` 与 `copies[].to` 先经 `resolveInside` 解析到所选
   目录内，任何一个越界就整批拒绝；`../`、绝对路径、盘符相对名、UNC 与 NUL 都拒收。
   复制源 `from` 不限制，导出的是用户自己的 PDF。
@@ -603,7 +603,7 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - 「有点卡」先量再改：`npm run perf` 用真实库、跳过 sync、只测不判；
   窗口必须真的 `showInactive()`，隐藏窗口 rAF 被节流到约 1 秒一帧，
   量到的是节流不是程序。
-- 慢帧阈值用本轮自己的中位数 ×2、不写死 50ms；滚动一格一格地滚
+- 慢帧阈值用当次测量的中位数 ×2、不写死 50ms；滚动一格一格地滚
   （每次 `await requestAnimationFrame`），按键代价读 `dispatchEvent` 的同步返回耗时。
 - 三档受控实验（0 篇 / 几十篇 / 上千篇）分嫌疑；排序键在比较函数外算
   （`map → sort → map`，n 次而非 n·log n 次），模块级复用一个 `Intl.Collator`，
@@ -637,13 +637,13 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - **归一化只有一份**：`normaliseQuery(q) = trim + toLowerCase + 折叠空白`，
   书目 haystack（`scopeHay` 的所有 scope）、`savedSearchMatches`、`refsindex.ts`
   的 `searchRefs`、`RefsView` 的高亮都用它。旧契约是「`all` 与内联 `hay()`
-  逐字节一致」，现已改为「等于旧 hay() 再折叠空白」：这是**有意放宽**，
+  逐字节一致」，契约是「等于 hay() 再折叠空白」：这是**有意放宽**，
   因为输入带两个空格时旧书目表搜不到、参考文献却能搜到。别再让某个范围
   自己写一遍 `trim().toLowerCase()`。`fulltext.ts` 的 `ftSearch` 本来就折叠空白，
-  不用改它（它有 smoke 计数断言）。**所有检索 UI 现在都接这一份规则**：
-  `SearchResults` / `TrashView` / `NotesView` / `FolderTree` / `AddByIdView`，
+  不用改它（它有 smoke 计数断言）。**所有检索 UI 都接这一份规则**：
+  `SearchResults` / `TrashView` / `NotesView` / `FolderTree` / `AddByIdView` / `RefsView`，
   且 hay 与 needle 同一份归一化（只改 needle 不改 hay 会造出「折叠后反而搜不到」）。
-  `SearchResults` 以前用 `query.trim()`，于是双空格查询能进列表却没有 `<mark>`；
+  `SearchResults` 若传未归一化的 `query.trim()`，双空格查询能进列表却没有 `<mark>`；
   `tests/refactor-2026-11-16.test.ts` 有「旧写法确实不高亮」的对照与源码串护栏。
   折叠空白是有意放宽，动手前按 §4 测试纪律先做逐值差分。
 - 范围控件是 `search-wrap` **内部**的原生 `<select>`，不是工具栏直属子元素、不是
@@ -679,7 +679,7 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   慢 IPC 回来会拿旧词结果盖住新词。`refs:search` / `refs:status` 返回 `{error}`
   或直接 reject 都要进 `refsError` 显示在面板上，**不能**用
   `Array.isArray(r) ? r : []` 或空的 `.catch(() => undefined)` 把故障伪装成
-  「没找到」。后者曾让面板留着旧命中且一句话不说；现在两条 catch 都带
+  「没找到」。后者会让面板留着旧命中且一句话不说；两条 catch 都带
   `live`（搜索那条还比对了归一化后的词）再写 `refsError`。
 - `RefEntry.hay` 是 `normaliseQuery(text)` 的副本，**匹配与切片段都在它上面做**：
   从 `toLowerCase()` 的串取偏移、却去切原串，遇到 `İ`（小写变两个 code unit）
@@ -718,12 +718,12 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   都还留在入口：它们共享闭包状态或依赖源码串计数，拆之前要先给这些依赖解耦。
   新增子模块只能用静态 import，且必须与 `smoke.ts` 同级，否则产物里多一层目录
   会让 `__dirname` 定位的 preload / renderer / 仓库根全部失效。
-- `src/styles.css` 现在只是十二行 `@import`，规则逐字留在 `src/styles/` 的分片里。
+- `src/styles.css` 是十二行 `@import`，规则逐字留在 `src/styles/` 的分片里。
   顺序就是层叠顺序：改动时先按顺序拼接与 `HEAD` 逐字节比对，别为了归类去重排。
 - 主进程侧 `system`、PDF 写入、同步 pull、标注与阅读位置四类都有行为单测；
   渲染层浮层优先级有纯规则单测（Esc 逐层关闭的 UI 行为仍由 smoke 实测）。
   `export.ts` / `importText.ts` / `updateText.ts` / `doctypes.ts` 的纯规则在
-  `tests/pure-modules.test.ts` 里补了纯 Node 用例（此前只靠 smoke 或完全没测）。
+  `tests/pure-modules.test.ts` 里有纯 Node 用例。
   `fulltext.ts` 索引状态机与 `App.tsx` 剩余状态簇仍只靠 smoke 的源码串断言
   和真实库自检守着；这两处是接下来唯一还没拆的高耦合区间。
 - 主窗口 `sandbox: false`（授权窗口是 `true`）：preload 只用 Electron API，

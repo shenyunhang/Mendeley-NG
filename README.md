@@ -203,7 +203,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 参考文献跳转 | 悬停正文里的引用标记看那条参考文献；在库里的给「打开」，PDF 里指向库内论文的链接也在这里开。**打开时左侧文件夹树定位到它所属的文件夹**，列表筛选和树高亮始终是同一个状态 |
 | 连续滚动 | 把所有页排成一列滚着读；单页模式下预取相邻页，翻页不等 |
 | 缩放 | 适宽 / 整页，跟着窗口变；手动缩放后不再被覆盖 |
-| 高亮 | 选中文字即高亮，可改色、加笔记、删除；**划下来的那句话会一并存下**——只有矩形的高亮换个地方就没法读了。笔记框始终属于当前选中的那一条：新建高亮后不会还挂着上一条的文字，也就不会把 A 的笔记写到 B 上 |
+| 高亮 | 阅读器里「高亮」开关默认关闭，开启后拖选文字才生成高亮；关闭时拖选只是选中文字、可直接复制。可改色、加笔记、删除；**划下来的那句话会一并存下**——只有矩形的高亮换个地方就没法读了。笔记框始终属于当前选中的那一条：新建高亮后不会还挂着上一条的文字，也就不会把 A 的笔记写到 B 上 |
 | PDF 目录 | 读 PDF 自带的 outline，点击跳到对应页 |
 | 标注侧栏 | 列出本篇全部标注，点一条跳到那一页并选中 |
 | 全部标注 | 跨篇列出整个库的标注，按篇分组，点一条选中那篇并翻到那一页 |
@@ -217,7 +217,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 功能 | 说明 |
 | --- | --- |
 | 浏览 | 三栏：文件夹树 / 文献列表 / 详情或 PDF。列表是虚拟滚动，几千行也不卡；**单实例**：再点一次图标只会把已经开着的那个窗口叫回来 |
-| 搜索 | Ctrl+F，覆盖标题、作者、发表处、citation key、DOI、摘要、标签，以及这篇上写的本地笔记 |
+| 搜索 | Ctrl+F，覆盖标题、作者、发表处、citation key、DOI、摘要、标签，以及这篇上写的本地笔记；范围下拉可收窄到「仅标题 / 仅摘要 / PDF 正文 / 参考文献」 |
 | 全文检索 | 「全文」模式下搜 PDF 正文，命中按篇分组、显示页码与上下文，点一条直接翻到那页；长查询（32 个词以上）也照常工作；**搜不到时会说清读了多少页、以及这不等于库里没有**，并给出改页数的入口。建索引途中改页数或清空索引，不会留下半份对不上号的索引 |
 | 连续阅读 | 恢复上次读到的页、或按全文命中跳到靠后的页时，会等页面高度量齐再滚过去，页码框和滚动位置不会各说各话 |
 | 筛选 | 按星标 / 未读 / 没有本地 PDF / 云端有本地没有 / 未归文件夹收窄，每档带条数 |
@@ -281,20 +281,22 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
   另一份语料了。页数的边界与默认值**只有一份规则**：设置面板、索引构建和开机时的
   配置恢复共用它，不会出现界面说 3 页、索引却按 50 页建这种对不上的情况。
 - **合并只补缺失字段，落败的进回收站而不是删掉**。合并是不可逆操作里最容易
-  手滑的，让它可恢复比让它快更重要——现在还有撤销栈兜底。
+  手滑的，让它可恢复比让它快更重要——另有撤销栈兜底。
 
 ## 结构
 
 ```
 electron/main/            主进程：IPC、本地库、全文索引、自更新
   index.ts                入口：单实例、mendeley:// 协议、这次是哪一种启动
-  ipc/                    按域拆开的 IPC 注册（library / system / docs / marks / files）
+  ipc/                    按域拆开的 IPC 注册（library / system / docs / marks / refs / files）
   library.ts / mendeley.ts / store.ts   同步、REST 客户端、本地缓存
   fulltext.ts / ftops.ts  正文索引与驱动层
+  refsindex.ts            参考文献索引（mtime+size 增量、checkpoint、prune）
   auth.ts / lookup.ts     OAuth 窗口、Crossref / arXiv 查元数据
   window.ts / updater.ts / instance.ts  窗口记忆、检查更新、单实例锁
   pdfindex.ts / pdfname.ts  "作者 - 年份 - 标题.pdf" 匹配、命名模板
   smoke.ts / perf.ts / demo.ts  开发期自检、性能测量、虚构库截图
+  smoke-*.ts             从冒烟入口抽出的纯断言块与共享类型
 electron/preload/index.ts   contextBridge，按 Api 契约暴露白名单方法
 src/
   App.tsx                  组装层：把 hooks 解构出来排进 JSX
@@ -313,7 +315,7 @@ scripts/
   verify-build.mjs         产物校验（ci.yml 与 release.yml 共用这一份）
   ...                      启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
 docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
-analysis/                  四角度深度分析：架构实现 / 演化 / 第一性原理与巧思（各含 md + 自包含 html）
+analysis/                  三份分析报告（架构实现 / 演化 / 第一性原理与巧思，各含 md + 自包含 html）与一份重构说明
 .github/workflows/
   ci.yml                   每次 push / PR 跑 typecheck + test + build + verify:build
   release.yml              推 v* tag 时先验 typecheck + test，再构建安装包并挂到 Release
@@ -330,7 +332,6 @@ electron.vite.config.ts    main / preload / renderer 三段构建配置
 几个约定：类型只在 `shared/types.ts` 改；跨 IPC 的规则（页数预算、位图尺寸、夹取、
 延时、静默失败、路径策略）也只留一份，别在调用点手抄；IPC 契约只在
 `src/global.d.ts` 定义一份，preload 编译期照它校验；所有尺寸用 rem，字号旋钮才有效；
-主进程产物必须是 CJS，package.json 里不能有 `"type": "module"`；
 `contextIsolation: true`，renderer 拿不到 node，所有能力走 `window.api`。
 
 ## 发布
@@ -411,8 +412,8 @@ cp scripts/hooks/post-commit .git/hooks/post-commit && chmod +x .git/hooks/post-
 ## 开发用的自检
 
 ```bash
+npm run typecheck          # 双侧类型检查
 npm test                   # 纯 Node 单元测试：shared 规则、渲染层纯函数、安全边界
-npm run typecheck          # 双侧类型检查；npx tsc --noEmit 跑的是空配置，不算
 npm run build              # 先构建：smoke 不替你构建，跑的是 out/ 里那一版
 npm run verify:build       # 校验 out/：chunk 可解析、worker 在、index.js 引用的 chunk 在
 npm run smoke              # 真实库 + 真实 PDF 的端到端自检
@@ -423,8 +424,9 @@ npm run smoke -- --no-sync # 用本地缓存，跳过同步
 所以它能进 CI，也是那些被主进程和渲染层共用的纯规则唯一的自动化回归。
 `npm run typecheck` 是唯一真正做类型检查的入口：根 `tsconfig.json` 是 `files: []` +
 `references`，`npx tsc --noEmit` 等于跑空。`.github/workflows/ci.yml` 会在每次
-push / PR 依次跑 `typecheck`、`test`、`build` 和 `verify:build`，`release.yml` 在打包前也补了
-前两道与同一道产物校验——tag 可以指向任意提交，不能假定它走过 CI。产物校验是
+push / PR 依次跑 `typecheck`、`test`、`build` 和 `verify:build`；`release.yml` 在打包前
+自己再跑一遍 `typecheck`、`test`、`build` 与同一道产物校验，然后 `npm run dist`。
+tag 可以指向任意提交，不能假定它走过 CI。产物校验是
 `scripts/verify-build.mjs` 一份脚本，两个 workflow 都只调它；本地 `npm run verify:build`
 跑的是同一段逻辑。**冒烟仍不放进 CI**——它要开真实窗口读真实库和 PDF，还量按键那一帧
 的主线程耗时，托管 runner 给不出诚实的答案。

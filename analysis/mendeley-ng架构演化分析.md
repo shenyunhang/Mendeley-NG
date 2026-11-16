@@ -1,15 +1,12 @@
 # Mendeley NG 基础层与领域模型演化分析报告
 
 > **分析对象**：`D:/mendeley-ng` 全量 git 历史
-> **依据**：322 个提交，2026-10-30 → 2026-11-16（18 天），单分支 `main`，远端 `github.com/shenyunhang/Mendeley-NG`
-> **方法**：`git log --all --reverse` 全量时间线 → 按日期分阶段 → 对关键提交逐个 `git show --stat` 与逐文件 diff → 与 `HEAD` 源码交叉核对
-> **核心发现**：这不是一条"功能堆到不能再堆于是重构"的曲线，而是一条**反复把「在调用点手抄的规则」下沉到 `shared/`、把「混在入口里的职责」迁移到独立模块**的收敛曲线。18 天里发生了三次范式级切换：`af4f4c3` 单体入口拆成六域、`f864926` 八个布尔标志收敛成单一 `View` 联合类型、`e419fda` 从「12k 行真实窗口冒烟是唯一回归」切换到「纯规则 + 519 个纯 Node 单测 + CI 门禁」。每一次都由**领域里踩到的具体坑**反向驱动基础层长出新能力。
+> **依据**：322 个提交，2026-10-30 → 2026-11-16（18 天），单分支 `main`，远端 `github.com/shenyunhang/Mendeley-NG`；代码与文档行号为分析时定位
+> **核心发现**：18 天里反复把「在调用点手抄的规则」下沉到 `shared/`、把混在入口里的职责迁到独立模块；三次范式切换分别解决职责不可辨、状态不可信、改动不可验。
 
 ---
 
 ## 1. 演化时间线总览
-
-按日期统计的提交密度直接画出了节奏：
 
 | 日期 | 提交数 | 阶段 | 主导动作 |
 | --- | ---: | --- | --- |
@@ -27,7 +24,7 @@
 | 2026-11-10 | 1 | K 发布门禁修补 | annotated tag 的 `git cat-file` 判定 |
 | 2026-11-16 | 3 | L 字段级检索 | 参考文献索引、归一化统一、返回全部命中 |
 
-**版本号不是线性的**：`v0.1.3`→`v0.1.112` 共 110 个 release bump，几乎每个功能提交后紧跟一个版本提交。这说明仓库把"一次逻辑改动 = 一个 commit，版本 bump = 另一个 commit"当成了纪律（`README.md:352-354`），功能提交的信息因此非常适合当演化证据读。
+**版本号不是线性的**：`v0.1.3`→`v0.1.112` 共 110 个 release bump，几乎每个功能提交后紧跟一个版本提交。这说明仓库把"一次逻辑改动 = 一个 commit，版本 bump = 另一个 commit"当成了纪律（`README.md:352-354`）。
 
 ---
 
@@ -48,25 +45,25 @@ shared/types.ts                 73   ← 领域模型（当时只有 73 行）
 
 ### 阶段 B｜2026-10-31 索引韧性（58 提交）
 
-关键词全在提交信息里：`32d661a` *"Make building the full-text index survivable"*、`0dd0934` *"Make an index that was interrupted still answer questions"*、`4b47bfc` *"Say why an index from an older version has to be built again"*、`d98f2a9` *"Lower-case the text before it is measured, not after"*。这一阶段奠定了后面 `fulltext.ts` 的 `bytes` 锚点、`format`/`budget` 两种作废原因与 `skipped` 字段——**是缺陷驱动的基础层能力，不是预先设计**。
+关键词全在提交信息里：`32d661a` *"Make building the full-text index survivable"*、`0dd0934` *"Make an index that was interrupted still answer questions"*、`4b47bfc` *"Say why an index from an older version has to be built again"*、`d98f2a9` *"Lower-case the text before it is measured, not after"*。这一阶段奠定了后面 `fulltext.ts` 的 `bytes` 锚点、`format`/`budget` 两种作废原因与 `skipped` 字段。
 
 ### 阶段 C｜2026-11-01 自审与量化（43 提交）
 
 `d58d7ce` *"Audit the index itself, not just the rows it produces"* 把验证对象从"搜索结果"换成"索引文件本身"；`70dfa5b` *"take the cost of a keystroke off the main thread"* 引入 `npm run perf` 的测量纪律；`6abd924` *"Run one copy however many times the icon is clicked"* 是单实例锁的起点（后来抽成 `instance.ts` 的纯函数 `wantsSingleInstance`）。
 
-### 阶段 D｜2026-11-02 决定性拆包（53 提交，本报告重点，见第 3 节）
+### 阶段 D｜2026-11-02 决定性拆包（53 提交）
 
 ### 阶段 E｜2026-11-03 状态新鲜度（23 提交）
 
-`426f06e` *"Stop a sync from writing back the config it read when it started"*、`1ad07a9` *"Ask the app what it has rather than what it had a moment ago"*。这是「磁盘事实是唯一真相」这条基本事实第一次被明确编码：同步结束时 `saveConfig({ ...loadConfig(), lastSync })` 重新读盘，而不是复用函数开头的 `cfg`（`electron/main/library.ts:116`）。
+`426f06e` *"Stop a sync from writing back the config it read when it started"*、`1ad07a9` *"Ask the app what it has rather than what it had a moment ago"*。「磁盘事实是唯一真相」在这两个提交里被编码：同步结束时 `saveConfig({ ...loadConfig(), lastSync })` 重新读盘，而不是复用函数开头的 `cfg`（`electron/main/library.ts:116`）。
 
 ### 阶段 F→G｜2026-11-04~06 共享规则运动（52 提交）
 
-`ab086b5` *"Share one page-budget rule across the IPC boundary"*、`14c7f13` *"Share one plain clamp across six call sites"*、`3178d14` *"Share one bitmap pixel-size rule across four call sites"*、`1ef32ea` *"Share one line-stitching merge between find and selection"*、`a24279a` *"Name the eight product-side delays"*、`e024a9b` *"Give every swallowed failure a named reason"*。三天里 `shared/` 从 1 个文件长到 16 个。**领域需求反向驱动基础层**最密集的一段，详见第 4 节。
+`ab086b5` *"Share one page-budget rule across the IPC boundary"*、`14c7f13` *"Share one plain clamp across six call sites"*、`3178d14` *"Share one bitmap pixel-size rule across four call sites"*、`1ef32ea` *"Share one line-stitching merge between find and selection"*、`a24279a` *"Name the eight product-side delays"*、`e024a9b` *"Give every swallowed failure a named reason"*。三天里 `shared/` 从 1 个文件长到 16 个。领域需求反向驱动基础层集中在阶段 G，见第 4 节。
 
 ### 阶段 H→I｜2026-11-07~08 正确性与信任边界（26 提交）
 
-`2d4757c` 新增 `shared/libraryReconcile.ts`（三方裁决），`f073acd` 新增 `shared/filePages.ts`（marker 是文件 id），`d75596a`+`02aa9b6` 把第五轮评审的 15 项缺陷记成 backlog 再一次性修完。`e419fda` 是一次提交里同时做四件事的分水岭：
+`2d4757c` 新增 `shared/libraryReconcile.ts`（三方裁决），`f073acd` 新增 `shared/filePages.ts`（marker 是文件 id），`d75596a`+`02aa9b6` 把第五轮评审的 15 项缺陷记成 backlog 再一次性修完。`e419fda` 一次提交做了四件事：
 
 ```
 e419fda  Harden IPC boundaries and add a unit-test foundation
@@ -79,7 +76,7 @@ e419fda  Harden IPC boundaries and add a unit-test foundation
   vitest.config.ts               17 +++
 ```
 
-提交信息里那句 *"Context isolation isolates code, it does not validate payloads"* 是整阶段 I 的论点；它还顺手解决了"两个手写 `Api` 已漂移"（`openExternal: void` vs Promise）和"每次生产启动都打包整个 smoke 套件"（改为动态 `import('./smoke')` 独立 chunk）。
+提交信息写明 *"Context isolation isolates code, it does not validate payloads"*；它还顺手解决了"两个手写 `Api` 已漂移"（`openExternal: void` vs Promise）和"每次生产启动都打包整个 smoke 套件"（改为动态 `import('./smoke')` 独立 chunk）。
 
 ### 阶段 J→L｜2026-11-09~16 可验证性收尾（12 提交）
 
@@ -113,14 +110,14 @@ electron/main/{demo,ftops,instance,library,perf,window}.ts  |  762 ++++
 | 混在入口末尾的 4383 行冒烟 | `smoke.ts` | 独立文件，后由 `e419fda` 改成动态 import 独立 chunk |
 | 全文索引的启动/驱动 | `ftops.ts` | `initFt()` 必须在 `registerIpc()` 之前 |
 
-**三条分层本质**：
+三条分层本质：
 1. **语义下移**：同步、索引、窗口这些"应用做什么"离开入口，入口只回答"这次是哪一种启动"。
 2. **顺序显式化**：`ipc/index.ts:8-20` 的注释把 `initFt()` 必须先于 `registerIpc()` 写成文字，而不是靠代码位置的偶然。
 3. **注册从改代码变成改归属**：新增通道是"放进哪个 `ipc/*.ts`"的问题，聚合器 `registerIpc()` 只手工调六个函数（`ipc/index.ts:22-29`）。
 
 ### 3.2 `f864926` — 八个布尔标志 → 一个 `View` 联合类型（范式切换）
 
-`git show --stat f864926`：`src/App.tsx` 106 行改写、新增 `src/lib/view.ts` 40 行。新增文件的注释把动机说得比任何总结都清楚：
+`git show --stat f864926`：`src/App.tsx` 106 行改写、新增 `src/lib/view.ts` 40 行。新增文件的注释：
 
 ```ts
 // src/lib/view.ts（f864926 版本）
@@ -145,7 +142,7 @@ export type View =
   | { kind: 'annotations'; anns: Annotation[] }
 ```
 
-这是**从「状态 = 若干独立标志」到「状态 = 一个带 payload 的代数数据类型」的范式切换**：payload 随视图走，视图不显示时它的数据就不存在，从类型层面消除了 stale 副本。`HEAD` 里这条线继续演化：`c0d575c` 加了 `{ kind:'reader' }`，`src/lib/view.ts:64-66` 的 `viewAfterReadingToggle` 取代了又一处三元链，`ba89d99` *"Give reading a view of its own instead of a column"* 是同一范式的延伸。
+状态表示从「若干独立标志」变成「一个带 payload 的代数数据类型」：payload 随视图走，视图不显示时它的数据就不存在，从类型层面消除了 stale 副本。`HEAD` 里这条线继续演化：`c0d575c` 加了 `{ kind:'reader' }`，`src/lib/view.ts:64-66` 的 `viewAfterReadingToggle` 取代了又一处三元链，`ba89d99` *"Give reading a view of its own instead of a column"* 是同一范式的延伸。
 
 ### 3.3 `e419fda` — 从「唯一回归是冒烟」到「纯规则 + 单测 + 门禁」
 
@@ -157,7 +154,7 @@ export type View =
 | 配置写入 | 二十多处 `setConfig` 无 rejection 分支 | `src/lib/configWrite.ts` 统一入口 + reporter |
 | 打包 | 每次生产启动都内联整个 smoke | `await import('./smoke')` 独立 chunk |
 
-`git show e419fda -- electron/preload/index.ts` 里两行 diff 尤其说明问题：
+`git show e419fda -- electron/preload/index.ts` 的关键两行：
 
 ```diff
 -  openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
@@ -172,15 +169,15 @@ export type View =
 
 ### 3.4 `8736d7e` — 有序拆分而不是按主题重排
 
-`git show --stat 8736d7e`：`styles.css` 从 1919 行变成 12 行 `@import`，12 个分片"逐字切出、规则顺序不可重排"（`HANDOFF.md:693-694` 要求改动时先按顺序拼接与 `HEAD` 逐字节比对）。`smoke.ts` 只抽走 6 个"不碰窗口、不碰真实库、不读自身源码"的纯断言块，且要求新模块**只能用静态 import、必须与 `smoke.ts` 同级**——因为 `electron.vite.config.ts` 的 `chunkFileNames` 让主进程用 `__dirname` 定位 preload / renderer / 仓库根，chunk 多一层目录会让这些路径全失效。这是一条**由构建布局反向约束源码结构**的证据。
+`git show --stat 8736d7e`：`styles.css` 从 1919 行变成 12 行 `@import`，12 个分片"逐字切出、规则顺序不可重排"（`HANDOFF.md:693-694` 要求改动时先按顺序拼接与 `HEAD` 逐字节比对）。`smoke.ts` 只抽走 6 个"不碰窗口、不碰真实库、不读自身源码"的纯断言块，且要求新模块**只能用静态 import、必须与 `smoke.ts` 同级**——因为 `electron.vite.config.ts` 的 `chunkFileNames` 让主进程用 `__dirname` 定位 preload / renderer / 仓库根，chunk 多一层目录会让这些路径全失效。构建布局反向约束了源码结构。
 
 ---
 
 ## 4. 领域需求反向驱动基础层（逐条 diff 证据）
 
-这是"基础层如何被炼成"的关键信号：**新能力不是先设计好再等调用，而是领域里踩了坑之后被下沉进 `shared/`，并同时开放扩展点**。
+领域需求反向驱动基础层的信号：**新能力不是先设计好再等调用，而是领域里踩了坑之后被下沉进 `shared/`，并同时开放扩展点**。
 
-### 4.1 `ab086b5` 页数预算下沉（最典型）
+### 4.1 `ab086b5` 页数预算下沉
 
 提交信息原文：*"The full-text page budget was clamped twice: once in the renderer write path and once in the index builder, with the default 3 copied into three places while the main process never imported `DEFAULT_FT_PAGES` … Changing the default meant editing three files."*
 
@@ -199,7 +196,7 @@ diff 显示两边同时被替换：
 +  const next = clampFullTextPages(n)
 ```
 
-新增 `shared/fullTextPages.ts` 把边界（`1`/`50`）、默认值（import 自 `types.ts` 而非抄 `3`）、夹取规则收在一处，并**用 190 个输入的差分断言 + 一条"旧的两条规则确实会不一致"的对照**，证明迁移没有偷偷改变任何答案。后续 `f6fdac6` *"Clamp restored page budgets through the shared rule"* 和 `92b194b` *"Write the effective page budget back into the settings field"* 继续把第三个、第四个调用点接进来——**一份规则被逐步"吸"走所有调用点**。
+新增 `shared/fullTextPages.ts` 把边界（`1`/`50`）、默认值（import 自 `types.ts` 而非抄 `3`）、夹取规则收在一处，并**用 190 个输入的差分断言 + 一条"旧的两条规则确实会不一致"的对照**，证明迁移没有偷偷改变任何答案。后续 `f6fdac6` *"Clamp restored page budgets through the shared rule"* 和 `92b194b` *"Write the effective page budget back into the settings field"* 继续把第三个、第四个调用点接进来。
 
 ### 4.2 `f073acd` 云端分页坑 → `shared/filePages.ts`
 
@@ -222,7 +219,7 @@ diff 显示两边同时被替换：
 
 结果是一个**不碰磁盘/网络/Electron/React** 的纯函数 `reconcileSyncWrite({started, proposed, current, trashedIds})`（`shared/libraryReconcile.ts:31-75`），领域层 `electron/main/library.ts:103-109` 只负责在写盘前重读 `current`。`587e439` 之后又补了字段级三方合并（`:50-57`），把「整行裁决」升级为「字段裁决」。
 
-### 4.4 `ba932c0` 归一化契约统一（最近一次）
+### 4.4 `ba932c0` 归一化契约统一
 
 `git show ba932c0 -- src/lib/searchScope.ts`：
 
@@ -231,11 +228,11 @@ diff 显示两边同时被替换：
 +  return q.trim().toLowerCase().replace(/\s+/g, ' ')
 ```
 
-同一提交让 `refsindex.ts` 存 `hay` 归一化副本、让 `savedSearch.ts` 改用共享规则、让 `searchRefs` 遍历全部命中（每篇上限 8、全局 200）。`HANDOFF.md:616-621` 同步把契约从「`all` 与内联 `hay()` 逐字节一致」改写成「等于旧 `hay()` 再折叠空白」，并注明这是**有意放宽**：*「输入带两个空格时旧书目表搜不到、参考文献却能搜到」*。这是"领域里两个视图给出不同答案 → 基础层多出一条规则 → 文档同步改写契约"的完整闭环。
+同一提交让 `refsindex.ts` 存 `hay` 归一化副本、让 `savedSearch.ts` 改用共享规则、让 `searchRefs` 遍历全部命中（每篇上限 8、全局 200）。`HANDOFF.md:616-621` 同步把契约从「`all` 与内联 `hay()` 逐字节一致」改写成「等于旧 `hay()` 再折叠空白」，并注明这是**有意放宽**：*「输入带两个空格时旧书目表搜不到、参考文献却能搜到」*。
 
 ### 4.5 `587e439` 与 `e024a9b` 两个"批量下沉"提交
 
-`587e439` *"Harden correctness and collapse duplicated rules"* 一次新增 `src/lib/updateText.ts`（两处更新文案归一）、`src/lib/hooks/useLazyPdfPages.ts`（两处页面抓取归一）、`tests/refactor-regression.test.ts`（差分回归）；`e024a9b` *"Give every swallowed failure a named reason"* 新增 `shared/failures.ts` 的 `FAILURE` 常量表与 `ignoreFailure`/`reportFailure` 两道门。**后者的关键设计**：`FailureReason` 是字面量联合类型，任何调用点想"顺手发明"一个新的静默失败都会编译失败——基础层用类型系统防止自己被绕过。
+`587e439` *"Harden correctness and collapse duplicated rules"* 一次新增 `src/lib/updateText.ts`（两处更新文案归一）、`src/lib/hooks/useLazyPdfPages.ts`（两处页面抓取归一）、`tests/refactor-regression.test.ts`（差分回归）；`e024a9b` *"Give every swallowed failure a named reason"* 新增 `shared/failures.ts` 的 `FAILURE` 常量表与 `ignoreFailure`/`reportFailure` 两道门。后者的设计：`FailureReason` 是字面量联合类型，任何调用点想"顺手发明"一个新的静默失败都会编译失败——基础层用类型系统防止自己被绕过。
 
 ---
 
@@ -250,7 +247,7 @@ diff 显示两边同时被替换：
 | 3 | 跨进程契约 | 两份手写 `Api`，已漂移（`openExternal: void`） | 唯一 `src/global.d.ts`，preload `const api: Api` 编译期校验，`window.d.ts` 单独放 DOM ambient | `e419fda` |
 | 4 | 规则位置 | 夹取/页数/UA/归一化在调用点手抄 2~5 份 | `shared/` 16 个纯规则模块，一份规则被所有调用点 import | `ab086b5`、`14c7f13`、`ba932c0` |
 | 5 | 信任边界 | `mendeley://pdf` 可取任意本地文件、`export:leave` 可越界、`config:set` 合并任意键 | 全部输入经 `shared/pathPolicy.ts`；`satisfies Record<keyof AppConfig, true>` 让漏审配置成为编译错误 | `e419fda`、`shared/pathPolicy.ts:109-174` |
-| 6 | 回归手段 | 12k 行真实窗口冒烟（唯一），不能进 CI | 519 个纯 Node Vitest 用例 + 14 个测试文件 + CI/release 两道门禁；冒烟仍保留但只本地跑 | `vitest.config.ts`、`.github/workflows/ci.yml` |
+| 6 | 回归手段 | 12k 行真实窗口冒烟（唯一），不能进 CI | 550 个纯 Node Vitest 用例 + 16 个测试文件 + CI/release 两道门禁；冒烟仍保留但只本地跑 | `vitest.config.ts`、`.github/workflows/ci.yml` |
 | 7 | 并发正确性 | 并行同步互踩水印；同步在途本地编辑被覆盖；`/files` 分页死循环 | `syncQueue` 串行化、`reconcileSyncWrite` 四快照裁决、`paged.ts` 双终止条件 | `shared/syncQueue.ts`、`libraryReconcile.ts`、`paged.ts` |
 | 8 | 失败语义 | 无名字的空 `catch` 散落各处 | `FAILURE` 字面量联合 + `ignoreFailure`/`reportFailure` + sink 审计 | `e024a9b`、`shared/failures.ts` |
 | 9 | 新增领域成本 | 往 `index.ts` 列表末尾插一个 `ipcMain.handle` | 判断属于哪个 `ipc/*.ts`；若涉及新配置键，编译期强制先决定是否可写 | `ipc/index.ts:8-20`、`pathPolicy.ts:103-130` |
@@ -258,25 +255,19 @@ diff 显示两边同时被替换：
 
 ### 5.2 驱动力量
 
-1. **范式觉醒（最高效）**：`f864926` 把"模式堆叠"改成一个带 payload 的联合类型；`e419fda` 把"隔离 = 安全"改写成"隔离只隔离代码，校验要单独做"。这两次不是加功能，是换掉对问题的定义。
-2. **领域需求反向驱动基础层（最高频）**：`ab086b5`（默认值三处不一致）、`f073acd`（5399 附件被看成 200）、`2d4757c`（回收站论文复活）、`ba932c0`（双空格查询两个视图答案不同）——每一次都是**具体事故 → 纯规则下沉 → 差分/行为测试锁定 → HANDOFF 补一条约定**。`shared/` 是这么长出来的，不是先画好的。
-3. **工具/可验证性驱动**：`e419fda` 引入 Vitest 与 CI 门禁后，后续 8 天的提交模式变成"先补纯规则单测，再改接线"（`1fd4437` 浮层栈、`dd0ec75` handler 行为测试、`ea5686f` 同步与标注接线）——**有了便宜的回归，才敢继续拆**。
-4. **文档沉淀后再实现**：`d75596a` 先记录第五轮评审 backlog，`02aa9b6` 再一次性修完 15 项；`84ec2de`/`e8ac7eb` 先写 polish 清单再逐条兑现；`be15f20`/`97fb679` 把 README/HANDOFF 重写到与当前树一致。文档在这个仓库里是**设计载体**而非事后说明。
+1. **范式觉醒**：`f864926` 把"模式堆叠"改成一个带 payload 的联合类型；`e419fda` 把"隔离 = 安全"改写成"隔离只隔离代码，校验要单独做"。这两次不是加功能，是换掉对问题的定义。
+2. **领域需求反向驱动基础层**：`ab086b5`（默认值三处不一致）、`f073acd`（5399 附件被看成 200）、`2d4757c`（回收站论文复活）、`ba932c0`（双空格查询两个视图答案不同）——每一次都是**具体事故 → 纯规则下沉 → 差分/行为测试锁定 → HANDOFF 补一条约定**。
+3. **工具/可验证性驱动**：`e419fda` 引入 Vitest 与 CI 门禁后，后续 8 天的提交模式变成"先补纯规则单测，再改接线"（`1fd4437` 浮层栈、`dd0ec75` handler 行为测试、`ea5686f` 同步与标注接线）。
+4. **文档沉淀后再实现**：`d75596a` 先记录第五轮评审 backlog，`02aa9b6` 再一次性修完 15 项；`84ec2de`/`e8ac7eb` 先写 polish 清单再逐条兑现；`be15f20`/`97fb679` 把 README/HANDOFF 重写到与当前树一致。
 
-### 5.3 一条贯穿全史的判据
-
-> **「一份规则」比「一个功能」更值得提交。**
-
-322 个提交里，`Release v0.1.X` 占约 110 个，剩下的绝大多数不是"新增能力"，而是"把已经在两处、三处写过的同一条规则收成一处，并配一条能证明没改变答案的断言"。`HANDOFF.md:300-301` 把方法固化为：*「抽共享规则前把旧表达式逐行抄进测试、对大批量输入逐值比，并单独证明退化差异真实存在。共享常量不等于共享规则，『怎么夹取』也要收进同一模块。」* 这正是本次「优化重构」必须遵守的工作方式。
+322 个提交里，`Release v0.1.X` 占约 110 个，剩下的绝大多数不是"新增能力"，而是"把已经在两处、三处写过的同一条规则收成一处，并配一条能证明没改变答案的断言"。`HANDOFF.md:300-301` 把方法固化为：*「抽共享规则前把旧表达式逐行抄进测试、对大批量输入逐值比，并单独证明退化差异真实存在。共享常量不等于共享规则，『怎么夹取』也要收进同一模块。」*
 
 ---
 
 ## 6. 结论
 
-这个仓库的 18 天不是"从零写了一个应用"，而是"把一个已经能跑的单体，沿着『磁盘事实可信 / 跨进程输入不可信 / 异步结果需要归属标记』这三条约束，一层层剥成可验证的结构"。三次范式切换各自解决了一类不可靠性：入口拆包解决**职责不可辨**，`View` 联合类型解决**状态不可信**，单测地基解决**改动不可验**。
+这 18 天把一个已经能跑的单体，沿着『磁盘事实可信 / 跨进程输入不可信 / 异步结果需要归属标记』这三条约束，一层层剥成可验证的结构。三次范式切换各自解决了一类不可靠性：入口拆包解决**职责不可辨**，`View` 联合类型解决**状态不可信**，单测地基解决**改动不可验**。
 
-遗留的演化断点也很清楚，且都被 `HANDOFF.md:682-698` 主动登记：`App.tsx` 剩余状态簇、`smoke.ts` 剩余的 UI 驱动链、`fulltext.ts` 索引状态机仍主要靠源码串断言守护、五份 JSON 无 schema 版本。它们是"下一轮"的起点，而不是遗漏。
+遗留的演化断点也很清楚，且都被 `HANDOFF.md:682-698` 主动登记：`App.tsx` 剩余状态簇、`smoke.ts` 剩余的 UI 驱动链、`fulltext.ts` 索引状态机仍主要靠源码串断言守护、五份 JSON 无 schema 版本。
 
-> **重构后记（2026-11-16）**：本轮重构继续了 §5.2 描述的「一份规则被逐步吸走所有调用点」模式——把剩余四个检索 UI、启动脚本与两份 workflow 的产物校验接回共享实现，并给抽规则的动作补上逐值差分测试。详见 [优化重构说明](./优化重构说明.md)。
-
-> 配套产物：[架构演化分析 HTML](./mendeley-ng架构演化分析.html) · [架构实现分析](./mendeley-ng架构实现分析.md) · [第一性原理与设计巧思分析](./mendeley-ng第一性原理与设计巧思分析.md) · [优化重构说明](./优化重构说明.md)
+> 相关文档：[架构演化分析 HTML](./mendeley-ng架构演化分析.html) · [架构实现分析](./mendeley-ng架构实现分析.md) · [第一性原理与设计巧思分析](./mendeley-ng第一性原理与设计巧思分析.md) · [优化重构说明](./优化重构说明.md)
