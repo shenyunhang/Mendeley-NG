@@ -283,7 +283,11 @@ export default function App() {
     void window.api
       .refsStatus()
       .then((s) => {
-        if (!live || 'error' in s) return
+        if (!live) return
+        if ('error' in s) {
+          setRefsError(String(s.error))
+          return
+        }
         setRefsStatus(s)
         if (s.indexed === 0 && s.total > 0) void buildRefs()
       })
@@ -323,7 +327,14 @@ export default function App() {
         .searchRefs(q)
         .then((r) => {
           if (!live || normaliseQuery(query) !== q) return
-          setRefsHits(Array.isArray(r) ? r : [])
+          // An IPC failure is a fault, not an empty answer. Turning the error
+          // object into [] made a broken index look like "not in the library".
+          if (!Array.isArray(r)) {
+            setRefsError('error' in r ? String(r.error) : '参考文献查询失败')
+            return
+          }
+          setRefsError(null)
+          setRefsHits(r)
         })
         .catch(() => undefined)
     }, REFERENCE_SEARCH_DEBOUNCE_MS)

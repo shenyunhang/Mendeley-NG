@@ -610,11 +610,16 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 ### 8.11 搜索范围与参考文献
 
 - 范围只有一份枚举 `src/lib/searchScope.ts` 的 `SearchScope`：
-  `all / title / abstract / body / references`。`scopeHay(d, 'all', note)` 必须与旧
-  `hay()` 逐字节一致（已保存搜索的计数、筛选计数和冒烟都靠它），`title` / `abstract`
-  只取那一个字段但仍用同样的 `join(' ').toLowerCase()`；`body` / `references`
+  `all / title / abstract / body / references`。`body` / `references`
   不走书目 haystack，由各自的视图回答，所以 `scopeHay` 对它们仍返回全字段，
   免得文献表在切过去时整张变空。
+- **归一化只有一份**：`normaliseQuery(q) = trim + toLowerCase + 折叠空白`，
+  书目 haystack（`scopeHay` 的所有 scope）、`savedSearchMatches`、`refsindex.ts`
+  的 `searchRefs`、`RefsView` 的高亮都用它。旧契约是「`all` 与内联 `hay()`
+  逐字节一致」，现已改为「等于旧 hay() 再折叠空白」：这是**有意放宽**，
+  因为输入带两个空格时旧书目表搜不到、参考文献却能搜到。别再让某个范围
+  自己写一遍 `trim().toLowerCase()`。`fulltext.ts` 的 `ftSearch` 本来就折叠空白，
+  不用改它（它有 smoke 计数断言）。
 - 范围控件是 `search-wrap` **内部**的原生 `<select>`，不是工具栏直属子元素、不是
   第二个 `<input>`、也不是浮层卡片。三者分别会：多一个 gap 把字号/主题挤出一行、
   打穿冒烟里 `document.querySelector(".toolbar input")` 的唯一性假设、或给
@@ -645,7 +650,18 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   否则已删文献的参考文献文本会一直被搜到、`indexed` 还能大于 `total`。
   单字查询（`MIN_QUERY = 1`）是正常中文检索，渲染层那道 `q.length < 1` 要与它一致。
 - 渲染层的 refs 查询必须带 `live` 守卫和 `.catch`：清 timer 只挡住还没发出的请求，
-  慢 IPC 回来会拿旧词结果盖住新词；错误对象静默变成空结果比报错更难查。
+  慢 IPC 回来会拿旧词结果盖住新词。`refs:search` / `refs:status` 返回 `{error}`
+  时要进 `refsError` 显示在面板上，**不能**用 `Array.isArray(r) ? r : []`
+  把故障伪装成「没找到」。
+- `RefEntry.hay` 是 `normaliseQuery(text)` 的副本，**匹配与切片段都在它上面做**：
+  从 `toLowerCase()` 的串取偏移、却去切原串，遇到 `İ`（小写变两个 code unit）
+  会整体偏掉；边折叠边找也会让第二个命中之后的偏移全错。字段可选，旧缓存
+  没有它时回退到 `normaliseQuery(e.text)`，不要求重建索引。
+- `searchRefs` 对每篇循环 `indexOf` 累积命中（每篇上限 8、全局 200），
+  `RefsView` 的 `hs.slice(0, 4)` /「还有 N 处」才不是死代码。推进游标用
+  `at + Math.max(1, needle.length)`，单字查询才不会死循环。短文本仍可能
+  四条的片段完全相同（±80 的窗口覆盖了全文），要区分得让 `RefHit` 带上
+  命中在片段内的偏移，尚未做。
 - **PDF 查找栏**：`usePdfFind` 每页命中就 `publish` 画高亮，早期实现却要等全篇
   扫完才 `setFindOpen(true)`，于是几十到上百页的论文会先出现橙框、很久之后才有
   写着词的查找栏（`box: 0`）。首次 publish 已证明词就在这篇里，此时就开框；

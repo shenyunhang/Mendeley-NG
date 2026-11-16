@@ -35,9 +35,15 @@ export function isSearchScope(v: unknown): v is SearchScope {
   return typeof v === 'string' && (SEARCH_SCOPES as string[]).includes(v)
 }
 
-/** One rule for the four places that used to spell it out. */
+/** One rule for every place a search term is compared with text.
+ *
+ *  Folding whitespace is not cosmetic: the bibliography haystack joins fields
+ *  with single spaces, the references index stores folded text, and the
+ *  full-text index folds the query too. Without it a term typed with two
+ *  spaces matches in one scope and returns nothing in another.
+ */
 export function normaliseQuery(q: string): string {
-  return q.trim().toLowerCase()
+  return q.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
 /** These three use the in-memory haystack; the other two have their own view. */
@@ -48,26 +54,30 @@ export function isMetadataScope(scope: SearchScope): boolean {
 /**
  * The haystack for one paper in one scope.
  *
- * `all` is deliberately byte-for-byte the old hay() — the saved-search counts,
- * the filter counts and the smoke run all depend on it. A scope that reads a
- * single field must still join and lower-case the same way, or a phrase could
- * start matching across fields it was never meant to touch.
+ * Every scope returns text normalised the same way as the query. `all` used
+ * to be byte-for-byte the old hay(); it is now that string with whitespace
+ * folded, which is strictly more permissive: a term with two spaces used to
+ * miss a field that contained two spaces, while the references scope found
+ * it. A scope that reads one field must use the identical normalisation, or a
+ * phrase could start matching across fields it was never meant to touch.
  */
 export function scopeHay(d: Doc, scope: SearchScope, note?: string): string {
-  if (scope === 'title') return [d.title].join(' ').toLowerCase()
-  if (scope === 'abstract') return [d.abstract].join(' ').toLowerCase()
-  return [
-    d.title,
-    d.source,
-    d.citation_key,
-    d.doi,
-    d.abstract,
-    d.type,
-    (d.authors ?? []).map((a) => `${a.first_name ?? ''} ${a.last_name ?? ''}`).join(' '),
-    (d.keywords ?? []).join(' '),
-    (d.tags ?? []).join(' '),
-    note ?? ''
-  ]
-    .join(' ')
-    .toLowerCase()
+  const parts =
+    scope === 'title'
+      ? [d.title]
+      : scope === 'abstract'
+        ? [d.abstract]
+        : [
+            d.title,
+            d.source,
+            d.citation_key,
+            d.doi,
+            d.abstract,
+            d.type,
+            (d.authors ?? []).map((a) => `${a.first_name ?? ''} ${a.last_name ?? ''}`).join(' '),
+            (d.keywords ?? []).join(' '),
+            (d.tags ?? []).join(' '),
+            note ?? ''
+          ]
+  return normaliseQuery(parts.join(' '))
 }

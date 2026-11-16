@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { normaliseQuery } from '../lib/searchScope'
 import type { Doc, RefHit } from '../../shared/types'
 
 interface Props {
@@ -18,10 +19,10 @@ interface Props {
  *  already centred on that word by the index. Lower-casing does not move the
  *  offset on ordinary text, so the cut can be made on the original string. */
 function Snippet({ text, query }: { text: string; query: string }) {
-  // The IPC folds whitespace before searching, and the stored snippet is
-  // folded too. Using the raw query here would silently lose the mark on a
-  // term typed with two spaces.
-  const q = query.trim().toLowerCase().replace(/\s+/g, ' ')
+  // The IPC and the index use the same normalisation; the snippet itself is
+  // already normalised. Using the raw query here would silently lose the mark
+  // on a term typed with two spaces.
+  const q = normaliseQuery(query)
   const i = q.length ? text.toLowerCase().indexOf(q) : -1
   if (i < 0) return <>{text}</>
   return (

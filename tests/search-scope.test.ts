@@ -74,15 +74,16 @@ describe('the scope table', () => {
     ])
   })
 
-  it('normalises a query the way all four old call sites did', () => {
-    expect(normaliseQuery('  Deep  Learning ')).toBe('deep  learning')
+  it('normalises a query the same way for every scope', () => {
+    expect(normaliseQuery('  Deep  Learning ')).toBe('deep learning')
+    expect(normaliseQuery('deep\t\nlearning')).toBe('deep learning')
     expect(normaliseQuery('')).toBe('')
     expect(normaliseQuery('   ')).toBe('')
   })
 })
 
 describe('scopeHay', () => {
-  it('all is byte-for-byte the old haystack', () => {
+  it('all is the old haystack with whitespace folded', () => {
     const cases: Doc[] = [
       doc,
       { id: 'bare', title: 'Only a title' },
@@ -90,9 +91,20 @@ describe('scopeHay', () => {
     ]
     for (const d of cases) {
       for (const note of [undefined, '', 'my note']) {
-        expect(scopeHay(d, 'all', note), `${d.id}/${note}`).toBe(oldHay(d, note))
+        expect(scopeHay(d, 'all', note), `${d.id}/${note}`).toBe(
+          normaliseQuery(oldHay(d, note))
+        )
       }
     }
+  })
+
+  it('a term typed with two spaces matches a field that contains one', () => {
+    const q = normaliseQuery('deep  learning')
+    expect(q).toBe('deep learning')
+    expect(scopeHay(doc, 'title').includes(q)).toBe(true)
+    expect(scopeHay(doc, 'all').includes(q)).toBe(true)
+    // and the folding really happened in the haystack, not just the query
+    expect(scopeHay(doc, 'all')).not.toContain('  ')
   })
 
   it('title sees the title and nothing else', () => {
@@ -119,7 +131,7 @@ describe('scopeHay', () => {
 
   it('body and references keep the full haystack so the table does not go blank', () => {
     for (const s of ['body', 'references'] as SearchScope[]) {
-      expect(scopeHay(doc, s, 'note')).toBe(oldHay(doc, 'note'))
+      expect(scopeHay(doc, s, 'note')).toBe(normaliseQuery(oldHay(doc, 'note')))
     }
   })
 

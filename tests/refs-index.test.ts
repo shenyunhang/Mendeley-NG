@@ -261,4 +261,60 @@ describe('searchRefs', () => {
     expect(hit[0].snippet.toLowerCase()).toContain('deep') // snippet contains the hit
     expect(mod.searchRefs('deep')[0].docId).toBe('d1')
   })
+
+  it('returns every occurrence in one paper, so the "还有 N 处" count is real', () => {
+    // Space the hits further apart than the snippet window (80 chars each
+    // side), or every hit would legitimately return the whole short text as
+    // its snippet and the test would be asking for four identical strings.
+    const filler = 'filler '.repeat(30)
+    const hay = ['alpha', filler, 'alpha', filler, 'alpha', filler, 'alpha'].join(' ')
+    fs.writeFileSync(
+      cachePath,
+      JSON.stringify({
+        version: 1,
+        entries: {
+          d1: { mtime: 1, size: 1, text: 'References', hay, page: 5 }
+        }
+      })
+    )
+    const hits = mod.searchRefs('ALPHA')
+    expect(hits).toHaveLength(4)
+    expect(hits.every((h) => h.docId === 'd1' && h.page === 5)).toBe(true)
+    for (const h of hits) expect(h.snippet.toLowerCase()).toContain('alpha')
+    // snippets are cut at different offsets, not four copies of the first hit
+    expect(new Set(hits.map((h) => h.snippet)).size).toBeGreaterThan(1)
+  })
+
+  it('caps the hits from one paper and the total', () => {
+    const many = Array.from({ length: 30 }, () => 'alpha').join(' ')
+    fs.writeFileSync(
+      cachePath,
+      JSON.stringify({
+        version: 1,
+        entries: {
+          a: { mtime: 1, size: 1, text: 'R', hay: many, page: 1 },
+          b: { mtime: 1, size: 1, text: 'R', hay: many, page: 2 }
+        }
+      })
+    )
+    const hits = mod.searchRefs('alpha')
+    expect(hits.filter((h) => h.docId === 'a')).toHaveLength(8)
+    expect(hits).toHaveLength(16)
+  })
+
+  it('still searches cache entries written before the normalised field existed', () => {
+    fs.writeFileSync(
+      cachePath,
+      JSON.stringify({
+        version: 1,
+        entries: {
+          d1: { mtime: 1, size: 1, text: 'Deep  Learning   for Retrieval', page: 2 }
+        }
+      })
+    )
+    const hits = mod.searchRefs('deep  learning')
+    expect(hits).toHaveLength(1)
+    expect(hits[0].snippet.toLowerCase()).toContain('deep learning')
+    expect(hits[0].snippet).not.toContain('  ')
+  })
 })

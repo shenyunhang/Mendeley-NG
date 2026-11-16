@@ -1,3 +1,5 @@
+import { normaliseQuery } from './searchScope'
+
 /**
  * The one rule behind a saved search's name, its sidebar count and the list
  * it opens.
@@ -24,7 +26,9 @@ export function savedSearchMatches<
   haystack: Map<string, string>,
   folderIds: Set<string> | null
 ): boolean {
-  const q = s.query.trim().toLowerCase()
+  // A saved query must be compared with the same normalised term the live
+  // search box uses, or its sidebar count disagrees with the list it opens.
+  const q = normaliseQuery(s.query)
   if (s.starred && !d.starred) return false
   for (const k of s.filters ?? []) {
     const test = testFor(k)

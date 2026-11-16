@@ -5,6 +5,7 @@ import { app } from 'electron'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { atomicWriteJson } from '../../shared/atomicJson'
 import { isRefHead } from '../../src/lib/refly'
+import { normaliseQuery } from '../../src/lib/searchScope'
 import type { Doc, RefHit } from '../../shared/types'
 import { dataDir, loadLibrary } from './store'
 
@@ -24,8 +25,9 @@ const TAIL_PAGES = 20
 const DOC_TIMEOUT_MS = 20_000
 /** Characters of context on either side of a hit in a snippet (~160 total). */
 const SNIPPET_HALF = 80
-/** Nobody reads more than this many hits. */
+/** Nobody reads more than this many hits, or this many from one paper. */
 const MAX_HITS = 200
+const MAX_HITS_PER_DOC = 8
 
 /** A build reads every local PDF and can take minutes; only one may run. */
 let building = false
@@ -43,6 +45,9 @@ interface RefEntry {
   text: string
   /** 1-based page the References heading was found on; 0 when there is none. */
   page: number
+  /** Normalised copy of `text` used for matching and for cutting snippets.
+   *  Optional so caches written before this field existed still load. */
+  hay?: string
 }
 
 interface RefsCache {
@@ -68,7 +73,8 @@ function isEntry(x: unknown): x is RefEntry {
     typeof e.mtime === 'number' && Number.isFinite(e.mtime) &&
     typeof e.size === 'number' && Number.isFinite(e.size) &&
     typeof e.text === 'string' &&
-    typeof e.page === 'number' && Number.isFinite(e.page)
+    typeof e.page === 'number' && Number.isFinite(e.page) &&
+    (e.hay === undefined || typeof e.hay === 'string')
   )
 }
 
@@ -323,10 +329,16 @@ export async function buildRefsIndex(
         if (!got.found || !got.text) {
           // Cache the empty result too, so a paper with no list is not re-read
           // on every run; the reason travels back in `skipped`.
-          c.entries[d.id] = { mtime, size: st.size, text: '', page: got.page }
+          c.entries[d.id] = { mtime, size: st.size, text: '', hay: '', page: got.page }
           skipped.push(`${d.id}: 未找到 References`)
         } else {
-          c.entries[d.id] = { mtime, size: st.size, text: got.text, page: got.page }
+          c.entries[d.id] = {
+            mtime,
+            size: st.size,
+            text: got.text,
+            hay: normaliseQuery(got.text),
+            page: got.page
+          }
         }
       } catch (e) {
         // One unreadable paper is recorded and left WITHOUT a cache entry, so the
@@ -360,16 +372,29 @@ function snippetAt(text: string, at: number, len: number): string {
 }
 
 export function searchRefs(query: string): RefHit[] {
-  const needle = query.trim().toLowerCase().replace(/\s+/g, ' ')
+  const needle = normaliseQuery(query)
   if (needle.length < MIN_QUERY) return []
   const c = loadCache()
   const hits: RefHit[] = []
   for (const docId of Object.keys(c.entries).sort()) {
     const e = c.entries[docId]!
     if (!e.text) continue
-    const at = e.text.toLowerCase().indexOf(needle)
-    if (at < 0) continue
-    hits.push({ docId, page: e.page, snippet: snippetAt(e.text, at, needle.length) })
+    // Matching and slicing both happen on a normalised copy. Taking the
+    // offset from a lower-cased string and cutting the original breaks on
+    // characters whose lower case is longer (U+0130); folding whitespace on
+    // the fly would shift every hit after the first one. Entries written
+    // before `hay` existed fall back to normalising their stored text.
+    const hay = e.hay ?? normaliseQuery(e.text)
+    let from = 0
+    let perDoc = 0
+    while (hits.length < MAX_HITS && perDoc < MAX_HITS_PER_DOC) {
+      const at = hay.indexOf(needle, from)
+      if (at < 0) break
+      hits.push({ docId, page: e.page, snippet: snippetAt(hay, at, needle.length) })
+      // Never advance by zero, or a one-character term would loop forever.
+      from = at + Math.max(1, needle.length)
+      perDoc++
+    }
     if (hits.length >= MAX_HITS) break
   }
   return hits
