@@ -1,4 +1,5 @@
 import { normaliseQuery } from './searchScope'
+import { queryMatches } from './searchMatch'
 
 /**
  * The one rule behind a saved search's name, its sidebar count and the list
@@ -24,10 +25,13 @@ export function savedSearchMatches<
   s: SavedSearchQuery,
   testFor: (key: string) => ((d: T) => boolean) | undefined,
   haystack: Map<string, string>,
-  folderIds: Set<string> | null
+  folderIds: Set<string> | null,
+  options?: { foldedHay?: Map<string, string>; allowNear?: boolean }
 ): boolean {
   // A saved query must be compared with the same normalised term the live
   // search box uses, or its sidebar count disagrees with the list it opens.
+  // `allowNear` is computed once by the caller for the whole haystack; doing
+  // it here would rescan every paper once per paper.
   const q = normaliseQuery(s.query)
   if (s.starred && !d.starred) return false
   for (const k of s.filters ?? []) {
@@ -35,6 +39,8 @@ export function savedSearchMatches<
     if (test && !test(d)) return false
   }
   if (folderIds && !(d.folder_uuids ?? []).some((f) => folderIds.has(f))) return false
-  if (q && !(haystack.get(d.id) ?? '').includes(q)) return false
+  if (q && !queryMatches(haystack.get(d.id) ?? '', q, options?.allowNear === true, options?.foldedHay?.get(d.id))) {
+    return false
+  }
   return true
 }

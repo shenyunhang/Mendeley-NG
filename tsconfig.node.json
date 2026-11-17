@@ -51,6 +51,7 @@
     "src/lib/pdfgeom.ts",
     "src/lib/rectLines.ts",
     "src/lib/savedSearch.ts",
+    "src/lib/searchMatch.ts",
     "src/lib/searchScope.ts",
     "src/lib/refly.ts",
     "src/lib/splitPersonName.ts",

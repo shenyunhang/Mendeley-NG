@@ -636,8 +636,8 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   免得文献表在切过去时整张变空。
 - **归一化只有一份**：`normaliseQuery(q) = trim + toLowerCase + 折叠空白`，
   书目 haystack（`scopeHay` 的所有 scope）、`savedSearchMatches`、`refsindex.ts`
-  的 `searchRefs`、`RefsView` 的高亮都用它。旧契约是「`all` 与内联 `hay()`
-  逐字节一致」，契约是「等于 hay() 再折叠空白」：这是**有意放宽**，
+  的   `searchRefs`、`RefsView` 的高亮都用它。`all` 的契约是「等于旧 `hay()`
+  再折叠空白」：这是**有意放宽**，
   因为输入带两个空格时旧书目表搜不到、参考文献却能搜到。别再让某个范围
   自己写一遍 `trim().toLowerCase()`。`fulltext.ts` 的 `ftSearch` 本来就折叠空白，
   不用改它（它有 smoke 计数断言）。**所有检索 UI 都接这一份规则**：
@@ -646,6 +646,28 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   `SearchResults` 若传未归一化的 `query.trim()`，双空格查询能进列表却没有 `<mark>`；
   `tests/refactor-2026-11-16.test.ts` 有「旧写法确实不高亮」的对照与源码串护栏。
   折叠空白是有意放宽，动手前按 §4 测试纪律先做逐值差分。
+- **近似匹配只用于书目字段；主搜索在没有精确命中时才兜底**。规则全在 `src/lib/searchMatch.ts`：
+  `foldSeparators` 把字母数字与 CJK 之外的字符当词间分隔，`compact` 再去一次空格（中文
+  里多打一个空格也能命中），`tokensNear` 对每个词只允许一次替换/增删/相邻交换且长度
+  小于 3 不近似，`matchQuery` 要求**每个查询词都命中、至少一个词精确命中、且命中位置
+  相距不超过 `词数+1` 个词**，并返回真正出现在 hay 里的 `terms` 供高亮。位置约束不能省：
+  `cud` 与长摘要里的 `can` / `cut` 只差一次编辑，没有它 `qwen cud` 会把一堆无关的
+  Qwen 报告一起捞出来。`allowNearFor` 由调用方对整个 haystack 算一次，
+  `queryMatches` 是列表、`filterCounts`、`savedSearchMatches` 与三个局部筛选共用的唯一
+  判定：主搜索、计数与保存搜索都传 `allowNearFor(...)` 的结果，回收站 / 笔记 /
+  文件夹树传 `true`（列表短、不排序、没有「相近」标签，直接兜底更实用）。App 另预建
+  `foldedHay`，避免每次按键对库里每篇文献各跑一遍正则。
+  **不要用改 `normaliseQuery` 的办法实现近似**：`AddByIdView` 拿它对 DOI / arXiv 做
+  `===` 判重，放宽会把两篇不同的文献合成一篇。
+- **近似结果必须能被标记**。`matchDoc` 第 4 参接 `terms`，`markAllTerms` /
+  `snippetTerms` / `authorPartsFor` 用多个词标同一字段并合并重叠区间；`SearchResults`
+  从 App 收 `nearTerms: Map<id, string[]>`，卡片加 `.res-near`「相近」标签。冒烟的
+  `explained === cards` 要求每张卡都有 `<mark>`，所以这里的高亮不是装饰。
+- **全文与参考文献仍是精确子串**。`fulltext.ts` 的 `at / start / len / bounds / docAt /
+  pageOf / snippetAt` 全指向固定 `fulltext.dat` 的 UTF-16 偏移，由 `byteAt` / `m.bytes`
+  双锚点锁死；`refsindex.ts` 的 `hay` 落盘，`RefsView` 靠 `indexOf(q)` 重定位 `<mark>`。
+  在这两处引入近似匹配会错文档、错页或让卡片失去高亮。要扩展只能做长度保持的
+  1:1 分隔符替换并同步改渲染层，不能改语料或偏移基准。
 - 范围控件是 `search-wrap` **内部**的原生 `<select>`，不是工具栏直属子元素、不是
   第二个 `<input>`、也不是浮层卡片。三者分别会：多一个 gap 把字号/主题挤出一行、
   打穿冒烟里 `document.querySelector(".toolbar input")` 的唯一性假设、或给

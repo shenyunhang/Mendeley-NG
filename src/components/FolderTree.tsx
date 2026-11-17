@@ -3,6 +3,7 @@ import type { Folder, SavedSearch } from '../../shared/types'
 import { FILTER_LABEL, type ListFilter } from '../lib/filters'
 import { buildTree, isSelfOrDescendant } from '../lib/tree'
 import { normaliseQuery } from '../lib/searchScope'
+import { queryMatches } from '../lib/searchMatch'
 
 /** The tooltip names the same conditions as the name, the count and the
  *  restored filters: the saved filters, not the old starred flag. */
@@ -90,7 +91,7 @@ export default function FolderTree({
     const out: { folder: Folder; depth: number }[] = []
 
     const visit = (f: Folder, depth: number) => {
-      if (!q || normaliseQuery(f.name).includes(q)) out.push({ folder: f, depth })
+      if (!q || queryMatches(normaliseQuery(f.name), q, true)) out.push({ folder: f, depth })
       // when filtering, children of a match still need to be reachable, so we
       // always descend even if the parent itself was filtered out
       const kids = tree.children.get(f.id) ?? []

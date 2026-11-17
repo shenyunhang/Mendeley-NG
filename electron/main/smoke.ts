@@ -160,8 +160,12 @@ import { createLazyPages, type PageAnswer } from '../../src/lib/lazyPages'
 import { buildTree, isSelfOrDescendant } from '../../src/lib/tree'
 import { clampScale, posToRect } from '../../src/lib/pdfgeom'
 import { gridTemplate } from '../../src/lib/columns'
-import { markAll } from '../../src/lib/match'
-import { scopeHay } from '../../src/lib/searchScope'
+import { markAll, markAllTerms } from '../../src/lib/match'
+import { normaliseQuery, scopeHay } from '../../src/lib/searchScope'
+// A hyphen in a title and a one-character typo used to produce an empty list.
+// The rule is pure, so it is checked here with fixed text as well as through
+// the live search box below (a source-string check cannot prove a match).
+import { allowNearFor, matchQuery, queryMatches } from '../../src/lib/searchMatch'
 import { splitPersonName } from '../../src/lib/splitPersonName'
 import { uniquePdfPath, writeUniquePdf } from '../../shared/uniquePdfPath'
 
@@ -925,6 +929,41 @@ export async function runSmoke() {
       !scopeHay(scopeSample, 'title').includes('feline') &&
       !scopeHay(scopeSample, 'abstract').includes('deep learning for cats'),
     { all: scopeHay(scopeSample, 'all') }
+  )
+
+  const nearSample = {
+    id: 'near-sample',
+    title: 'Qwen-CUA: A Framework for Computer Use Agents'
+  } as Parameters<typeof scopeHay>[0]
+  const nearHay = scopeHay(nearSample, 'all')
+  const nearQ = normaliseQuery('qwen cud')
+  const nearHit = matchQuery(nearHay, nearQ)
+  expect(
+    'a one-character typo still finds a hyphenated title',
+    nearHit?.kind === 'near' &&
+      !!nearHit.terms.includes('qwen') &&
+      !!nearHit.terms.includes('cua'),
+    { nearHay, nearQ, nearHit }
+  )
+  expect(
+    'a near result can still be marked with the words that really occur',
+    !!nearHit && markAllTerms(nearSample.title!, nearHit.terms).some((p) => p.hit),
+    { terms: nearHit?.terms ?? [] }
+  )
+  expect(
+    'an exact hit keeps near matching closed',
+    !allowNearFor([normaliseQuery('qwen cud exact paper'), nearHay], nearQ) &&
+      queryMatches(normaliseQuery('qwen cud exact paper'), nearQ, false) &&
+      !queryMatches(nearHay, nearQ, false),
+    {}
+  )
+  expect(
+    'a word salad is not a near match',
+    matchQuery(nearHay, normaliseQuery('xwen cud')) === null &&
+      matchQuery(nearHay, normaliseQuery('zzzz')) === null &&
+      allowNearFor([nearHay], nearQ) &&
+      queryMatches(nearHay, nearQ, true),
+    {}
   )
 
   await w.webContents.executeJavaScript(

@@ -22,6 +22,12 @@ import {
   scopeHay,
   type SearchScope
 } from './lib/searchScope'
+import {
+  allowNearFor,
+  foldSeparators,
+  matchQuery,
+  queryMatches
+} from './lib/searchMatch'
 import { createViewGeneration } from './lib/viewGeneration'
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
@@ -618,6 +624,15 @@ export default function App() {
     return m
   }, [docs, noteMap, scope])
 
+  /** The separator-folded form, built once per library change rather than
+   *  once per keystroke per paper. It is only ever used for comparison; no
+   *  offset is ever taken from it. */
+  const foldedHay = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const [id, h] of haystack) m.set(id, foldSeparators(h))
+    return m
+  }, [haystack])
+
   /**
    * What has to happen before there is anything to look at, or null when
    * there is.  Only one thing is ever named, because being told about three
@@ -673,7 +688,14 @@ export default function App() {
       const ids = new Set(tree.subtree.get(folderId) ?? [folderId])
       out = out.filter((d) => (d.folder_uuids ?? []).some((f) => ids.has(f)))
     }
-    if (q) out = out.filter((d) => (haystack.get(d.id) ?? '').includes(q))
+    if (q) {
+      // A typo gets a second chance only when nothing matched exactly. An
+      // ordinary search must keep returning the same papers in the same order.
+      const allowNear = allowNearFor(out.map((d) => haystack.get(d.id) ?? ''), q)
+      out = out.filter((d) =>
+        queryMatches(haystack.get(d.id) ?? '', q, allowNear, foldedHay.get(d.id))
+      )
+    }
     const { key, dir } = sort
     const val = (d: Doc): string | number => sortValue(d, key)
     // The key is taken once per document and carried through the sort.
@@ -687,7 +709,20 @@ export default function App() {
       return (a.v < b.v ? -1 : 1) * dir
     })
     return rows.map((r) => r.d)
-  }, [docs, folderId, query, sort, filters, haystack])
+  }, [docs, folderId, query, sort, filters, haystack, foldedHay])
+
+  /** For a near match, the words that really occur in the paper. The card
+   *  marks these instead of the query, which may differ by one character. */
+  const nearTerms = useMemo(() => {
+    const q = normaliseQuery(query)
+    const m = new Map<string, string[]>()
+    if (!q || !isMetadataScope(scope)) return m
+    for (const d of filtered) {
+      const r = matchQuery(haystack.get(d.id) ?? '', q, foldedHay.get(d.id))
+      if (r && r.kind === 'near') m.set(d.id, r.terms)
+    }
+    return m
+  }, [filtered, haystack, foldedHay, query, scope])
 
   /**
    * How many papers each switch would leave, counted on the list as it stands
@@ -702,7 +737,12 @@ export default function App() {
       const ids = new Set(tree.subtree.get(folderId) ?? [folderId])
       base = base.filter((d) => (d.folder_uuids ?? []).some((f) => ids.has(f)))
     }
-    if (q) base = base.filter((d) => (haystack.get(d.id) ?? '').includes(q))
+    if (q) {
+      const allowNear = allowNearFor(base.map((d) => haystack.get(d.id) ?? ''), q)
+      base = base.filter((d) =>
+        queryMatches(haystack.get(d.id) ?? '', q, allowNear, foldedHay.get(d.id))
+      )
+    }
     // One walk, counting as it goes.  `base.filter(FILTER_TEST[k]).length`
     // builds a fresh array of every surviving paper for each switch and then
     // throws it away after reading one number off it -- five arrays of a few
@@ -714,7 +754,7 @@ export default function App() {
       for (const k of LIST_FILTERS) if (FILTER_TEST[k](d)) out[k]++
     }
     return out
-  }, [docs, folderId, query, haystack, tree])
+  }, [docs, folderId, query, haystack, foldedHay, tree])
 
   /**
    * The keydown listener is installed once, so it reaches the list and the
@@ -945,6 +985,8 @@ export default function App() {
     const m = new Map<string, number>()
     for (const s of saved) {
       const ids = s.folderId ? new Set(tree.subtree.get(s.folderId) ?? [s.folderId]) : null
+      // Computed once per saved search, not once per paper.
+      const allowNear = allowNearFor(haystack.values(), normaliseQuery(s.query))
       m.set(
         s.id,
         docs.filter((d) =>
@@ -953,13 +995,14 @@ export default function App() {
             s,
             (k) => FILTER_TEST[k as ListFilter],
             haystack,
-            ids
+            ids,
+            { foldedHay, allowNear }
           )
         ).length
       )
     }
     return m
-  }, [saved, docs, tree, haystack])
+  }, [saved, docs, tree, haystack, foldedHay])
 
   // The anchor is an index into the current list, so anything that reshapes
   // the list invalidates it. Without this, clicking row 100 in a wide list
@@ -2517,6 +2560,7 @@ export default function App() {
             <SearchResults
               docs={filtered}
               query={query}
+              nearTerms={nearTerms}
               noteMap={noteMap}
               fontSize={fontSize}
               multi={multi}

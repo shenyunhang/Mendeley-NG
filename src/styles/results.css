@@ -43,6 +43,18 @@
   font-size: 0.733rem;
   font-variant-numeric: tabular-nums;
 }
+/* A near match is not an exact hit, and saying so is what keeps the extra
+   results from being mistaken for false precision. */
+.res-near {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 0.667rem;
+  line-height: 1.5;
+  white-space: nowrap;
+}
 .res-authors {
   overflow: hidden;
   text-overflow: ellipsis;

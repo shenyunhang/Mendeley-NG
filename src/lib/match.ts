@@ -43,28 +43,52 @@ function lowerMap(text: string, hay: string): number[] | null {
   return map
 }
 
-export function markAll(text: string, q: string): Part[] {
-  if (!q) return [{ t: text, hit: false }]
-  const needle = q.toLowerCase()
+/**
+ * Split `text` around every occurrence of any word in `terms`.
+ *
+ * A near match can hit several different words in the same field (`qwen` and
+ * `cua` in "Qwen-CUA"), so marking only the first word would leave a result
+ * that says nothing about why it came back. Spans are merged before slicing,
+ * which keeps two nearby words from producing overlapping <mark> runs.
+ */
+export function markAllTerms(text: string, terms: string[]): Part[] {
+  const needles = terms.filter(Boolean).map((t) => t.toLowerCase())
+  if (!needles.length) return [{ t: text, hit: false }]
   const hay = text.toLowerCase()
   const map = lowerMap(text, hay)
   const startOf = (j: number) => (map ? map[j] : j)
   const endOf = (j: number) => (map ? map[j] + 1 : j + 1)
+  const spans: [number, number][] = []
+  for (const needle of needles) {
+    let at = 0
+    for (;;) {
+      const i = hay.indexOf(needle, at)
+      if (i < 0) break
+      spans.push([startOf(i), endOf(i + needle.length - 1)])
+      at = i + needle.length
+    }
+  }
+  if (!spans.length) return [{ t: text, hit: false }]
+  spans.sort((a, b) => a[0] - b[0] || b[1] - a[1])
+  const merged: [number, number][] = []
+  for (const [s, e] of spans) {
+    const last = merged[merged.length - 1]
+    if (last && s <= last[1]) last[1] = Math.max(last[1], e)
+    else merged.push([s, e])
+  }
   const out: Part[] = []
-  let at = 0
   let cursor = 0
-  for (;;) {
-    const i = hay.indexOf(needle, at)
-    if (i < 0) break
-    const start = startOf(i)
-    const end = endOf(i + needle.length - 1)
-    if (start > cursor) out.push({ t: text.slice(cursor, start), hit: false })
-    out.push({ t: text.slice(start, end), hit: true })
-    cursor = end
-    at = i + needle.length
+  for (const [s, e] of merged) {
+    if (s > cursor) out.push({ t: text.slice(cursor, s), hit: false })
+    out.push({ t: text.slice(s, e), hit: true })
+    cursor = e
   }
   if (cursor < text.length) out.push({ t: text.slice(cursor), hit: false })
   return out.length ? out : [{ t: text, hit: false }]
+}
+
+export function markAll(text: string, q: string): Part[] {
+  return markAllTerms(text, [q])
 }
 
 /**
@@ -75,22 +99,39 @@ export function markAll(text: string, q: string): Part[] {
  * field is worth a line.  Showing every field of every paper, matched or
  * not, buries the one line that explains why this paper is here.
  */
-export function snippet(text: string, q: string, lead = 44, trail = 96): Part[] | null {
+export function snippetTerms(
+  text: string,
+  terms: string[],
+  lead = 44,
+  trail = 96
+): Part[] | null {
   const flat = text.replace(/\s+/g, ' ').trim()
-  if (!flat || !q) return null
-  const needle = q.toLowerCase()
+  const needles = terms.filter(Boolean).map((t) => t.toLowerCase())
+  if (!flat || !needles.length) return null
   const hay = flat.toLowerCase()
-  const i = hay.indexOf(needle)
-  if (i < 0) return null
+  let first = -1
+  let firstLen = 0
+  for (const needle of needles) {
+    const i = hay.indexOf(needle)
+    if (i >= 0 && (first < 0 || i < first)) {
+      first = i
+      firstLen = needle.length
+    }
+  }
+  if (first < 0) return null
   const map = lowerMap(flat, hay)
-  const hitStart = map ? map[i] : i
-  const hitEnd = map ? map[i + needle.length - 1] + 1 : i + needle.length
+  const hitStart = map ? map[first] : first
+  const hitEnd = map ? map[first + firstLen - 1] + 1 : first + firstLen
   const from = Math.max(0, hitStart - lead)
   const to = Math.min(flat.length, hitEnd + trail)
-  const parts = markAll(flat.slice(from, to), q)
+  const parts = markAllTerms(flat.slice(from, to), needles)
   if (from > 0) parts.unshift({ t: '…', hit: false })
   if (to < flat.length) parts.push({ t: '…', hit: false })
   return parts
+}
+
+export function snippet(text: string, q: string, lead = 44, trail = 96): Part[] | null {
+  return snippetTerms(text, [q], lead, trail)
 }
 
 /**
@@ -136,28 +177,33 @@ function authorNames(d: Doc): AuthorName[] {
  * thing the card is for.  So when one of the authors matched, the window is
  * drawn around that one instead of around the front of the list.
  */
-export function authorParts(d: Doc, q: string): Part[] {
+export function authorPartsFor(d: Doc, terms: string[]): Part[] {
   const all = authorNames(d)
   if (!all.length) return []
-  const needle = q.toLowerCase()
+  const needles = terms.filter(Boolean).map((t) => t.toLowerCase())
+  const has = (s: string) => needles.some((n) => s.includes(n))
   const matched = (a: AuthorName) =>
-    !!needle && (a.full.toLowerCase().includes(needle) || a.short.toLowerCase().includes(needle))
+    !!needles.length && (has(a.full.toLowerCase()) || has(a.short.toLowerCase()))
   // the short form unless it would swallow the match, in which case the name
   // is worth the extra room
   const draw = (a: AuthorName) =>
-    matched(a) && !a.short.toLowerCase().includes(needle) ? a.full : a.short
+    matched(a) && !has(a.short.toLowerCase()) ? a.full : a.short
   const i = all.findIndex(matched)
   if (i < 0) {
     const head = all.slice(0, 3)
     const text = head.map((a) => a.short).join(', ') + (all.length > 3 ? ` 等 ${all.length} 人` : '')
-    return markAll(text, q)
+    return markAllTerms(text, needles)
   }
   const from = Math.max(0, i - 1)
   const to = Math.min(all.length, i + 3)
-  const parts = markAll(all.slice(from, to).map(draw).join(', '), q)
+  const parts = markAllTerms(all.slice(from, to).map(draw).join(', '), needles)
   if (from > 0) parts.unshift({ t: '… ', hit: false })
   if (to < all.length) parts.push({ t: ` 等 ${all.length} 人`, hit: false })
   return parts
+}
+
+export function authorParts(d: Doc, q: string): Part[] {
+  return authorPartsFor(d, [q])
 }
 
 export interface DocMatch {
@@ -180,12 +226,15 @@ export interface DocMatch {
  * the query is in it — which is the difference between "here is why this
  * paper came back" and "here is the paper again".
  */
-export function matchDoc(d: Doc, q: string, note?: string): DocMatch {
+export function matchDoc(d: Doc, q: string, note?: string, terms?: string[]): DocMatch {
   const titleText = (d.title ?? '').trim() || '(无标题)'
+  // A near match supplies the words that actually occur in the paper; without
+  // them the card would match and then decline to say where.
+  const needles = terms && terms.length ? terms : [q]
   const fields: FieldHit[] = []
   const add = (label: string, text?: string | null) => {
     if (!text) return
-    const parts = snippet(text, q)
+    const parts = snippetTerms(text, needles)
     if (parts) fields.push({ label, parts })
   }
   // in the order a reader reads them: who published it, what it is called in
@@ -202,8 +251,8 @@ export function matchDoc(d: Doc, q: string, note?: string): DocMatch {
   // meant, but a card that matched and shows no mark at all looks broken
   add('类型', d.type)
   return {
-    title: markAll(titleText, q),
-    authors: authorParts(d, q),
+    title: markAllTerms(titleText, needles),
+    authors: authorPartsFor(d, needles),
     year: d.year ? String(d.year) : '',
     source: d.source ?? '',
     fields

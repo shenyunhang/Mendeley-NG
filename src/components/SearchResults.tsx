@@ -11,6 +11,8 @@ interface Props {
    *  when this is empty, which is why the caller only shows this pane while
    *  there is something in the box. */
   query: string
+  /** Words that actually occur in a near match, keyed by document id. */
+  nearTerms?: Map<string, string[]>
   noteMap: Record<string, string>
   selectedId: string | null
   onSelect: (d: Doc, index: number, mod: { shift: boolean; add: boolean }) => void
@@ -55,6 +57,7 @@ function Runs({ parts }: { parts: Part[] }) {
 export default function SearchResults({
   docs,
   query,
+  nearTerms,
   noteMap,
   selectedId,
   onSelect,
@@ -113,11 +116,11 @@ export default function SearchResults({
       const d = docs[i]
       const hit = cache.get(d.id)
       if (hit) return hit
-      const made = matchDoc(d, q, noteMap[d.id])
+      const made = matchDoc(d, q, noteMap[d.id], nearTerms?.get(d.id))
       cache.set(d.id, made)
       return made
     }
-  }, [docs, q, noteMap])
+  }, [docs, q, noteMap, nearTerms])
 
   return (
     <div
@@ -176,6 +179,11 @@ export default function SearchResults({
                   <span className="res-title">
                     <Runs parts={m.title} />
                   </span>
+                  {nearTerms?.has(d.id) ? (
+                    <span className="res-near" title="没有完全匹配的结果，这是按词形相近找到的">
+                      相近
+                    </span>
+                  ) : null}
                   {m.year ? <span className="res-year">{m.year}</span> : null}
                 </div>
                 {m.authors.length ? (
