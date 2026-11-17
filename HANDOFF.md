@@ -539,9 +539,10 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   唯一例外是键盘方向键的 `selectOnly`，它只 `setSelId` 不打开标签——否则按一次
   ↓ 就开一篇，会瞬间堆满标签栏。回收站文献不在 `docs` 里，靠标签里的 `doc` 快照
   与 `pinned` 兜底。若以后要给标签数量设上限，改 `upsertPaper`，别在各调用点各写一份。
-- 标签栏是 `.pane-head` **下面独立一行** `.paper-tabs`（`flex: 0 0 auto` +
-  横向滚动），不塞进 `pane-head`：既守住「新功能不挤右栏 `PdfViewer`」的分层，
-  也不会抢走 PDF 的高度。标签按钮文字不能叫「详情」「PDF」「返回列表」，
+- 标签栏是 `.pane-head` **上面独立一行** `.paper-tabs`（`flex: 0 0 auto` +
+  横向滚动），不塞进 `pane-head`：和浏览器一样，「切哪篇文献」的层级在「详情 /
+  PDF」这组只作用于当前文献的按钮之上，顺序不能倒过来。仍是固定高度，不会抢走
+  PDF 的高度，也不挤 `PdfViewer`。标签按钮文字不能叫「详情」「PDF」「返回列表」，
   冒烟用 `find(textContent.trim()===...)` 在 `.pane-right button` 里找它们。
 - 逐字段搜（`src/lib/match.ts`）标出命中的字段 + 片段 + `<mark>`，作者命中时
   改用全名显示；Unicode 折叠后的下标要映射回原串再切片。

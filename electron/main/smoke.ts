@@ -9961,7 +9961,10 @@ export async function runSmoke() {
       + 'const firstId=(first.find(t=>t.active)||{}).id||"";'
       + 'rows[1].click();await wait(400);'
       + 'const second=tabs();'
-      + 'return JSON.stringify({first,firstId,second,'
+      + 'const pane=document.querySelector(".pane-right");'
+      + 'const order=(pane?[...pane.children].slice(0,2):[])'
+      + '.map(e=>e.className).join("|");'
+      + 'return JSON.stringify({first,firstId,second,order,'
       + 'kept:!!firstId&&second.some(t=>t.id===firstId)})})()'
     )
   ) as Record<string, unknown>
@@ -9973,6 +9976,13 @@ export async function runSmoke() {
       rowTabs.firstId !== '' &&
       (rowTabs.second as { active: boolean }[]).filter((t) => t.active).length === 1 &&
       rowTabs.kept === true,
+    rowTabs
+  )
+  // Switching papers outranks switching the view of one paper, so the tab
+  // bar sits above the 详情 / PDF row rather than below it.
+  expect(
+    'the tab bar sits above the details and PDF buttons',
+    rowTabs.order === 'paper-tabs|pane-head',
     rowTabs
   )
 

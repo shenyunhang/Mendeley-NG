@@ -2617,26 +2617,6 @@ export default function App() {
         />
 
         <div className="pane pane-right" style={{ flexBasis: `${rightPct}%` }}>
-          <div className="pane-head">
-            <button
-              className={rightTab === 'details' ? 'primary' : ''}
-              style={{ padding: '3px 10px', fontSize: '0.8rem' }}
-              onClick={() => setRightTab('details')}
-            >
-              详情
-            </button>
-            <button
-              className={rightTab === 'pdf' ? 'primary' : ''}
-              style={{ padding: '3px 10px', fontSize: '0.8rem' }}
-              onClick={() => setRightTab('pdf')}
-            >
-              PDF
-            </button>
-            <span className="grow" />
-            {selected?.citation_key && (
-              <span className="badge">{selected.citation_key}</span>
-            )}
-          </div>
           {openPapers.length ? (
             <div className="paper-tabs">
               {openPapers.map((p) => (
@@ -2663,6 +2643,26 @@ export default function App() {
               ))}
             </div>
           ) : null}
+          <div className="pane-head">
+            <button
+              className={rightTab === 'details' ? 'primary' : ''}
+              style={{ padding: '3px 10px', fontSize: '0.8rem' }}
+              onClick={() => setRightTab('details')}
+            >
+              详情
+            </button>
+            <button
+              className={rightTab === 'pdf' ? 'primary' : ''}
+              style={{ padding: '3px 10px', fontSize: '0.8rem' }}
+              onClick={() => setRightTab('pdf')}
+            >
+              PDF
+            </button>
+            <span className="grow" />
+            {selected?.citation_key && (
+              <span className="badge">{selected.citation_key}</span>
+            )}
+          </div>
           {!selected ? (
             <div className="empty">选中左侧一条文献查看详情或 PDF</div>
           ) : pinnedSelected && rightTab === 'details' ? (
