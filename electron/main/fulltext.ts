@@ -993,27 +993,65 @@ export function ftSearch(q: string): FtHit[] {
   }
 
   /**
-   * Last resort when no exact hit exists: find the words that really occur in
-   * the corpus and use *their* offsets. Nothing in `body`, `m.entries` or the
-   * byte/code-unit anchors is rewritten, so docAt, pageOf and snippetAt still
-   * describe the same text they always did. A folded copy would break that:
-   * offset 100 in a copy is not offset 100 in fulltext.dat.
+   * Words that are adjacent in the corpus but differ from the query by a
+   * separator or one edit. Their offsets come from the words that really
+   * occur, so nothing in `body`, `m.entries` or the byte/code-unit anchors
+   * is rewritten: docAt, pageOf and snippetAt still describe the same text.
+   * A folded copy would break that -- offset 100 in a copy is not offset 100
+   * in fulltext.dat.
    *
-   * At least one query word must occur exactly somewhere in the corpus. That
-   * is both the anchor the shared rule requires and a cheap way to skip a
-   * word-salad query without scanning every paper.
+   * `limit` is the room left in MAX_HITS and `skip` holds documents already
+   * listed as exact hits, so appending these never crowds out or repeats an
+   * exact answer. At least one query word must occur exactly somewhere in
+   * the corpus; that is both the anchor the shared rule requires and a cheap
+   * way to skip a word-salad query without scanning every paper.
    */
-  const nearHits = (): FtHit[] => {
+  const nearHits = (limit = MAX_HITS, skip?: Set<string>): FtHit[] => {
+    if (limit <= 0) return []
     const wanted = queryTokens(needle)
     if (!wanted.length || wanted.length > MAX_NEAR_WORDS) return []
     const anchors = wanted.filter((w) => w.length >= 2 && body.includes(w))
     if (!anchors.length) return []
     const out: FtHit[] = []
+    // The shared rule keeps every hit word within a handful of tokens of an
+    // exact anchor word. Tokenising whole papers to find a phrase that can
+    // only live next to an anchor costs hundreds of milliseconds on a large
+    // corpus, so look at a neighbourhood of each occurrence instead. More
+    // than one occurrence matters: a model name like "qwen" can appear in a
+    // table on page one and again in the title phrase on page two.
+    const WINDOW_BEFORE = 160
+    const WINDOW_AFTER = 200
+    const MAX_WINDOWS_PER_DOC = 12
+    const nearIn = (piece: string) => {
+      const tried = new Set<number>()
+      for (const a of anchors) {
+        let from = 0
+        let used = 0
+        for (;;) {
+          const i = piece.indexOf(a, from)
+          if (i < 0 || used >= MAX_WINDOWS_PER_DOC) break
+          used++
+          from = i + Math.max(1, a.length)
+          const windowFrom = Math.max(0, i - WINDOW_BEFORE)
+          if (tried.has(windowFrom)) continue
+          tried.add(windowFrom)
+          const windowTo = Math.min(piece.length, i + WINDOW_AFTER)
+          const spans = wordSpans(piece.slice(windowFrom, windowTo)).map((s) => ({
+            ...s,
+            at: s.at + windowFrom
+          }))
+          const near = nearSpans(spans, needle)
+          if (near?.length) return near
+        }
+      }
+      return null
+    }
     for (const [id, e] of sorted) {
+      if (skip?.has(id)) continue
       const piece = body.slice(e.start, e.start + e.len)
       if (!anchors.some((a) => piece.includes(a))) continue
-      const near = nearSpans(wordSpans(piece), needle)
-      if (!near || !near.length) continue
+      const near = nearIn(piece)
+      if (!near) continue
       // Spans are relative to this document's slice. Add its start so pageOf
       // and snippetAt still read the original corpus, and use the whole
       // matching range so no hit word falls outside the snippet.
@@ -1026,7 +1064,7 @@ export function ftSearch(q: string): FtHit[] {
         near: true,
         terms: [...new Set(near.map((s) => s.word))]
       })
-      if (out.length >= MAX_HITS) break
+      if (out.length >= limit) break
     }
     return out
   }
@@ -1099,5 +1137,13 @@ export function ftSearch(q: string): FtHit[] {
     })
     if (hits.length >= MAX_HITS) break
   }
-  return hits.length ? hits : nearHits()
+  // The exact phrase was not in the corpus, so "every word in one paper" is
+  // the best exact answer there is. But those words may be scattered across
+  // a page, while the paper the reader actually wanted has them adjacent
+  // with a hyphen and one typo. Append those near hits after the exact ones:
+  // both answers stay visible, and the near ones say so on the card. Nothing
+  // is replaced, and an exact hit is never shown twice under two labels.
+  const already = new Set(hits.map((h) => h.docId))
+  hits.push(...nearHits(MAX_HITS - hits.length, already))
+  return hits
 }

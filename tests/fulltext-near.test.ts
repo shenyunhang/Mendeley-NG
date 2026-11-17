@@ -124,4 +124,56 @@ describe('ftSearch near fallback', () => {
     // The shared rule needs one exact word to anchor the match.
     expect(mod.ftSearch('cud')).toEqual([])
   })
+
+  it('appends near hits after the exact AND answers without replacing them', () => {
+    // d1 has both query words scattered across its text (the exact multi-word
+    // path), d2 has them adjacent with a hyphen and one typo (the near path).
+    const first = 'alpha qwen in one place and cud somewhere else entirely'
+    const second = 'first page words here. qwen-cua: native computer use agents'
+    const gap = ' | '
+    const body = first + gap + second
+    const secondStart = first.length + gap.length
+    writeIndex(body, {
+      d1: { start: 0, len: first.length, bounds: [first.length] },
+      d2: { start: secondStart, len: second.length, bounds: [body.length] }
+    })
+
+    const hits = mod.ftSearch('qwen cud')
+    expect(hits).toHaveLength(2)
+    expect(hits[0]!.docId).toBe('d1')
+    expect(hits[0]!.near).toBeUndefined()
+    expect(hits[1]!.docId).toBe('d2')
+    expect(hits[1]!.near).toBe(true)
+    expect(hits[1]!.terms).toEqual(['qwen', 'cua'])
+    expect(hits[1]!.snippet).toContain('qwen-cua')
+    // A paper already listed as an exact hit is not shown twice.
+    expect(new Set(hits.map((h) => h.docId)).size).toBe(hits.length)
+    expect(hits.length).toBeLessThanOrEqual(300)
+  })
+
+  it('finds a near phrase around a later occurrence of the anchor word', () => {
+    // The first "qwen" is in a model table; the phrase the reader wants is
+    // much later. Looking only at the first anchor window would miss it.
+    const body =
+      'qwen model table ' +
+      'filler '.repeat(40) +
+      'qwen-cua: native computer use agents'
+    writeIndex(body, {
+      d1: { start: 0, len: body.length, bounds: [body.length] }
+    })
+    const hits = mod.ftSearch('qwen cud')
+    expect(hits).toHaveLength(1)
+    expect(hits[0]!.near).toBe(true)
+    expect(hits[0]!.terms).toEqual(['qwen', 'cua'])
+  })
+
+  it('does not append near hits when the exact phrase was found', () => {
+    const body = 'a short paper about qwen cua agents, with qwen-cua nearby'
+    writeIndex(body, {
+      d1: { start: 0, len: body.length, bounds: [body.length] }
+    })
+    const hits = mod.ftSearch('qwen cua')
+    expect(hits.length).toBeGreaterThan(0)
+    expect(hits.every((h) => h.near === undefined)).toBe(true)
+  })
 })

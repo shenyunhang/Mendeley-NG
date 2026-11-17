@@ -673,7 +673,17 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   **不能用折叠副本取偏移**：`at / start / len / bounds / docAt / pageOf / snippetAt`
   全指向固定 `fulltext.dat` 的 UTF-16 位置并由 `byteAt` / `m.bytes` 双锚点锁死，副本里
   的 100 不是原文里的 100，会错文档、错页、错片段。近似路径先用「至少一个词在整篇里
-  精确出现」做快速筛再 tokenize，词数上限 `MAX_NEAR_WORDS`，避免扫全库。
+  精确出现」做快速筛，词数上限 `MAX_NEAR_WORDS`。
+- **全文的近似结果是追加，不是替换；参考文献仍是零命中兜底**。全文的多词精确路径是
+  `docsWithAllWords`（所有词在同一篇即算命中），语义比书目的整短语子串宽，所以
+  `qwen cud` 这类查询往往先返回一批「词散落在不同处」的精确结果。整短语
+  `body.indexOf(needle)` 命中时直接返回，不追加；没命中时把 `nearHits` 追加在精确结果
+  尾部，按 `docId` 去重、受 `MAX_HITS` 限额，精确结果一条不少。参考文献只有短语
+  `indexOf`，没有 AND 路径，仍按「零精确命中才兜底」，与书目一致。
+  `fulltext.ts` 的 `nearHits` 只在 anchor 词每次出现的前后 160/200 字符窗口内切词
+  （每篇最多 12 个窗口）：命中词按规则必须紧邻 anchor，整篇 tokenize 在大语料上要
+  几百毫秒，会卡住 `ft:search` 这个同步 handler。窗口是**局部短语搜索**，不能拿它的
+  token 下标去和整篇的跨度比较；`MAX_HITS` 与 `skip` 集合仍由调用方给。
 - **两个视图都要标近似命中**。`FtHit` / `RefHit` 加可选 `near` / `terms`；精确命中路径
   完全不变，`FullTextView` 只在 `h.near` 时用 `markAllTerms` 标词；`RefsView.Snippet`
   原来的 `indexOf(q)` 在近义片段里找不到词，改走 `terms`。`.ft-near` 标签说明这不是
