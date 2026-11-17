@@ -9944,6 +9944,38 @@ export async function runSmoke() {
     backToTable
   )
 
+  // Selecting a paper from the table is an open, not just a selection: it
+  // gets a tab, and clicking a second row must leave the first row's tab
+  // there. This is the exact regression a reader hits when the right pane
+  // loses the paper they were on.
+  const rowTabs = JSON.parse(
+    await w.webContents.executeJavaScript(
+      '(async()=>{'
+      + 'const wait=(m)=>new Promise(r=>setTimeout(r,m));'
+      + 'const rows=[...document.querySelectorAll("div.row")];'
+      + 'const tabs=()=>[...document.querySelectorAll(".paper-tab")]'
+      + '.map(t=>({id:t.dataset.id||"",active:t.classList.contains("active")}));'
+      + 'if(rows.length<2)return JSON.stringify({error:"not enough rows"});'
+      + 'rows[0].click();await wait(400);'
+      + 'const first=tabs();'
+      + 'const firstId=(first.find(t=>t.active)||{}).id||"";'
+      + 'rows[1].click();await wait(400);'
+      + 'const second=tabs();'
+      + 'return JSON.stringify({first,firstId,second,'
+      + 'kept:!!firstId&&second.some(t=>t.id===firstId)})})()'
+    )
+  ) as Record<string, unknown>
+  log('row clicks open tabs', rowTabs)
+  expect(
+    'clicking a row opens its paper as a tab and a second row keeps the first',
+    rowTabs.error === undefined &&
+      (rowTabs.first as { active: boolean }[]).some((t) => t.active) &&
+      rowTabs.firstId !== '' &&
+      (rowTabs.second as { active: boolean }[]).filter((t) => t.active).length === 1 &&
+      rowTabs.kept === true,
+    rowTabs
+  )
+
   // A blank click is the way out of a selection, and a row click must not be
   // mistaken for one. Everything here is put back at the end so the settings
   // checks that follow start from the row that was selected before (177).
