@@ -135,7 +135,8 @@ describe('source-string guards for the optimisation pass', () => {
       'src/components/TrashView.tsx',
       'src/components/NotesView.tsx',
       'src/components/FolderTree.tsx',
-      'src/components/AddByIdView.tsx'
+      'src/components/AddByIdView.tsx',
+      'src/lib/hooks/usePdfFind.ts'
     ]
     for (const f of files) {
       const src = read(f)

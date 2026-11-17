@@ -14,6 +14,8 @@ import { clampFullTextPages } from '../shared/fullTextPages'
 import { folderForOpenedDoc } from './lib/folderForDoc'
 import { createBatchGate } from './lib/batchGate'
 import { runBatch } from './lib/batch'
+import { DOWNLOAD_FLUSH_EVERY, DOWNLOAD_LANES } from './lib/budgets'
+import { fieldOf, mergeMissingFields } from './lib/mergeFields'
 import { useOverlayStack } from './lib/hooks/useOverlayStack'
 import { savedSearchMatches } from './lib/savedSearch'
 import {
@@ -1087,8 +1089,10 @@ export default function App() {
       setMulti([d.id])
     }
     lastIdx.current = index
-    setSelId(d.id)
-    setRightTab(d.localPdf ? 'pdf' : 'details')
+    // Clicking a row opens the paper, not just selects it: the right pane
+    // keeps a tab for it, so moving to another row does not close this one.
+    // Passing no page leaves the reader free to restore the last position.
+    openPaper(d, null)
   }
 
   /**
@@ -1547,7 +1551,7 @@ export default function App() {
         )
       }
       const queue = need.slice()
-      const lanes = Math.min(3, queue.length)
+      const lanes = Math.min(DOWNLOAD_LANES, queue.length)
       const work = async () => {
         for (;;) {
           const d = queue.shift()
@@ -1561,7 +1565,7 @@ export default function App() {
           }
           done++
           setDlRun({ done, total: need.length })
-          if (done % 10 === 0) flush()
+          if (done % DOWNLOAD_FLUSH_EVERY === 0) flush()
         }
       }
       await Promise.all(Array.from({ length: lanes }, work))
@@ -2320,47 +2324,14 @@ export default function App() {
               if (!go) return
               // fill only what the keeper is missing, so merging never
               // overwrites a good field with a worse one
-              const patch: Record<string, unknown> = {}
-              const field = (d: Doc, f: string) =>
-                (d as unknown as Record<string, unknown>)[f]
-              for (const f of [
-                'abstract',
-                'source',
-                'publisher',
-                'volume',
-                'issue',
-                'pages',
-                'citation_key',
-                'keywords',
-                'url'
-              ]) {
-                if (field(keeper, f)) continue
-                const hit = others.find((o) => field(o, f))
-                if (hit) patch[f] = field(hit, f)
-              }
-              if (!keeper.year) {
-                const y = others.find((o) => o.year)?.year
-                if (y) patch.year = y
-              }
-              if (!keeper.authors?.length) {
-                const a = others.find((o) => o.authors?.length)?.authors
-                if (a) patch.authors = a
-              }
-              const ident = { ...(keeper.identifiers ?? {}) }
-              if (!ident.doi) {
-                ident.doi = others.map((o) => o.identifiers?.doi ?? o.doi).find(Boolean)
-              }
-              if (!ident.arxiv) {
-                ident.arxiv = others.map((o) => o.identifiers?.arxiv ?? o.arxiv).find(Boolean)
-              }
-              if (ident.doi || ident.arxiv) patch.identifiers = ident
+              const patch = mergeMissingFields(keeper, others)
               const updated = Object.keys(patch).length
                 ? await window.api.patchDoc(keeper.id, patch)
                 : keeper
               // remember what the keeper looked like, so undoing the merge can
               // put it back rather than only resurrecting the losers
               const prev: Record<string, unknown> = {}
-              for (const f of Object.keys(patch)) prev[f] = field(keeper, f)
+              for (const f of Object.keys(patch)) prev[f] = fieldOf(keeper, f)
               for (const o of others) {
                 const r = await window.api.trashDoc(o.id)
                 if (!r.ok) {
@@ -2671,6 +2642,7 @@ export default function App() {
               {openPapers.map((p) => (
                 <div
                   key={p.id}
+                  data-id={p.id}
                   className={'paper-tab' + (selId === p.id ? ' active' : '')}
                 >
                   <button

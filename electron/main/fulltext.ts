@@ -18,6 +18,16 @@ import {
 } from '../../src/lib/searchMatch'
 import { docsWithAllWords, type WordOccurrence } from '../../shared/wordCoverage'
 import { atomicWriteJson } from '../../shared/atomicJson'
+import { progressAllowed, sameIndexedFile, snippetAround } from '../../shared/indexedFileRules'
+import {
+  docAt,
+  endOf,
+  isFullTextMetaShape,
+  isReaderFailure,
+  pageOf,
+  type FullTextEntry as Entry,
+  type FullTextMeta as Meta
+} from '../../shared/fulltextRules'
 /** One lane is the floor; four is the ceiling even on a many-core box. */
 const MIN_INDEX_LANES = 1
 const MAX_INDEX_LANES = 4
@@ -116,45 +126,12 @@ export function setFullTextPages(n: number): boolean {
 /** How much context to show either side of a hit. */
 const SNIPPET_BEFORE = 60
 const SNIPPET_AFTER = 140
+/** A build tells the window about progress about three times a second. */
+const FULL_TEXT_PROGRESS_MIN_MS = 300
 
 /** Stop after this many hits; nobody scrolls past it. */
 const MAX_HITS = 300
 
-interface Entry {
-  /** offset into the text file */
-  start: number
-  len: number
-  /** absolute offsets of the end of each indexed page, for hit -> page */
-  bounds: number[]
-  mtime: number
-  size: number
-  /**
-   * Which file the text came from.  The text does not depend on it, so a
-   * build never re-reads a paper just because the name changed, but an
-   * append does: a paper that has been renamed or re-attached is read
-   * again rather than left describing a path that is no longer there.
-   * Older entries lack it, which counts as "not the same file".
-   */
-  file?: string
-}
-
-interface Meta {
-  version: 2
-  pages: number
-  /**
-   * How many bytes of the text file the entry table actually describes.
-   *
-   * Offsets in the table are counted in UTF-16 code units and the file is
-   * measured in bytes, and the two are not convertible without reading the
-   * whole thing — one Chinese character is three bytes but one code unit.
-   * So the byte length is carried alongside the entries, and it is the one
-   * place a build can pick up again from: everything after `bytes` is text
-   * that was written but never recorded, which is what an interrupted run
-   * leaves behind.
-   */
-  bytes: number
-  entries: Record<string, Entry>
-}
 
 let dir: string = ''
 let meta: Meta | null = null
@@ -269,23 +246,6 @@ let voided: 'format' | 'budget' | null = null
 /** What the unreadable index was built with, when the budget is the reason. */
 let voidedPages = 0
 
-/** Whether a parsed table has the shape the rest of this module reads:
- *  offsets, page bounds and a byte anchor that are real numbers.  A legal
- *  JSON object with the right version but a missing entries/bytes used to be
- *  cached and written back, while Object.keys(m.entries) threw on every call. */
-function isMetaShape(m: unknown): m is Meta {
-  if (!m || typeof m !== 'object') return false
-  const x = m as Meta
-  if (typeof x.bytes !== 'number' || !Number.isFinite(x.bytes) || x.bytes < 0) return false
-  if (!x.entries || typeof x.entries !== 'object' || Array.isArray(x.entries)) return false
-  for (const e of Object.values(x.entries)) {
-    if (!e || typeof e !== 'object') return false
-    if (typeof e.start !== 'number' || !Number.isFinite(e.start)) return false
-    if (typeof e.len !== 'number' || !Number.isFinite(e.len)) return false
-    if (!Array.isArray(e.bounds) || !e.bounds.every((b) => typeof b === 'number' && Number.isFinite(b))) return false
-  }
-  return true
-}
 
 function loadMeta(): Meta {
   if (meta) return meta
@@ -299,7 +259,7 @@ function loadMeta(): Meta {
     // thing as the one the user is about to search, so it is discarded; so is
     // one written before the byte anchor existed, because there is no way to
     // tell where its text file can safely be appended to
-    if (sameFormat && isMetaShape(m)) {
+    if (sameFormat && isFullTextMetaShape(m)) {
       meta = m
       return meta
     }
@@ -321,14 +281,6 @@ function loadMeta(): Meta {
   return meta
 }
 
-/** The highest offset the entry table claims, in code units. */
-function endOf(m: Meta): number {
-  let at = 0
-  for (const e of Object.values(m.entries)) {
-    if (e.start + e.len > at) at = e.start + e.len
-  }
-  return at
-}
 
 /** A build owns the meta object it started with. Writing the module-level
  *  variable instead meant that changing the page budget or clearing the
@@ -381,19 +333,6 @@ function text(): string {
   return blob
 }
 
-/** Which document an offset into the text file belongs to, by binary search. */
-function docAt(sorted: [string, Entry][], off: number): [string, Entry] | null {
-  let lo = 0
-  let hi = sorted.length - 1
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1
-    const e = sorted[mid][1]
-    if (off < e.start) hi = mid - 1
-    else if (off >= e.start + e.len) lo = mid + 1
-    else return sorted[mid]
-  }
-  return null
-}
 
 export function ftStatus(docs: Doc[]): FtStatus {
   const m = loadMeta()
@@ -458,18 +397,6 @@ const DOC_TIMEOUT_MS = 20_000
 
 let failures = 0
 
-/**
- * Whether an exception is about the reader failing to start rather than about
- * the file being unreadable.
- *
- * These are the messages pdf.js gives when its worker thread is missing, and
- * then every document fails identically whatever is in it.  Telling that
- * apart is the whole difference between "your PDFs are broken" and "this
- * install is", and only one of the two is something the reader can fix.
- */
-function isReaderFailure(err: string): boolean {
-  return /fake worker|workerSrc|pdf\.worker|GlobalWorkerOptions/i.test(err)
-}
 
 /**
  * What came out of one PDF.  `why` is empty only when there is text.
@@ -693,7 +620,7 @@ export async function ftBuild(
     // count mattered before, which meant a re-run over cached documents —
     // every batch finishing in microseconds — sent hundreds of progress
     // messages a second, and that is its own kind of freeze.
-    if (now - lastPing < 300) return
+    if (!progressAllowed(lastPing, now, FULL_TEXT_PROGRESS_MIN_MS)) return
     lastPing = now
     progress.current = cur
     onProgress(ftStatus(docs))
@@ -751,11 +678,7 @@ export async function ftBuild(
           continue
         }
         const prev = fresh.entries[d.id]
-        if (
-          prev &&
-          prev.mtime === Math.floor(st.mtimeMs) &&
-          prev.size === st.size
-        ) {
+        if (sameIndexedFile(prev, Math.floor(st.mtimeMs), st.size)) {
           progress.done++
           continue
         }
@@ -896,15 +819,9 @@ export async function ftAdd(docs: Doc[], ids: string[]): Promise<number> {
         continue
       }
       const prev = m.entries[d.id]
-      // Same file, same moment, same length: the text already in the index is
-      // this text.  A different path counts as a different file, so a paper
-      // that was renamed, re-downloaded or re-attached is read again.
-      if (
-        prev &&
-        prev.file === d.localPdf &&
-        prev.mtime === Math.floor(st.mtimeMs) &&
-        prev.size === st.size
-      ) {
+      // An append needs the stricter rule: a renamed or re-attached paper is
+      // a different file even when its moment and size happen to agree.
+      if (sameIndexedFile(prev, Math.floor(st.mtimeMs), st.size, d.localPdf as string)) {
         continue
       }
       const g = await extract(d.localPdf as string, budget)
@@ -975,22 +892,11 @@ export function ftSearch(q: string): FtHit[] {
   const tokens = needle.split(' ')
   const hits: FtHit[] = []
 
-  const snippetAt = (off: number, len: number) => {
-    const from = Math.max(0, off - SNIPPET_BEFORE)
-    const to = Math.min(body.length, off + len + SNIPPET_AFTER)
-    return (
-      (from > 0 ? '…' : '') +
-      body.slice(from, to).replace(/\s+/g, ' ').trim() +
-      (to < body.length ? '…' : '')
-    )
-  }
+  /** Offsets only mean anything on the original corpus; the shared rule
+   *  slices there and folds whitespace afterwards. */
+  const snippetAt = (off: number, len: number) =>
+    snippetAround(body, off, len, SNIPPET_BEFORE, SNIPPET_AFTER)
 
-  const pageOf = (e: Entry, off: number) => {
-    for (let i = 0; i < e.bounds.length; i++) {
-      if (off < e.bounds[i]) return i + 1
-    }
-    return e.bounds.length
-  }
 
   /**
    * Words that are adjacent in the corpus but differ from the query by a

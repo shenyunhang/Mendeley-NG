@@ -1,8 +1,8 @@
 # Mendeley NG 基础层与领域模型演化分析报告
 
 > **分析对象**：`D:/mendeley-ng` 全量 git 历史
-> **依据**：322 个提交，2026-10-30 → 2026-11-16（18 天），单分支 `main`，远端 `github.com/shenyunhang/Mendeley-NG`；代码与文档行号为分析时定位
-> **核心发现**：18 天里反复把「在调用点手抄的规则」下沉到 `shared/`、把混在入口里的职责迁到独立模块；三次范式切换分别解决职责不可辨、状态不可信、改动不可验。
+> **依据**：331 个提交，2026-10-30 → 2026-11-17（19 天），单分支 `main`，远端 `github.com/shenyunhang/Mendeley-NG`；代码与文档行号为分析时定位
+> **核心发现**：19 天里反复把「在调用点手抄的规则」下沉到 `shared/`、把混在入口里的职责迁到独立模块；四次范式切换分别解决职责不可辨、状态不可信、改动不可验，以及「新增一套领域索引时规则不重新分裂」。
 
 ---
 
@@ -22,9 +22,10 @@
 | 2026-11-08 | 5 | **I 信任边界与单测地基** | `e419fda` 硬化 IPC + Vitest 地基；`be15f20` 文档重写 |
 | 2026-11-09 | 8 | J 可验证性收尾 | 拆 smoke/CSS、handler 行为测试、浮层栈单一规则、视口附近重绘 |
 | 2026-11-10 | 1 | K 发布门禁修补 | annotated tag 的 `git cat-file` 判定 |
-| 2026-11-16 | 3 | L 字段级检索 | 参考文献索引、归一化统一、返回全部命中 |
+| 2026-11-16 | 7 | **L 字段级检索与规则收口** | `2add2e5` 参考文献索引、`ba932c0` 归一化统一、`994c252` 分析后收口重复规则 |
+| 2026-11-17 | 5 | **M 近似匹配与多标签** | `a14d41b` 标题容错、`b4e0061` 近似扩展不碰偏移、`52442bc` 追加而非替换、`9b37ad0` 多标签 |
 
-**版本号不是线性的**：`v0.1.3`→`v0.1.112` 共 110 个 release bump，几乎每个功能提交后紧跟一个版本提交。这说明仓库把"一次逻辑改动 = 一个 commit，版本 bump = 另一个 commit"当成了纪律（`README.md:352-354`）。
+**版本号不是线性的**：`v0.1.3`→`v0.1.114`，功能提交后几乎总跟着一个 Release bump。仓库把"一次逻辑改动 = 一个 commit，版本 bump = 另一个 commit"当成了纪律（README 发布一节）。
 
 ---
 
@@ -81,6 +82,33 @@ e419fda  Harden IPC boundaries and add a unit-test foundation
 ### 阶段 J→L｜2026-11-09~16 可验证性收尾（12 提交）
 
 `8736d7e` 把 `smoke.ts` 抽出 7 个 `smoke-*.ts` 纯断言块、把 `styles.css` 逐字切成 12 个有序分片；`dd0ec75` 给主进程 IPC handler 补行为测试；`1fd4437` 把浮层优先级抽成 `topOverlay` 纯规则 + 单测；`ba932c0` 统一归一化并让 `refsindex.ts` 存 `hay` 归一化副本。
+
+---
+
+### 阶段 L｜2026-11-16 字段级检索与规则收口（7 提交）
+
+`2add2e5` 一次落地第二套索引：`electron/main/refsindex.ts`（当时 324 行）、
+`src/lib/searchScope.ts`（73 行）、`src/components/RefsView.tsx`（177 行）、
+`electron/main/ipc/refs.ts`（34 行）与 `shared/types.ts` 的 `RefHit`。范围枚举只有 5 个值，
+`body` / `references` 由各自的视图与索引回答，不走书目 haystack。`746504c` 补进程内 busy 闸门、
+每 20 篇 checkpoint、按 `candidates()` 的 id 集合 prune，以及渲染层的 `live` 守卫与
+`refsError` 故障出口；`ba932c0` 把归一化收成 `normaliseQuery` 一份，让 `searchRefs`
+返回每篇全部命中。`994c252` 是同日的代码分析收口：删掉未暴露的 `pdf:read` 通道与无用常量、
+把 CI 与 release 的产物校验合到 `scripts/verify-build.mjs`、脚本共用 `scripts/_shared.mjs`，
+并写出三对分析报告。`0aae621` / `efa9602` 清掉过时文档与一次性重构说明。
+
+### 阶段 M｜2026-11-17 近似匹配与多标签（5 提交）
+
+`a14d41b` 加 `src/lib/searchMatch.ts`（223 行）：`foldSeparators` 把非字母数字与 CJK 之外
+的字符当词间分隔，`compact` 再去一次空格，`tokensNear` 对每个词只允许一次替换 / 增删 /
+相邻交换且长度小于 3 不近似；`matchQuery` 要求每个查询词都命中、至少一个词精确命中、
+命中位置相距不超过「词数 + 1」个词。没有位置约束，`qwen cud` 会把一堆无关的 Qwen 报告
+一起捞出来。`b4e0061` 用 `wordSpans` 保留原文本里的 `at/len`，把近似规则扩展到全文与
+参考文献而**不碰偏移**：`fulltext.ts` 的 `nearHits` 把 `at` 加上 `e.start` 变回
+`fulltext.dat` 的绝对偏移，`refsindex.ts` 在 `hay` 上匹配并用同一个 `hay` 切片段。
+`52442bc` 把全文近似结果改为追加在精确结果尾部（按 `docId` 去重、受 `MAX_HITS` 限额），
+而不是替换。`9b37ad0` 用 `src/lib/openPapers.ts`（58 行）记录每篇打开的论文，
+右栏仍只有一个 `PdfViewer`。
 
 ---
 
@@ -173,6 +201,35 @@ export type View =
 
 ---
 
+### 3.5 `9b37ad0` — 多标签不是多个阅读器，而是一份状态投影
+
+`git show --stat 9b37ad0`：`src/App.tsx` +127/-34、`src/lib/openPapers.ts` 新增 58 行、
+`tests/open-papers.test.ts` 新增 91 行、`electron/main/smoke.ts` +24。逐文件看语义移动：
+
+| 文件 | 变化 | 语义落在哪 |
+| --- | --- | --- |
+| `src/lib/openPapers.ts` | 新增 `paperEntry` / `upsertPaper` / `removePaper` / `nextActivePaper` | 「打开过的论文」这份事实本身，纯规则、无 React |
+| `src/App.tsx` | `openPaper` 成为所有打开动作的唯一入口；`activatePaper` 投影到 `selId / pinned / rightTab / jump` | 组装层只接线，`selected` 与 `reader` 语义不变 |
+| `src/styles/panes.css` | `.paper-tabs` 是 `.pane-head` 下面独立一行 | 新功能不挤进 `PdfViewer` |
+| `tests/open-papers.test.ts` | 91 行纯 Node 用例 | 同 id 只刷新页码、关当前标签后落到哪篇，先有行为断言再改 UI |
+
+冒烟里单 `.pdf-pane`、单个右栏空态、单行 `.open` 的断言因此仍然成立：变化的是
+「哪篇被激活」，不是「右栏有几个阅读器」。这是 `f864926` 单一 `View` 范式在
+「多篇论文」这个新维度上的延续。
+
+### 3.6 `b4e0061` + `52442bc` — 近似规则跨三层复用而不改语料
+
+`b4e0061` 动了 13 个文件：`src/lib/searchMatch.ts` +120/-41（新增 `wordSpans` /
+`nearSpans` / `spanBounds`）、`electron/main/fulltext.ts` +50、`electron/main/refsindex.ts` +40、
+两个视图各 +25、`shared/types.ts` 给 `FtHit` / `RefHit` 加可选 `near` / `terms`，
+并新增 `tests/fulltext-near.test.ts` 127 行。关键取舍是**位置与语料分离**：近似词的位置
+来自 `wordSpans` 在原文上的 `at/len`，`fulltext.ts` 只把它平移到绝对偏移，
+`refsindex.ts` 只在同一份 `hay` 上切片段，旧索引照常加载、不需要升 `version`。
+`52442bc` 再改 `fulltext.ts` +72/-15，把近似命中从「替换精确结果」改成「追加」，
+并新增 52 行差分用例覆盖「精确结果一条不少」。
+
+---
+
 ## 4. 领域需求反向驱动基础层（逐条 diff 证据）
 
 领域需求反向驱动基础层的信号：**新能力不是先设计好再等调用，而是领域里踩了坑之后被下沉进 `shared/`，并同时开放扩展点**。
@@ -236,22 +293,38 @@ diff 显示两边同时被替换：
 
 ---
 
+### 4.6 `a14d41b` / `b4e0061` — 领域检索把规则推过进程边界
+
+`a14d41b` 的 `src/lib/searchMatch.ts` 不在渲染层独有：`tsconfig.node.json` 把它列进手工白名单，
+主进程的两个索引、冒烟与 Vitest 都 import 同一份规则。`b4e0061` 让 `wordSpans` 保留原文位置
+后，`fulltext.ts` 与 `refsindex.ts` 才能在不重建缓存的前提下共用近似判定。两次提交合起来是
+「领域里出现一个新问题（打错一个字母就找不到）→ 答案被表达成与 DOM 无关的纯规则 → 基础层
+`shared/` 再收走两套索引共同的片段 / 文件判定 / 进度」这条链。同一个循环在 `ba932c0`
+（归一化）、`994c252`（脚本共用底座）与本轮的 `indexedFileRules.ts` 上各走了一遍。
+
+---
+
 ## 5. 演化规律总结
 
 ### 5.1 维度对比表（演化前 vs 演化后）
 
-| # | 维度 | 演化前（2026-10-30） | 演化后（2026-11-16） | 证据 |
+| # | 维度 | 演化前（2026-10-30） | 演化后（2026-11-17） | 证据 |
 | --- | --- | --- | --- | --- |
 | 1 | 入口职责 | `index.ts` 5602 行：启动 + 同步 + 40 个 IPC + 冒烟 | `index.ts` 142 行，六个域注册器 + 独立 `smoke.ts` | `af4f4c3`、`HEAD:index.ts` |
 | 2 | 视图表示 | 8 个布尔标志 + 三元链，payload 与标志并列 | 单一 `View` 联合类型，payload 随视图走，不显示即不存在 | `f864926`、`src/lib/view.ts` |
 | 3 | 跨进程契约 | 两份手写 `Api`，已漂移（`openExternal: void`） | 唯一 `src/global.d.ts`，preload `const api: Api` 编译期校验，`window.d.ts` 单独放 DOM ambient | `e419fda` |
-| 4 | 规则位置 | 夹取/页数/UA/归一化在调用点手抄 2~5 份 | `shared/` 16 个纯规则模块，一份规则被所有调用点 import | `ab086b5`、`14c7f13`、`ba932c0` |
+| 4 | 规则位置 | 夹取/页数/UA/归一化在调用点手抄 2~5 份 | `shared/` 18 个纯规则模块，两份索引共用三条规则 | `ab086b5`、`14c7f13`、`ba932c0`、`shared/indexedFileRules.ts` |
 | 5 | 信任边界 | `mendeley://pdf` 可取任意本地文件、`export:leave` 可越界、`config:set` 合并任意键 | 全部输入经 `shared/pathPolicy.ts`；`satisfies Record<keyof AppConfig, true>` 让漏审配置成为编译错误 | `e419fda`、`shared/pathPolicy.ts:109-174` |
-| 6 | 回归手段 | 12k 行真实窗口冒烟（唯一），不能进 CI | 550 个纯 Node Vitest 用例 + 16 个测试文件 + CI/release 两道门禁；冒烟仍保留但只本地跑 | `vitest.config.ts`、`.github/workflows/ci.yml` |
+| 6 | 回归手段 | 12k 行真实窗口冒烟（唯一），不能进 CI | 635 个纯 Node Vitest 用例 + 24 个测试文件 + CI/release 两道门禁；冒烟仍保留但只本地跑 | `vitest.config.ts`、`.github/workflows/ci.yml` |
 | 7 | 并发正确性 | 并行同步互踩水印；同步在途本地编辑被覆盖；`/files` 分页死循环 | `syncQueue` 串行化、`reconcileSyncWrite` 四快照裁决、`paged.ts` 双终止条件 | `shared/syncQueue.ts`、`libraryReconcile.ts`、`paged.ts` |
 | 8 | 失败语义 | 无名字的空 `catch` 散落各处 | `FAILURE` 字面量联合 + `ignoreFailure`/`reportFailure` + sink 审计 | `e024a9b`、`shared/failures.ts` |
 | 9 | 新增领域成本 | 往 `index.ts` 列表末尾插一个 `ipcMain.handle` | 判断属于哪个 `ipc/*.ts`；若涉及新配置键，编译期强制先决定是否可写 | `ipc/index.ts:8-20`、`pathPolicy.ts:103-130` |
-| 10 | 文档与代码关系 | HANDOFF 是功能清单 | HANDOFF 按主题写「改这些地方之前先读」，记录坑与判据，不写死会变的数字 | `HANDOFF.md:421-670` |
+| 10 | 文档与代码关系 | HANDOFF 是功能清单 | HANDOFF 按主题写「改这些地方之前先读」，记录坑与判据，不写死会变的数字 | `HANDOFF.md` 第 8 节 |
+| 11 | 索引数量 | 1 套（每篇前 3 页的全文语料） | 2 套：再加末尾最多 20 页的参考文献，独立缓存、不合并 | `2add2e5`、`refsindex.ts:29-47` |
+| 12 | 检索范围 | 一个拼接所有字段的 haystack | 5 个 scope，一份 `normaliseQuery`，`body` / `references` 各有自己的视图 | `searchScope.ts:15-47`、`ba932c0` |
+| 13 | 容错匹配 | 无 | 书目 / 全文 / 参考文献共用 `searchMatch.ts`，保留原文 `at/len`，不改语料 | `a14d41b`、`b4e0061` |
+| 14 | 打开多篇 | 单篇选中态，打开别篇会关掉前一篇 | `OpenPaper[]` 投影到既有选中态，右栏仍一个 `PdfViewer` | `9b37ad0`、`openPapers.ts:25-58` |
+| 15 | 索引基础设施 | 无第二套可比 | 两套索引共用文件判定 / 片段 / 进度，旧表达式逐值差分 | `shared/indexedFileRules.ts`、5 个差分测试 |
 
 ### 5.2 驱动力量
 
@@ -260,14 +333,14 @@ diff 显示两边同时被替换：
 3. **工具/可验证性驱动**：`e419fda` 引入 Vitest 与 CI 门禁后，后续 8 天的提交模式变成"先补纯规则单测，再改接线"（`1fd4437` 浮层栈、`dd0ec75` handler 行为测试、`ea5686f` 同步与标注接线）。
 4. **文档沉淀后再实现**：`d75596a` 先记录第五轮评审 backlog，`02aa9b6` 再一次性修完 15 项；`84ec2de`/`e8ac7eb` 先写 polish 清单再逐条兑现；`be15f20`/`97fb679` 把 README/HANDOFF 重写到与当前树一致。
 
-322 个提交里，`Release v0.1.X` 占约 110 个，剩下的绝大多数不是"新增能力"，而是"把已经在两处、三处写过的同一条规则收成一处，并配一条能证明没改变答案的断言"。`HANDOFF.md:300-301` 把方法固化为：*「抽共享规则前把旧表达式逐行抄进测试、对大批量输入逐值比，并单独证明退化差异真实存在。共享常量不等于共享规则，『怎么夹取』也要收进同一模块。」*
+331 个提交里，`Release v0.1.X` 与功能提交几乎交替出现，剩下的绝大多数不是"新增能力"，而是"把已经在两处、三处写过的同一条规则收成一处，并配一条能证明没改变答案的断言"。`HANDOFF.md` 第 4 节把方法固化为：*「抽共享规则前把旧表达式逐行抄进测试、对大批量输入逐值比，并单独证明退化差异真实存在。共享常量不等于共享规则，『怎么夹取』也要收进同一模块。」*
 
 ---
 
 ## 6. 结论
 
-这 18 天把一个已经能跑的单体，沿着『磁盘事实可信 / 跨进程输入不可信 / 异步结果需要归属标记』这三条约束，一层层剥成可验证的结构。三次范式切换各自解决了一类不可靠性：入口拆包解决**职责不可辨**，`View` 联合类型解决**状态不可信**，单测地基解决**改动不可验**。
+这 19 天把一个已经能跑的单体，沿着『磁盘事实可信 / 跨进程输入不可信 / PDF 文本昂贵且有损 / 异步结果需要归属标记』这四条约束，一层层剥成可验证的结构。四次范式切换各自解决一类不可靠性：入口拆包解决**职责不可辨**，`View` 联合类型解决**状态不可信**，单测地基解决**改动不可验**，字段级检索与多标签解决**新增领域能力时规则重新分裂**——第二套索引没有复制第一套的基础设施，多篇论文没有复制多个阅读器。
 
-遗留的演化断点也很清楚，且都被 `HANDOFF.md:682-698` 主动登记：`App.tsx` 剩余状态簇、`smoke.ts` 剩余的 UI 驱动链、`fulltext.ts` 索引状态机仍主要靠源码串断言守护、五份 JSON 无 schema 版本。
+遗留的演化断点已被 `HANDOFF.md` 第 9 节主动登记：`App.tsx` 剩余状态簇、`smoke.ts` 剩余的 UI 驱动链、`fulltext.ts` 写入状态机仍主要靠源码串断言守护、五份 JSON 无 schema 版本与迁移、IPC 失败形态不统一、两个索引的 worker 生命周期仍各写一份。
 
 > 相关文档：[架构演化分析 HTML](./mendeley-ng架构演化分析.html) · [架构实现分析](./mendeley-ng架构实现分析.md) · [第一性原理与设计巧思分析](./mendeley-ng第一性原理与设计巧思分析.md)

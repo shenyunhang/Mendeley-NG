@@ -198,7 +198,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 功能 | 说明 |
 | --- | --- |
 | 读 PDF | pdf.js，按 `devicePixelRatio` 出后备缓冲，高 DPI 下不虚；点进阅读区后 PageUp/PageDown/空格/←→/Home/End 翻页 |
-| 已打开的文献 | 从参考文献命中、全文命中、全部标注、查重、回收站或 PDF 内链接打开论文时，右侧栏给它留一个标签；再打开别的不关掉原来的。点标签切回并回到当时打开的那一页，点 × 单独关闭，关掉正在看的会切到相邻那篇 |
+| 已打开的文献 | 点文献列表行、搜索结果卡片，或从参考文献命中、全文命中、全部标注、查重、回收站、PDF 内链接打开论文时，右侧栏给它留一个标签；再打开别的不关掉原来的。点标签切回并回到当时打开的那一页（从列表打开的回到上次读到的页），点 × 单独关闭，关掉正在看的会切到相邻那篇 |
 | 篇内查找 | Ctrl+F 在当前 PDF 里找词，命中标橙、显示 n/N，回车跳下一个 |
 | 页内链接 | PDF 自带的超链接可点：内部章节跳转翻页，外部地址交给浏览器。**默认不画框**——一篇几十个链接，满屏蓝框让每句话都像能点——悬停才显形；开着拖选高亮时整层让位 |
 | 参考文献跳转 | 悬停正文里的引用标记看那条参考文献；在库里的给「打开」，PDF 里指向库内论文的链接也在这里开。**打开时左侧文件夹树定位到它所属的文件夹**，列表筛选和树高亮始终是同一个状态 |
@@ -306,10 +306,15 @@ src/
   components/              视图组件（PdfViewer.tsx 是阅读器）
   lib/hooks/               React 状态簇，按「谁跟谁一起变」切
   lib/                     与 React 无关的纯规则：PDF 几何与文本、导入导出、
-                           列与三栏、检索代次、引文、匹配、树、具名延时
+                           列与三栏、检索代次、引文、匹配、树、具名延时与批量预算
+  lib/searchScope.ts       唯一的检索归一化、范围枚举与篇内查找词长
+  lib/mergeFields.ts       查重合并「只补空缺字段」的纯规则
+  lib/budgets.ts           下载并发、路径 flush 与批量进度的三份预算
   lib/configWrite.ts       渲染层所有配置写入的统一入口
-shared/                    三端共享：类型、规则常量、原子写、安全策略、分页与队列
+shared/                    三端共享：类型、规则常量、原子写、安全策略、索引规则
   pathPolicy.ts            协议白名单、导出路径、外链与配置输入的校验规则
+  indexedFileRules.ts      两套 PDF 索引共用的文件判定、片段切割与进度节流
+  fulltextRules.ts         全文索引表的形状、偏移定位、页码与 worker 故障判定
 tests/                     Vitest 单测：shared 规则 / 渲染层纯函数 / 安全边界 / 重构差分
 scripts/
   _shared.mjs              脚本共用：仓库根、Electron 路径、环境清理、UA
@@ -331,7 +336,11 @@ electron.vite.config.ts    main / preload / renderer 三段构建配置
 所以单测和冒烟都能直接喂假时钟、手控 promise 去测它。
 
 几个约定：类型只在 `shared/types.ts` 改；跨 IPC 的规则（页数预算、位图尺寸、夹取、
-延时、静默失败、路径策略）也只留一份，别在调用点手抄；IPC 契约只在
+延时、静默失败、路径策略）也只留一份，别在调用点手抄；检索归一化只有
+`src/lib/searchScope.ts` 的 `normaliseQuery` 一份，书目、参考文献、篇内查找与保存
+搜索都走它；两套 PDF 索引的「同一份文件」「片段切割」「进度节流」共用
+`shared/indexedFileRules.ts`，全文索引表的形状与只读规则在 `shared/fulltextRules.ts`；
+合并补字段与批量预算是纯规则，各自带一份旧表达式逐值差分测试。IPC 契约只在
 `src/global.d.ts` 定义一份，preload 编译期照它校验；所有尺寸用 rem，字号旋钮才有效；
 `contextIsolation: true`，renderer 拿不到 node，所有能力走 `window.api`。
 

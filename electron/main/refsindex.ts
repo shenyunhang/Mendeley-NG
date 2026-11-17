@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { app } from 'electron'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { atomicWriteJson } from '../../shared/atomicJson'
+import { progressAllowed, sameIndexedFile, snippetAround } from '../../shared/indexedFileRules'
 import { isRefHead } from '../../src/lib/refly'
 import { normaliseQuery } from '../../src/lib/searchScope'
 import {
@@ -299,7 +300,7 @@ export async function buildRefsIndex(
   }
   const step = (force = false) => {
     const now = Date.now()
-    if (!force && now - lastPing < PROGRESS_MIN_MS) return
+    if (!progressAllowed(lastPing, now, PROGRESS_MIN_MS, force)) return
     lastPing = now
     try {
       onProgress?.({ done, total })
@@ -327,7 +328,7 @@ export async function buildRefsIndex(
       const mtime = Math.floor(st.mtimeMs)
       const prev = c.entries[d.id]
       // Same moment and same length: the cached section is this file's section.
-      if (prev && prev.mtime === mtime && prev.size === st.size) {
+      if (sameIndexedFile(prev, mtime, st.size)) {
         advance()
         continue
       }
@@ -371,13 +372,6 @@ export async function buildRefsIndex(
   return { total, indexed: countIndexed(c), skipped }
 }
 
-function snippetAt(text: string, at: number, len: number): string {
-  const from = Math.max(0, at - SNIPPET_HALF)
-  const to = Math.min(text.length, at + len + SNIPPET_HALF)
-  const body = text.slice(from, to).replace(/\s+/g, ' ').trim()
-  return (from > 0 ? '…' : '') + body + (to < text.length ? '…' : '')
-}
-
 export function searchRefs(query: string): RefHit[] {
   const needle = normaliseQuery(query)
   if (needle.length < MIN_QUERY) return []
@@ -397,7 +391,7 @@ export function searchRefs(query: string): RefHit[] {
     while (hits.length < MAX_HITS && perDoc < MAX_HITS_PER_DOC) {
       const at = hay.indexOf(needle, from)
       if (at < 0) break
-      hits.push({ docId, page: e.page, snippet: snippetAt(hay, at, needle.length) })
+      hits.push({ docId, page: e.page, snippet: snippetAround(hay, at, needle.length, SNIPPET_HALF, SNIPPET_HALF) })
       // Never advance by zero, or a one-character term would loop forever.
       from = at + Math.max(1, needle.length)
       perDoc++
@@ -431,7 +425,7 @@ export function searchRefs(query: string): RefHit[] {
     hits.push({
       docId,
       page: e.page,
-      snippet: snippetAt(hay, bounds.at, bounds.len),
+      snippet: snippetAround(hay, bounds.at, bounds.len, SNIPPET_HALF, SNIPPET_HALF),
       near: true,
       terms: [...new Set(near.map((s) => s.word))]
     })

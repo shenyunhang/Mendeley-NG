@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FIND_QUERY_DEBOUNCE_MS } from '../timing'
+import { MIN_FIND_QUERY_LENGTH, normaliseQuery } from '../searchScope'
 import type * as pdfjs from 'pdfjs-dist'
 import type { MutableRefObject } from 'react'
 import type { FindHit, TextRun } from '../pdfgeom'
@@ -56,9 +57,9 @@ export function usePdfFind(o: {
   const textCache = useRef(new Map<number, TextRun[]>())
   const findInput = useRef<HTMLInputElement>(null)
 
-  /** The word the answer belongs to. A lower-cased word, because that is what
-   *  `findInPage` was asked about. */
-  const key = findQ.trim().toLowerCase()
+  /** The word the answer belongs to. The scan and this key must use the same
+   *  one normalisation rule, or an answer would never match its own word. */
+  const key = normaliseQuery(findQ)
   const findHits = answerHits(answer, key) ?? NO_HITS
   const findBusy = answerBusy(answer, key)
 
@@ -120,14 +121,17 @@ export function usePdfFind(o: {
    * click is worse than no box.
    */
   useEffect(() => {
-    const q = (hitQuery ?? '').trim()
-    if (q.length < 2) {
+    const raw = (hitQuery ?? '').trim()
+    const q = normaliseQuery(raw)
+    if (q.length < MIN_FIND_QUERY_LENGTH) {
       if (!queryDriven.current) return
       closeFind()
       return
     }
     queryDriven.current = true
-    setFindQ(q)
+    // The box shows what the reader searched for; the scan compares the
+    // normalised form, which is what `key` and `needle` agree on.
+    setFindQ(raw)
   }, [hitQuery, o.docKey, closeFind])
 
   /** Bring hit `i` on screen.  Takes the list explicitly so a scan can jump to
@@ -169,8 +173,8 @@ export function usePdfFind(o: {
    */
   const runFind = useCallback(
     async (q: string) => {
-      const needle = q.trim().toLowerCase()
-      if (!pdf || needle.length < 2) {
+      const needle = normaliseQuery(q)
+      if (!pdf || needle.length < MIN_FIND_QUERY_LENGTH) {
         // No state write: the word in the box is now too short for the old
         // answer to match, which is already an empty, non-busy view.
         scan.current?.cancel()

@@ -212,6 +212,9 @@ src/
   components/           视图组件，PdfViewer.tsx 是阅读器
   lib/hooks/            React 状态簇，按「谁跟谁一起变」切
   lib/hooks/useOverlayStack.ts  设置面板与三张工具条卡片的状态 + 一次 Esc 关一层
+  lib/searchScope.ts    唯一的检索归一化、范围枚举与篇内查找词长
+  lib/mergeFields.ts    查重合并只补空缺字段的纯规则
+  lib/budgets.ts        下载并发、路径 flush 与批量进度的具名预算
   lib/                  与 React 无关的纯规则，可直接在 Node 里 import
   lib/overlayStack.ts   浮层优先级的纯规则 topOverlay
   lib/searchScope.ts    搜索范围枚举、标签与 scopeHay 纯规则
@@ -219,7 +222,9 @@ src/
   lib/batch.ts          批量动作的进度节流与失败名单，不碰 React
   styles.css            样式唯一入口，只有一串按原顺序排列的 @import
   styles/               从原单文件逐字切出的十二个分片，规则顺序不可重排
-shared/                  三端共享：类型、规则常量、原子写、安全策略、分页与队列
+shared/                  三端共享：类型、规则常量、原子写、安全策略、索引规则
+                         indexedFileRules.ts：两套索引共用的文件判定、片段与进度
+                         fulltextRules.ts：全文表的形状、偏移、页码与 worker 故障
                          librarySync.ts：把云端回答变成同步提议的三条纯规则
 tests/                   Vitest 单测：shared / renderer-pure / security / refactor-regression
                          main-ipc-system / main-ipc-files（Electron 用替身，捕获 handler）
@@ -247,7 +252,10 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   `PdfViewer` 只留缩放、翻页、拖选与 JSX；几何 / 位图 / 文本 / 查找 / 选区放
   `src/lib/pdf*.ts`，连续滚动账本放独立 hook。
 - 类型只在 `shared/types.ts` 改，不在三处各写一份；跨 IPC 的规则（页数预算、位图尺寸、
-  夹取、延时、静默失败、路径策略）也只留一份，别在调用点手抄。
+  夹取、延时、静默失败、路径策略）也只留一份，别在调用点手抄。检索归一化只有
+  `src/lib/searchScope.ts` 一份；两套索引的基础设施共用 `shared/indexedFileRules.ts`，
+  全文表的只读规则在 `shared/fulltextRules.ts`；纯规则下沉时同步在 `tests/` 留一份
+  旧表达式逐值差分，探测器先喂旧写法证明抓得到。
 - `src/global.d.ts` 定义唯一的 `Api`，preload 用 `const api: Api = {...}` 在编译期照它
   校验；`src/window.d.ts` 只提供 `Window.api` 的 ambient 声明，这样主进程工程 import
   契约时不会被拉进 DOM 的 `Window` 类型。
@@ -461,6 +469,11 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   `ftBuild().then()` 两处都更新。
 - 页数的边界与默认值只有一份规则（`shared/fullTextPages.ts`）：设置面板、索引构建
   和开机时的配置恢复共用，不会出现界面说 3 页、索引却按 50 页建的情况。
+- 两个索引不各写一份基础设施：`sameIndexedFile`（mtime+size，追加路径额外比 `file`）、
+  `snippetAround`（先按原文本切片再折叠空白）、`progressAllowed` 都在
+  `shared/indexedFileRules.ts`；`fulltext.dat` 表的形状、偏移定位、页码与 worker
+  故障判定在 `shared/fulltextRules.ts`。两处的旧表达式逐字抄在
+  `tests/indexed-file-rules.test.ts` 与 `tests/fulltext-rules.test.ts` 里做逐值差分。
 
 ### 8.2 阅读器与 PDF
 
@@ -520,9 +533,12 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   `upsertPaper` 同 id 只刷新页码不追加，`nextActivePaper` 决定关闭当前标签后落到哪篇。
   App 的 `openPaper` 把激活标签投影到 `selId / pinned / rightTab / jump`，
   `selected` 与 `reader` 的语义不变，冒烟里单 `.pdf-pane`、单个右栏空态、单行
-  `.open` 的断言都仍然成立。所有「打开」动作（全文 / 参考文献 / 标注 / 查重 /
-  回收站 / PDF 内链接）走 `openPaper`；列表行点选是「选中」，仍只 `setSelId`，
-  两者不要混。回收站文献不在 `docs` 里，靠标签里的 `doc` 快照与 `pinned` 兜底。
+  `.open` 的断言都仍然成立。**所有「打开」动作都走 `openPaper`**：文献列表行 /
+  搜索结果卡片（`onRowSelect`）、全文 / 参考文献 / 标注 / 查重 / 回收站 / PDF 内
+  链接。点列表行不指定页码（`page: null`），仍按 `reading.json` 恢复上次读到的页。
+  唯一例外是键盘方向键的 `selectOnly`，它只 `setSelId` 不打开标签——否则按一次
+  ↓ 就开一篇，会瞬间堆满标签栏。回收站文献不在 `docs` 里，靠标签里的 `doc` 快照
+  与 `pinned` 兜底。若以后要给标签数量设上限，改 `upsertPaper`，别在各调用点各写一份。
 - 标签栏是 `.pane-head` **下面独立一行** `.paper-tabs`（`flex: 0 0 auto` +
   横向滚动），不塞进 `pane-head`：既守住「新功能不挤右栏 `PdfViewer`」的分层，
   也不会抢走 PDF 的高度。标签按钮文字不能叫「详情」「PDF」「返回列表」，
@@ -716,6 +732,10 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   两套索引不要合并，也不要去改 `fulltext.ts` 的格式。
 - 首次选 `references` 且索引为空时自动建一次，渲染层查询按 250ms 防抖；
   `buildRefsIndex` 的 IPC 是长任务，进度必须显示，别让一次等待看起来像卡死。
+- 篇内查找也接这一份归一化：`usePdfFind` 的 `key`、`needle` 与长度判定都用
+  `normaliseQuery`，查找框仍显示读者输入的原词。最短词长具名为
+  `MIN_FIND_QUERY_LENGTH = 2`（要逐页问 pdf.js 取文本），与 `refsindex.ts` 的
+  `MIN_QUERY = 1`（短表内精确 `indexOf`，中文单字检索）有意不同，别把两者合并。
 - 范围目前是**会话内状态**，没有写进 `SavedSearch` / `AppConfig`。要持久化时
   `SavedSearch.scope` 必须可选并兼容旧配置（照 `s.filters?.filter(` 的写法），
   且别动冒烟锁住的 `filters: [...filters]` / `savedSearchMatches(` 等源码串。
@@ -763,10 +783,11 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   串行，且自检会拒绝第二份程序共写同一份 config；这不是并发安全的实现，不要把它
   拿去给多进程场景用。
 - `src/App.tsx` 仍是组装层里的一个大文件，`Toolbar` 的 props 很多。已抽出
-  `runBatch`（`lib/batch.ts`）与浮层栈（`lib/overlayStack.ts` +
-  `hooks/useOverlayStack.ts`），两者都是先配纯规则单测再改接线。剩下的
-  `setLib` 状态簇与 Esc 之后的键盘导航仍在 App 里；拆它们要连带重排冒烟里
-  大量 UI 驱动与接线断言，同样先补行为测试再动手。
+  `runBatch`（`lib/batch.ts`）、浮层栈（`lib/overlayStack.ts` +
+  `hooks/useOverlayStack.ts`）、合并补字段（`lib/mergeFields.ts`）与批量预算
+  （`lib/budgets.ts`），每一处都是先配纯规则单测再改接线。剩下的 `setLib`
+  状态簇与 Esc 之后的键盘导航仍在 App 里；拆它们要连带重排冒烟里大量 UI
+  驱动与接线断言，同样先补行为测试再动手。
 - `smoke.ts` 只抽走了六个不碰窗口、不碰真实库、不读自身源码的纯断言块，入口、
   `cfgSnapshot`、`restoreSmokeConfig`、共享 `expect`/`fails` 与末尾汇总都没动。
   剩下两段 UI 驱动链、读真实库的块、读 smoke.ts 自身源码的块、以及配置收尾块
@@ -779,8 +800,11 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   渲染层浮层优先级有纯规则单测（Esc 逐层关闭的 UI 行为仍由 smoke 实测）。
   `export.ts` / `importText.ts` / `updateText.ts` / `doctypes.ts` 的纯规则在
   `tests/pure-modules.test.ts` 里有纯 Node 用例。
-  `fulltext.ts` 索引状态机与 `App.tsx` 剩余状态簇仍只靠 smoke 的源码串断言
-  和真实库自检守着；这两处是接下来唯一还没拆的高耦合区间。
+  `fulltext.ts` 的表形状、偏移定位、页码与 worker 故障判定已下沉到
+  `shared/fulltextRules.ts` 并配固定输入单测；两个索引共用的文件判定、片段
+  与进度在 `shared/indexedFileRules.ts`。仍只靠 smoke 源码串断言与真实库自检
+  守着的是 `fulltext.ts` 的写入状态机（`busy` / `deferred` / `pending`）与
+  `App.tsx` 剩余状态簇。
 - 主窗口 `sandbox: false`（授权窗口是 `true`）：preload 只用 Electron API，
   统一沙箱前要确认没有依赖 Node 的 preload 路径。
 - `store.ts` 里五个 JSON 没有 schema 版本与迁移：结构校验失败一律当成「无缓存」，

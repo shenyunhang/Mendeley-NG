@@ -1,9 +1,9 @@
 # Mendeley NG 第一性原理与设计巧思分析报告
 
 > **分析对象**：`D:/mendeley-ng`
-> **分析日期**：2026-11-16
+> **分析日期**：2026-11-17
 > **引用口径**：代码与文档行号为分析时定位
-> **结论先行**：根本问题是「一个终将失效的外部服务，要持续喂养一份必须永远可读、可搜、可带走的本地库」；四条基本事实（磁盘是唯一真相、跨进程输入不可信、PDF 文本抽取代价高且转码有损、异步结果属于它出发时的世界）决定了代码形状。
+> **结论先行**：根本问题是「一个终将失效的外部服务，要持续喂养一份必须永远可读、可搜、可带走的本地库」；四条基本事实（磁盘是唯一真相、跨进程输入不可信、PDF 文本抽取代价高且转码有损、异步结果属于它出发时的世界）决定了代码形状。第二套索引与近似匹配把事实 C 推到更远处：容错命中必须借用原文词的位置，一个偏移都不能改；多标签把事实 D 推到「多篇论文」这个维度，答案是一份状态投影而不是多个阅读器。
 
 ---
 
@@ -42,7 +42,7 @@
 
 ---
 
-## 3. 代码巧思全景（14 项，覆盖 5 层）
+## 3. 代码巧思全景（19 项，覆盖 6 层）
 
 ### 层一：存储 / 持久化层
 
@@ -289,6 +289,78 @@ try { await run(items[i]!); ok++ } catch { failed.push(name(items[i]!)) }
 
 ---
 
+### 层六：领域检索与共享规则层
+
+#### 巧思 15｜近似命中借用原文词的位置，一个偏移都不改
+
+- 位置：`src/lib/searchMatch.ts:105,120,151,167`；`electron/main/fulltext.ts:915`；`electron/main/refsindex.ts:394,428`
+- 证据：
+
+```ts
+// src/lib/searchMatch.ts:105 —— 位置留在原文
+export function wordSpans(text: string): WordSpan[]   // at / len 描述原串
+export function nearSpans(spans: WordSpan[], q: string): WordSpan[] | null
+export function spanBounds(spans: WordSpan[]): { at: number; len: number }
+// electron/main/fulltext.ts:nearHits —— 只把相对位置平移成绝对偏移
+const absolute = span.at + e.start
+```
+
+- **为什么必然**：事实 C。`at / start / len / bounds / docAt / pageOf / snippetAt` 全指向固定的
+  `fulltext.dat` UTF-16 位置并由 `byteAt` / `m.bytes` 双锚点锁死；折叠副本里的 100 不是
+  原文里的 100，会错文档、错页、错片段。`wordSpans` 用 `/[\p{L}\p{N}]+/gu` 切词并保留位置，
+  `nearSpans` 复用 `matchWords`（每词命中 + 至少一精确 + 邻近），两套索引都不升 `version`、
+  不重建缓存，旧索引照常加载。近似路径还先用「至少一个词在整篇里精确出现」做快速筛，
+  因为整篇 tokenize 在大语料上要几百毫秒，会卡住同步的 `ft:search`。
+
+#### 巧思 16｜近似结果是追加，不是替换
+
+- 位置：`electron/main/fulltext.ts:915` 起的 `nearHits`、`52442bc`、HANDOFF 8.11
+- 证据：整短语 `body.indexOf(needle)` 命中时直接返回，不追加；没命中时把近似命中追加在
+  精确结果尾部，按 `docId` 去重、受 `MAX_HITS` 限额，`skip` 集合排除已列出的精确结果。
+  参考文献只有短语 `indexOf`、没有 AND 路径，仍按「零精确命中才兜底」。
+- **为什么必然**：事实 C 与 D。全文的多词精确路径 `docsWithAllWords` 语义比书目整短语宽，
+  `qwen cud` 这类查询往往先返回一批「词散落在不同处」的精确结果；替换会让这些答案凭空
+  消失。`FtHit` / `RefHit` 带可选 `near` / `terms`，视图用 `markAllTerms` 标出真正命中的词、
+  加「相近」标签，让「这不是完全匹配」在界面上可见。
+
+#### 巧思 17｜第二套索引与自己的转码副本
+
+- 位置：`electron/main/refsindex.ts:29-47,55-63,331,347,361,394`；`src/lib/refly.ts`
+- 证据：`RefEntry.hay = normaliseQuery(got.text)`，匹配与切片段都在同一份副本上；
+  `hay` 可选，旧缓存回退到 `normaliseQuery(e.text)`，不要求重建索引。只读每篇 PDF 末尾
+  最多 20 页，按 `mtime+size` 增量、每 20 篇 checkpoint、跑完按 `live` 集合 prune。
+- **为什么必然**：事实 C 与 A。全文索引只取前几页，参考文献搜不到，两套索引不合并、
+  不改 `fulltext.ts` 的格式；`İ` 小写后变两个 code unit，从 `toLowerCase()` 的串取偏移
+  却去切原串会整体偏掉，边折叠边找会让第二个命中之后的偏移全错。已删文献的文本必须
+  被 prune，否则仍能被搜到、`indexed` 还能大于 `total`。
+
+#### 巧思 18｜多标签是状态投影，不是多个阅读器
+
+- 位置：`src/lib/openPapers.ts:25,34,42,52`；`src/App.tsx:816-833`；HANDOFF 8.3
+- 证据：`OpenPaper[]` 保存 `id / doc 快照 / page / tab`；`upsertPaper` 同 id 只刷新页码
+  不追加，`nextActivePaper` 决定关闭当前标签后落到哪篇。`activatePaper` 把激活标签投影到
+  `selId / pinned / rightTab / jump`，`selected` 与 `reader` 的语义不变，右栏 `PdfViewer`
+  没有 `key`、跨文献复用。
+- **为什么必然**：事实 A 与 D。多个 viewer 会让在途的位图、查找、标注各带一份归属，
+  而清 state 停不了已经发出的 promise；投影让「当前在读哪篇」始终能从既有选中态推导。
+  回收站文献不在 `docs` 里，靠标签里的 `doc` 快照与 `pinned` 兜底，冒烟里单
+  `.pdf-pane`、单个右栏空态的断言因此仍然成立。
+
+#### 巧思 19｜两条索引共用三条规则，每条都留了旧表达式做差分
+
+- 位置：`shared/indexedFileRules.ts:33,52,70`；`shared/fulltextRules.ts:48-102`；
+  `tests/indexed-file-rules.test.ts`、`tests/fulltext-rules.test.ts`
+- 证据：`sameIndexedFile`（mtime+size，追加路径额外比 `file`）、`snippetAround`
+  （先按原文本切片再折叠空白）、`progressAllowed`（`force` 收尾消息）；全文表的形状、
+  偏移定位、页码与 worker 故障判定也下沉到 `shared/`。测试把三份旧表达式逐字抄进去，
+  对语料 × 偏移 × 长度的组合逐值比，并先喂旧写法证明源码串探测器抓得到。
+- **为什么必然**：事实 A 与 C。两套索引的元数据格式不同（`Meta` v2 带 `bytes` 锚点，
+  `RefsCache` v1 带 `text/hay/page`），但「这个文件变没变」「片段从哪切」「什么时候
+  告诉窗口」是同一批事实；各写一份迟早一处改了另一处没改。把只读规则与持有 `fs`、
+  worker 的状态机分开后，前者不需要启动 Electron 或造 PDF 就能测。
+
+---
+
 ## 4. 巧思 → 基本事实映射表（闭环）
 
 | 巧思 | 层 | A 磁盘真相 | B 输入不可信 | C 抽取有损 | D 异步归属 | 防住/支撑了什么 |
@@ -310,10 +382,15 @@ try { await run(items[i]!); ok++ } catch { failed.push(name(items[i]!)) }
 | 补：`paged` 双终止 | 工具 | ◐ | ● | | | 服务器忽略 marker 导致死循环 |
 | 补：`start.mjs` 剔环境 | 工具 | ● | | | | 主进程在 IDE 终端里静默崩溃 |
 | 补：smoke 快照即时写 | 工具 | ● | | | | 自检崩溃后污染真实配置 |
+| 15 近似命中不碰偏移 | 检索 | ◐ | | ● | | 错文档、错页、错片段、旧索引被迫重建 |
+| 16 近似结果追加不替换 | 检索 | | | ● | ◐ | 精确结果被兜底结果挤掉、同一篇重复出现 |
+| 17 第二套索引 + `hay` 副本 | 索引 | ● | | ● | | 参考文献搜不到、U+0130 偏移错位、已删文献仍被搜到 |
+| 18 多标签状态投影 | 展示 | ● | | | ● | 多个 viewer 各自在途、选中态语义漂移 |
+| 19 两索引共用三条规则 | 共享 | ● | | ● | | 一处改了规则另一处没改、纯规则无法脱离 Electron 测 |
 
 （● 主要服务，◐ 次要服务）
 
-A 与 C 两列主要对应存储层与索引层，B 对应协议层，D 对应展示层。
+A 与 C 两列主要对应存储层、索引层与检索层，B 对应协议层，D 对应展示层与检索层；层六的巧思 15~19 把 C 与 D 两条事实从「一套索引、一个文档」扩展到「两套索引、多篇论文」。
 
 ---
 
@@ -322,16 +399,19 @@ A 与 C 两列主要对应存储层与索引层，B 对应协议层，D 对应�
 1. **约束强度从"不可能错"降级为"错了会被拦住"**。`safeConfigPatch` 能挡未知键，但挡不住一个白名单内的值语义上是错的（`pdfDir` 指向一个不存在的目录）；`reconcileSyncWrite` 能裁决字段，但依赖"写盘前重读"这一次读与写之间不再有第二个写入者——`HANDOFF.md:679-681` 承认原子写不是并发安全的。
 2. **通用性换来的性能代价与页数取舍**。`shared/fullTextPages.ts` 默认只索引每篇前 3 页：`electron/main/fulltext.ts:60-64` 记着 5245 篇全页约 293 MB / 前三页约 60 MB 的实测，代价是搜不到时必须说清"读了多少页、这不等于库里没有"，且改页数会丢索引（`README.md:277-281`）。
 3. **开放词汇的语义治理成本**。`DOC_TYPES` 白名单之外的值留空显示「（未设）」而不是顶成第一项（`HANDOFF.md:362-363`）；BibTeX 没有独立类型名的网页/专利/程序只能写成 `@misc`，导回会变成 `generic`（`README.md:245`）——这是通用交换格式的固有损失，
-4. **可验证性本身有未覆盖区间**。`fulltext.ts` 索引状态机与 `App.tsx` 剩余状态簇仍主要靠 smoke 的源码串断言和真实库自检守着（`HANDOFF.md:695-698`）；`smoke` 因需要真实窗口而无法进 CI，最重的一层回归只能本地跑。
-5. **一份规则的纪律有维护成本**。`HANDOFF.md:616-621` 明令"别再让某个范围自己写一遍 `trim().toLowerCase()`"，`TrashView.tsx:38`、`NotesView.tsx:54`、`FolderTree.tsx:88`、`AddByIdView.tsx:28` 各写一份，`SearchResults.tsx:104` 漏了折叠空白导致"能命中却不高亮"。**规则存在 ≠ 所有调用点都接上了**。
+4. **可验证性仍有未覆盖区间**。`fulltext.ts` 的表形状、偏移定位、页码与 worker 故障判定已下沉到 `shared/fulltextRules.ts` 并配固定输入单测；仍主要靠 smoke 源码串断言与真实库自检守着的是写入状态机（`busy` / `deferred` / `pending`）、`App.tsx` 剩余状态簇，以及 `smoke.ts` 里两段 UI 驱动链。`smoke` 需要真实窗口，无法进 CI。
+5. **一份规则的纪律已铺到检索与索引，剩下的边界在门禁上**。书目、参考文献、篇内查找与保存搜索共用 `normaliseQuery`；两套索引共用 `shared/indexedFileRules.ts`。剩下的重复是 worker 定位 / 超时竞速 / 清理（`fulltext.ts:33-60` 对 `refsindex.ts:119-143`）与 IPC 失败形态（`ipc/library.ts`、`ipc/refs.ts` 返回 `{error}`，`ipc/docs.ts`、`ipc/marks.ts` 直接 reject），两者都被冒烟源码串断言与渲染层两种错误处理路径绑着。
+6. **具名失败门受计数判据约束**。`smoke.ts:5824-5852` 对五个产品文件统计 6 个 `ignoreFailure` + 6 个 `reportFailure`，并要求每个 `FAILURE` reason 在这五个文件或 smoke 自身出现。新增一个静默失败理由而不改这道门禁会让冒烟变红；扩展失败门必须先改判据，不能只加常量的调用点。
 
 ---
 
 ## 6. 综合结论
 
-14 项巧思覆盖**表示**（单一 `View` + payload、归一化副本）、**写入**（四快照裁决、原子写、双锚点、checkpoint）、**审计**（具名失败门、索引自审、差分回归）、**解释**（空态说明读了多少页、批量报失败名单、作废分 format/budget）、**演化**（编译期穷尽的白名单、可选 `hay` 兼容旧缓存、纯规则先配单测再改接线）五个维度。
+19 项巧思覆盖**表示**（单一 `View` + payload、归一化副本）、**写入**（四快照裁决、原子写、双锚点、checkpoint）、**审计**（具名失败门、索引自审、差分回归）、**解释**（空态说明读了多少页、批量报失败名单、作废分 format/budget）、**演化**（编译期穷尽的白名单、可选 `hay` 兼容旧缓存、纯规则先配单测再改接线）、**检索**（近似命中借用原文位置、第二套索引与转码副本、追加而非替换、多标签状态投影）六个维度。
 
 > **因为外部服务不可靠、跨进程输入不可信、PDF 文本昂贵且有损、异步结果不可取消，所以这个系统选择让磁盘做唯一的裁判，让所有规则只留一份且可测，让每一次写入都能被重读与解释，让每一个在途答案都带着它出发时的标签。**
+
+未收敛的部分已不在「规则有没有」，而在「哪道门禁允许改」：五份 JSON 无 schema 版本与迁移、IPC 失败形态不统一、两个索引的 worker 生命周期仍各写一份、具名失败门受 6/6 计数判据约束。抽共享规则仍须遵守 HANDOFF 第 4 节「先逐值差分，且探测器先证明抓得到旧写法」。
 
 未收敛的部分是**这份纪律还没铺满所有调用点**（第 5 节第 5 条）：漂移的调用点、被空吞的故障、未覆盖的纯逻辑、重复的构建脚本。抽共享规则须遵守 `HANDOFF.md:300-301`「先逐值差分」。
 

@@ -46,6 +46,15 @@ export function normaliseQuery(q: string): string {
   return q.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+/**
+ * The shortest word worth walking a whole PDF for. Finding inside a paper
+ * asks pdf.js for every page's text, so a one-character term would scan an
+ * entire document for thousands of hits. The references index answers from a
+ * small in-memory table instead and deliberately allows one character for
+ * Chinese queries; the two thresholds are different on purpose.
+ */
+export const MIN_FIND_QUERY_LENGTH = 2
+
 /** These three use the in-memory haystack; the other two have their own view. */
 export function isMetadataScope(scope: SearchScope): boolean {
   return scope === 'all' || scope === 'title' || scope === 'abstract'

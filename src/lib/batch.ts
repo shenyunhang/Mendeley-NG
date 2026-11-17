@@ -1,3 +1,5 @@
+import { BATCH_PROGRESS_STEPS } from './budgets'
+
 /**
  * Run one cloud call per item and say afterwards what actually happened.
  *
@@ -22,7 +24,7 @@ export async function runBatch<T>(
 ): Promise<{ ok: number; failed: string[] }> {
   const failed: string[] = []
   let ok = 0
-  const every = Math.max(1, Math.floor(items.length / 20))
+  const every = Math.max(1, Math.floor(items.length / BATCH_PROGRESS_STEPS))
   for (let i = 0; i < items.length; i++) {
     try {
       await run(items[i]!)
