@@ -6,7 +6,7 @@ import type { Doc } from '../../shared/types'
  * The pane still renders a single PdfViewer, so a tab is not a second reader:
  * it is the remembered fact that this paper was opened, at which page, and
  * whether it had a file to show. That is enough to bring it back without
- * closing the paper that was on screen before.
+ * keeping a second pdf.js document alive.
  *
  * `doc` is a snapshot rather than an id lookup. A hit can point at a paper
  * that has since been trashed, or at one that the current folder filter no
@@ -20,23 +20,56 @@ export interface OpenPaper {
    *  open from a list or a link has always done. */
   page: number | null
   tab: 'pdf' | 'details'
+  /** A preview tab is drawn in italics and is replaced by the next single
+   *  click, the way VS Code previews a file from the explorer. A double
+   *  click turns it into a permanent tab. */
+  preview: boolean
 }
 
-export function paperEntry(d: Doc, page: number | null): OpenPaper {
-  return { id: d.id, doc: d, page, tab: d.localPdf ? 'pdf' : 'details' }
+export function paperEntry(d: Doc, page: number | null, preview: boolean): OpenPaper {
+  return { id: d.id, doc: d, page, tab: d.localPdf ? 'pdf' : 'details', preview }
 }
 
 /**
- * Opening a paper that already has a tab refreshes its page in place instead
- * of appending a second tab. The order is the order the papers were opened,
- * which is what makes the tab bar stable while the reader moves between them.
+ * Turn a preview tab into a permanent one without moving it. Returns the
+ * same array when there is nothing to change, so a stray double click on a
+ * folder or a button does not rebuild the tab bar.
+ */
+export function pinPaper(list: OpenPaper[], id: string): OpenPaper[] {
+  const at = list.findIndex((p) => p.id === id)
+  if (at < 0 || !list[at]!.preview) return list
+  const next = [...list]
+  next[at] = { ...next[at]!, preview: false }
+  return next
+}
+
+/**
+ * One set of rules for opening a paper, shared by every entry point:
+ *  - a preview replaces the existing preview tab in place, so single
+ *    clicking through the library never piles up tabs;
+ *  - a permanent tab is never replaced and never degrades back to a
+ *    preview when the same paper is single clicked again;
+ *  - opening a paper twice with the same id refreshes its page, it does
+ *    not append a second tab.
+ * The order is the order the papers were opened, which is what makes the
+ * tab bar stable while the reader moves between them.
  */
 export function upsertPaper(list: OpenPaper[], entry: OpenPaper): OpenPaper[] {
   const at = list.findIndex((p) => p.id === entry.id)
-  if (at < 0) return [...list, entry]
-  const next = [...list]
-  next[at] = entry
-  return next
+  if (at >= 0) {
+    const next = [...list]
+    next[at] = { ...entry, preview: entry.preview && next[at]!.preview }
+    return next
+  }
+  if (entry.preview) {
+    const previewAt = list.findIndex((p) => p.preview)
+    if (previewAt >= 0) {
+      const next = [...list]
+      next[previewAt] = entry
+      return next
+    }
+  }
+  return [...list, entry]
 }
 
 export function removePaper(list: OpenPaper[], id: string): OpenPaper[] {

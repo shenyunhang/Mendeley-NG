@@ -157,7 +157,7 @@ export default function RefsView({
             </div>
           ) : (
             groups.map(({ id, hs, d }) => (
-              <div key={id} className="ft-row">
+              <div key={id} data-id={id} className="ft-row">
                 <div
                   className="ft-title"
                   onClick={() => d && onOpen(d, hs[0]!.page)}

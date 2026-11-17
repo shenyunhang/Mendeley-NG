@@ -175,7 +175,7 @@ import {
 } from '../../src/lib/searchMatch'
 // Opening a second paper must keep the first one's tab. The rule is pure, so
 // it is checked with fixed papers here as well as through the tab bar DOM.
-import { nextActivePaper, paperEntry, upsertPaper } from '../../src/lib/openPapers'
+import { nextActivePaper, paperEntry, pinPaper, upsertPaper } from '../../src/lib/openPapers'
 import { splitPersonName } from '../../src/lib/splitPersonName'
 import { uniquePdfPath, writeUniquePdf } from '../../shared/uniquePdfPath'
 
@@ -992,20 +992,27 @@ export async function runSmoke() {
     { indexedSpans, indexedBounds }
   )
 
-  const firstPaper = paperEntry({ id: 'a', title: 'A', localPdf: 'a.pdf' } as Parameters<typeof paperEntry>[0], 2)
-  const secondPaper = paperEntry({ id: 'b', title: 'B', localPdf: 'b.pdf' } as Parameters<typeof paperEntry>[0], 5)
-  const twoTabs = upsertPaper(upsertPaper([], firstPaper), secondPaper)
+  const paperA = { id: 'a', title: 'A', localPdf: 'a.pdf' } as Parameters<typeof paperEntry>[0]
+  const paperB = { id: 'b', title: 'B', localPdf: 'b.pdf' } as Parameters<typeof paperEntry>[0]
+  const previewA = paperEntry(paperA, 2, true)
+  const previewB = paperEntry(paperB, 5, true)
+  const pinnedA = pinPaper([previewA], 'a')
+  const replaced = upsertPaper([previewA], previewB)
+  const pinnedPlusPreview = upsertPaper(pinnedA, previewB)
   expect(
-    'opening a second paper keeps the first tab instead of replacing it',
-    twoTabs.length === 2 &&
-      twoTabs[0]!.id === 'a' &&
-      twoTabs[1]!.id === 'b' &&
-      // opening the same paper again refreshes its page, it does not append
-      upsertPaper(twoTabs, paperEntry({ id: 'a', title: 'A', localPdf: 'a.pdf' } as Parameters<typeof paperEntry>[0], 9)).length === 2 &&
-      nextActivePaper(twoTabs, 'a')?.id === 'b' &&
-      nextActivePaper(twoTabs, 'b')?.id === 'a' &&
-      nextActivePaper([firstPaper], 'a') === null,
-    { tabs: twoTabs.map((p) => p.id) }
+    'a preview tab is replaced by the next click but a pinned tab survives it',
+    replaced.length === 1 &&
+      replaced[0]!.id === 'b' &&
+      replaced[0]!.preview === true &&
+      pinnedPlusPreview.length === 2 &&
+      pinnedPlusPreview[0]!.id === 'a' &&
+      pinnedPlusPreview[0]!.preview === false &&
+      pinnedPlusPreview[1]!.id === 'b' &&
+      // single clicking a pinned paper again never degrades it to a preview
+      upsertPaper(pinnedA, paperEntry(paperA, 9, true))[0]!.preview === false &&
+      nextActivePaper(pinnedPlusPreview, 'a')?.id === 'b' &&
+      nextActivePaper([previewA], 'a') === null,
+    { replaced: replaced.map((p) => p.id), pinned: pinnedPlusPreview.map((p) => p.id) }
   )
 
   await w.webContents.executeJavaScript(
@@ -9944,38 +9951,60 @@ export async function runSmoke() {
     backToTable
   )
 
-  // Selecting a paper from the table is an open, not just a selection: it
-  // gets a tab, and clicking a second row must leave the first row's tab
-  // there. This is the exact regression a reader hits when the right pane
-  // loses the paper they were on.
+  // VS Code tab rules end to end: a single click previews, the next single
+  // click replaces that preview, a double click pins it, and a pinned tab
+  // survives the next preview. Checked on real rows because the rule spans
+  // the pure module, the double-click listener and the italic style.
   const rowTabs = JSON.parse(
     await w.webContents.executeJavaScript(
       '(async()=>{'
       + 'const wait=(m)=>new Promise(r=>setTimeout(r,m));'
       + 'const rows=[...document.querySelectorAll("div.row")];'
-      + 'const tabs=()=>[...document.querySelectorAll(".paper-tab")]'
-      + '.map(t=>({id:t.dataset.id||"",active:t.classList.contains("active")}));'
-      + 'if(rows.length<2)return JSON.stringify({error:"not enough rows"});'
+      + 'const tabs=()=>[...document.querySelectorAll(".paper-tab")].map(t=>({'
+      + 'id:t.dataset.id||"",active:t.classList.contains("active"),'
+      + 'preview:t.classList.contains("preview"),'
+      + 'italic:getComputedStyle(t.querySelector(".paper-tab-label")).fontStyle}));'
+      + 'if(rows.length<3)return JSON.stringify({error:"not enough rows"});'
+      + 'const ids=rows.slice(0,3).map(r=>r.dataset.id||"");'
       + 'rows[0].click();await wait(400);'
       + 'const first=tabs();'
-      + 'const firstId=(first.find(t=>t.active)||{}).id||"";'
       + 'rows[1].click();await wait(400);'
       + 'const second=tabs();'
+      + 'const previewTab=document.querySelector(".paper-tab.preview");'
+      + 'if(previewTab)previewTab.dispatchEvent(new MouseEvent("dblclick",{bubbles:true}));'
+      + 'await wait(400);'
+      + 'const pinned=tabs();'
+      + 'rows[2].click();await wait(400);'
+      + 'const third=tabs();'
       + 'const pane=document.querySelector(".pane-right");'
-      + 'const order=(pane?[...pane.children].slice(0,2):[])'
-      + '.map(e=>e.className).join("|");'
-      + 'return JSON.stringify({first,firstId,second,order,'
-      + 'kept:!!firstId&&second.some(t=>t.id===firstId)})})()'
+      + 'const order=(pane?[...pane.children].slice(0,2):[]).map(e=>e.className).join("|");'
+      + 'return JSON.stringify({first,second,pinned,third,ids,order})})()'
     )
   ) as Record<string, unknown>
-  log('row clicks open tabs', rowTabs)
+  log('preview and pinned tabs', rowTabs)
+  type TabState = { id: string; active: boolean; preview: boolean; italic: string }
+  const firstTabs = rowTabs.first as TabState[]
+  const secondTabs = rowTabs.second as TabState[]
+  const pinnedTabs = rowTabs.pinned as TabState[]
+  const thirdTabs = rowTabs.third as TabState[]
+  const rowIds = rowTabs.ids as string[]
   expect(
-    'clicking a row opens its paper as a tab and a second row keeps the first',
+    'a single click previews a paper and the next click replaces that preview',
     rowTabs.error === undefined &&
-      (rowTabs.first as { active: boolean }[]).some((t) => t.active) &&
-      rowTabs.firstId !== '' &&
-      (rowTabs.second as { active: boolean }[]).filter((t) => t.active).length === 1 &&
-      rowTabs.kept === true,
+      firstTabs.some((t) => t.active && t.preview && t.italic === 'italic') &&
+      // The preview is replaced, not accumulated.
+      secondTabs.filter((t) => t.preview).length ===
+        firstTabs.filter((t) => t.preview).length &&
+      secondTabs.some((t) => t.active && t.id === rowIds[1] && t.preview),
+    rowTabs
+  )
+  expect(
+    'double clicking a preview tab pins it and the next click keeps that tab',
+    pinnedTabs.some(
+      (t) => t.id === rowIds[1] && !t.preview && t.italic !== 'italic'
+    ) &&
+      thirdTabs.some((t) => t.id === rowIds[1] && !t.preview) &&
+      thirdTabs.some((t) => t.id === rowIds[2] && t.preview),
     rowTabs
   )
   // Switching papers outranks switching the view of one paper, so the tab

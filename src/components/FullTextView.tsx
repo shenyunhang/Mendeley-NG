@@ -296,7 +296,7 @@ export default function FullTextView({
           ) : (
             groups.map(({ id, hs: list, d }) => {
               return (
-                <div key={id} className="ft-row">
+                <div key={id} data-id={id} className="ft-row">
                   <div
                     className="ft-title"
                     onClick={() => d && onOpen(d, list[0].page)}

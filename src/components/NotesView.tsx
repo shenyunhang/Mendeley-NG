@@ -139,6 +139,7 @@ export default function NotesView({
               {g.rows.map(({ a, doc, page }) => (
                 <div
                   key={a.id}
+                  data-id={doc?.id ?? ''}
                   className="notes-row"
                   title={doc ? `打开 ${doc.title} 第 ${page} 页` : '这篇已不在库中'}
                   onClick={() => doc && onOpen(doc, page)}

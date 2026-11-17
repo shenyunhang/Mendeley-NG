@@ -56,6 +56,7 @@ import { DEFAULT_LEFT_W, DEFAULT_RIGHT_PCT } from './lib/panes'
 import {
   nextActivePaper,
   paperEntry,
+  pinPaper,
   removePaper,
   upsertPaper,
   type OpenPaper
@@ -824,11 +825,34 @@ export default function App() {
     setJump(p.page === null ? null : { page: p.page, nonce: ++jumpNonce.current })
   }
 
+  /** A single click opens a preview. The next single click replaces it, so
+   *  walking through a result list never piles up tabs. */
   const openPaper = (d: Doc, page: number | null) => {
-    const entry = paperEntry(d, page)
+    const entry = paperEntry(d, page, true)
     setOpenPapers((prev) => upsertPaper(prev, entry))
     activatePaper(entry)
   }
+
+  /** A double click makes the tab permanent. Kept as one rule here: every
+   *  view opens a paper with onOpen/onSelect, and none of them needs to know
+   *  whether the click that opened it was a single or a double one. */
+  const pinOpenPaper = (id: string) => {
+    setOpenPapers((prev) => pinPaper(prev, id))
+  }
+
+  useEffect(() => {
+    const onDoubleClick = (e: MouseEvent) => {
+      const target = e.target instanceof Element ? e.target : null
+      // The tab bar pins its own tabs; the right pane's details panel is not
+      // a list of papers and must not pin anything.
+      if (!target || target.closest('.pane-right')) return
+      const id = target.closest('[data-id]')?.getAttribute('data-id')
+      if (id) pinOpenPaper(id)
+    }
+    // Capture, so this runs even when a row stops propagation on click.
+    document.addEventListener('dblclick', onDoubleClick, true)
+    return () => document.removeEventListener('dblclick', onDoubleClick, true)
+  }, [])
 
   const closePaper = (id: string) => {
     // Only closing the paper currently on screen changes what is shown.
@@ -2623,7 +2647,12 @@ export default function App() {
                 <div
                   key={p.id}
                   data-id={p.id}
-                  className={'paper-tab' + (selId === p.id ? ' active' : '')}
+                  className={
+                    'paper-tab' +
+                    (selId === p.id ? ' active' : '') +
+                    (p.preview ? ' preview' : '')
+                  }
+                  onDoubleClick={() => pinOpenPaper(p.id)}
                 >
                   <button
                     className="paper-tab-label"

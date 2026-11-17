@@ -530,15 +530,26 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - **右栏一次只渲染一个 `PdfViewer`**（`reader` 没有 `key`，跨文献复用同一组件；
   `smoke.ts` 的单 viewer 注释与 `documentScope` 都依赖它）。「打开多篇」不是多个
   reader，而是 `src/lib/openPapers.ts` 的 `OpenPaper[]`：`id / doc 快照 / page / tab`。
-  `upsertPaper` 同 id 只刷新页码不追加，`nextActivePaper` 决定关闭当前标签后落到哪篇。
-  App 的 `openPaper` 把激活标签投影到 `selId / pinned / rightTab / jump`，
-  `selected` 与 `reader` 的语义不变，冒烟里单 `.pdf-pane`、单个右栏空态、单行
-  `.open` 的断言都仍然成立。**所有「打开」动作都走 `openPaper`**：文献列表行 /
-  搜索结果卡片（`onRowSelect`）、全文 / 参考文献 / 标注 / 查重 / 回收站 / PDF 内
-  链接。点列表行不指定页码（`page: null`），仍按 `reading.json` 恢复上次读到的页。
-  唯一例外是键盘方向键的 `selectOnly`，它只 `setSelId` 不打开标签——否则按一次
-  ↓ 就开一篇，会瞬间堆满标签栏。回收站文献不在 `docs` 里，靠标签里的 `doc` 快照
-  与 `pinned` 兜底。若以后要给标签数量设上限，改 `upsertPaper`，别在各调用点各写一份。
+  `OpenPaper` 多一个 `preview` 位，固定策略是 VS Code 那一套：`openPaper`
+  （所有单击入口）建预览标签，`upsertPaper` 让新预览**替换现有预览标签**、
+  固定标签既不替换也不因再单击而降级，`pinPaper` 把预览就地转固定，
+  `nextActivePaper` 决定关闭当前标签后落到哪篇。App 的 `activatePaper`
+  把激活标签投影到 `selId / pinned / rightTab / jump`，`selected` 与 `reader`
+  的语义不变，冒烟里单 `.pdf-pane`、单个右栏空态、单行 `.open` 的断言仍成立。
+  **所有「打开」动作都走 `openPaper`**：文献列表行 / 搜索结果卡片
+  （`onRowSelect`）、全文 / 参考文献 / 标注 / 查重 / 回收站 / PDF 内链接。
+  点列表行不指定页码（`page: null`），仍按 `reading.json` 恢复上次读到的页。
+  唯一例外是键盘方向键的 `selectOnly`，只 `setSelId` 不打开标签。
+- **双击固定只在一处接线**：App 用 `document` 的 `dblclick` 捕获，从
+  `target.closest('[data-id]')` 取文献 id 调 `pinPaper`，并排除 `.pane-right`
+  （标签栏有自己的 `onDoubleClick`，详情面板不该触发固定）。各视图的行只要带
+  `data-id` 就自动生效，`DocTable` / `SearchResults` / `DupesView` /
+  `TrashView` 原本就有，`RefsView` / `FullTextView` 的 `.ft-row` 与 `NotesView`
+  的 `.notes-row` 已补齐。双击会先派发两次 `click`（两次 `openPaper` 同一篇，
+  幂等），随后 `dblclick` 才固定，顺序不要改。预览标签加 `.preview` 类，
+  `panes.css` 里 `.paper-tab.preview .paper-tab-label { font-style: italic }`。
+  回收站文献不在 `docs` 里，靠标签里的 `doc` 快照与 `pinned` 兜底。
+  要改预览/固定规则只动 `upsertPaper` / `pinPaper`，别在各调用点各写一份。
 - 标签栏是 `.pane-head` **上面独立一行** `.paper-tabs`（`flex: 0 0 auto` +
   横向滚动），不塞进 `pane-head`：和浏览器一样，「切哪篇文献」的层级在「详情 /
   PDF」这组只作用于当前文献的按钮之上，顺序不能倒过来。仍是固定高度，不会抢走

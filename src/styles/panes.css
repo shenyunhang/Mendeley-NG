@@ -181,6 +181,11 @@ body.resizing {
   border-color: var(--accent);
   background: var(--accent-dim);
 }
+/* A preview tab is italic, VS Code style: the reader can tell at a glance
+   which tab the next single click will replace. */
+.paper-tab.preview .paper-tab-label {
+  font-style: italic;
+}
 .paper-tab-label {
   min-width: 0;
   overflow: hidden;
