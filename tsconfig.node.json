@@ -42,6 +42,7 @@
     "src/lib/latestSearch.ts",
     "src/lib/listBlank.ts",
     "src/lib/match.ts",
+    "src/lib/openPapers.ts",
     "src/lib/offline.ts",
     "src/lib/overlayStack.ts",
     "src/lib/pageBudgetCommit.ts",

@@ -152,3 +152,60 @@ body.resizing {
   flex: 0 0 auto;
 }
 
+/* Papers opened from a hit or a link each keep a tab. The row is fixed-height
+   and scrolls sideways, so a long list cannot steal height from the reader
+   or widen the pane past the splitter. */
+.paper-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-head);
+}
+.paper-tab {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 190px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+.paper-tab.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.paper-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 2px 3px 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.733rem;
+  text-align: left;
+  cursor: pointer;
+}
+.paper-tab-close {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 0;
+  background: none;
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.paper-tab-close:hover {
+  color: var(--fg);
+}
+

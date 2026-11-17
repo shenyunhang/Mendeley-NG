@@ -52,6 +52,13 @@ import {
 } from './lib/columns'
 import { DEFAULT_LEFT_W, DEFAULT_RIGHT_PCT } from './lib/panes'
 import {
+  nextActivePaper,
+  paperEntry,
+  removePaper,
+  upsertPaper,
+  type OpenPaper
+} from './lib/openPapers'
+import {
   ALL_HAVE_PDF_MESSAGE_VISIBLE_MS,
   BATCH_CLEAN_MESSAGE_VISIBLE_MS,
   BATCH_FAILED_MESSAGE_VISIBLE_MS,
@@ -124,6 +131,11 @@ export default function App() {
   const [refsError, setRefsError] = useState<string | null>(null)
   const { selId, setSelId, pinned, setPinned, multi, setMulti, lastIdx } = useSelection()
   const [rightTab, setRightTab] = useState<'pdf' | 'details'>('details')
+  /** One tab per paper opened from a hit, a link or a list. The pane still
+   *  renders a single reader; the tabs are what stop a new paper from
+   *  closing the one already on screen. */
+  const [openPapers, setOpenPapers] = useState<OpenPaper[]>([])
+  const jumpNonce = useRef(0)
   const [err, setErr] = useState<string | null>(null)
   const [upd, setUpd] = useState<UpdateState | null>(null)
   // What the middle of the window is.  Six separate pieces of state used to
@@ -792,6 +804,47 @@ export default function App() {
    *  there.  Keyed off the pinned record rather than off view.kind, so a
    *  library row can never be mistaken for a trashed one. */
   const pinnedSelected = !!pinned && !!selected && selected.id === pinned.id
+
+  /**
+   * Opening a paper means remembering it as a tab and showing it. The pane
+   * keeps its single PdfViewer: a tab holds the page and the record, so
+   * switching back reopens that paper where the hit pointed without keeping
+   * a second pdf.js document alive.
+   */
+  const activatePaper = (p: OpenPaper) => {
+    setSelId(p.id)
+    // A trashed record is not in `docs`, and `selected` would otherwise
+    // resolve to nothing the moment it left the current filter.
+    if (!docs.some((x) => x.id === p.id)) setPinned(p.doc)
+    setRightTab(p.tab)
+    // A hit names a page; opening from a list or a link does not, and must
+    // keep restoring the reading position instead of jumping to page one.
+    setJump(p.page === null ? null : { page: p.page, nonce: ++jumpNonce.current })
+  }
+
+  const openPaper = (d: Doc, page: number | null) => {
+    const entry = paperEntry(d, page)
+    setOpenPapers((prev) => upsertPaper(prev, entry))
+    activatePaper(entry)
+  }
+
+  const closePaper = (id: string) => {
+    // Only closing the paper currently on screen changes what is shown.
+    // Closing any other tab leaves the reader exactly where it was.
+    if (selId !== id) {
+      setOpenPapers((prev) => removePaper(prev, id))
+      return
+    }
+    const following = nextActivePaper(openPapers, id)
+    setOpenPapers((prev) => removePaper(prev, id))
+    if (following) activatePaper(following)
+    else {
+      setSelId(null)
+      setPinned(null)
+      setRightTab('details')
+      setJump(null)
+    }
+  }
 
   /** Saving a search captures the three things that shape the list: the text,
    *  the folder and the starred filter.  Sort order is deliberately not part
@@ -1913,14 +1966,15 @@ export default function App() {
       // already on the shelf opens here instead of in a browser
       linkDoc={linkDocFor}
       onOpenDoc={(id) => {
-        setSelId(id)
-        setRightTab('pdf')
-        // A reference that is already on the shelf opens in place. Bring the
-        // folder tree with it: otherwise the tree keeps pointing at a folder
-        // that may not even contain the paper now on screen. `folderId` is
-        // both the highlight and the list filter, so moving it keeps what is
-        // shown and what is selected the same thing (171).
-        setFolderId(folderForOpenedDoc(docs.find((d) => d.id === id), folderId, folders))
+        const d = docs.find((x) => x.id === id)
+        // Opening a link out of the paper keeps the paper it came from on
+        // its own tab instead of replacing it.
+        if (d) openPaper(d, null)
+        // Bring the folder tree with it: otherwise the tree keeps pointing at
+        // a folder that may not even contain the paper now on screen.
+        // `folderId` is both the highlight and the list filter, so moving it
+        // keeps what is shown and what is selected the same thing (171).
+        setFolderId(folderForOpenedDoc(d, folderId, folders))
         setActiveSearch(null)
       }}
     />
@@ -2208,15 +2262,7 @@ export default function App() {
               setSetSec('全文检索')
               setSettings(true)
             }}
-            onOpen={(d, p) => {
-              setSelId(d.id)
-              // A hit is a hit into a file that was read, but the file can
-              // still have gone since: the index keeps text for a paper whose
-              // PDF was moved or deleted, and sending the pane to a reader
-              // with nothing in it is worse than sending it to the details.
-              setRightTab(d.localPdf ? 'pdf' : 'details')
-              setJump({ page: p, nonce: Date.now() })
-            }}
+            onOpen={(d, p) => openPaper(d, p)}
           />
         ) : view.kind === 'annotations' ? (
           <NotesView
@@ -2225,9 +2271,7 @@ export default function App() {
             onClose={() => setView(LIBRARY)}
             onOpen={(d, p) => {
               setView(LIBRARY)
-              setSelId(d.id)
-              setRightTab(d.localPdf ? 'pdf' : 'details')
-              setJump({ page: p, nonce: Date.now() })
+              openPaper(d, p)
             }}
             onDelete={(id) => void deleteAnnotation(id)}
             onCopy={(a, d) =>
@@ -2258,11 +2302,10 @@ export default function App() {
             }}
             onClose={() => setView(LIBRARY)}
             onOpen={(d) => {
-              setSelId(d.id)
               // a paper that has no file on disk opens on its details:
               // which of two entries has the PDF is very often exactly what
               // the reader came here to find out
-              setRightTab(d.localPdf ? 'pdf' : 'details')
+              openPaper(d, null)
             }}
             openId={selId}
             onMerge={async (g, keeper) => {
@@ -2381,12 +2424,9 @@ export default function App() {
               setView(LIBRARY)
             }}
             onOpen={(d) => {
-              // a trashed record is not in `docs`; hold it so the right pane
-              // has something to show.  A file that survived the trash opens
-              // as a PDF, one that did not falls to the read-only details.
-              setPinned(d)
-              setSelId(d.id)
-              setRightTab(d.localPdf ? 'pdf' : 'details')
+              // a trashed record is not in `docs`; openPaper holds the record
+              // on its tab so the right pane has something to show later.
+              openPaper(d, null)
             }}
             openId={pinned?.id ?? null}
             onRestore={(id) => void restoreTrashed(id)}
@@ -2550,11 +2590,7 @@ export default function App() {
                 setView(LIBRARY)
                 onScope('all')
               }}
-              onOpen={(d, p) => {
-                setSelId(d.id)
-                setRightTab(d.localPdf ? 'pdf' : 'details')
-                setJump({ page: p, nonce: Date.now() })
-              }}
+              onOpen={(d, p) => openPaper(d, p)}
             />
           ) : query.trim() ? (
             <SearchResults
@@ -2630,6 +2666,31 @@ export default function App() {
               <span className="badge">{selected.citation_key}</span>
             )}
           </div>
+          {openPapers.length ? (
+            <div className="paper-tabs">
+              {openPapers.map((p) => (
+                <div
+                  key={p.id}
+                  className={'paper-tab' + (selId === p.id ? ' active' : '')}
+                >
+                  <button
+                    className="paper-tab-label"
+                    title={p.doc.title ?? ''}
+                    onClick={() => activatePaper(p)}
+                  >
+                    {p.doc.title || '(无标题)'}
+                  </button>
+                  <button
+                    className="paper-tab-close"
+                    title="关闭这篇文献"
+                    onClick={() => closePaper(p.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
           {!selected ? (
             <div className="empty">选中左侧一条文献查看详情或 PDF</div>
           ) : pinnedSelected && rightTab === 'details' ? (

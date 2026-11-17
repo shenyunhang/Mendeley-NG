@@ -173,6 +173,9 @@ import {
   spanBounds,
   wordSpans
 } from '../../src/lib/searchMatch'
+// Opening a second paper must keep the first one's tab. The rule is pure, so
+// it is checked with fixed papers here as well as through the tab bar DOM.
+import { nextActivePaper, paperEntry, upsertPaper } from '../../src/lib/openPapers'
 import { splitPersonName } from '../../src/lib/splitPersonName'
 import { uniquePdfPath, writeUniquePdf } from '../../shared/uniquePdfPath'
 
@@ -987,6 +990,22 @@ export async function runSmoke() {
       ) &&
       indexedText.slice(indexedBounds.at, indexedBounds.at + indexedBounds.len) === 'Qwen-CUA',
     { indexedSpans, indexedBounds }
+  )
+
+  const firstPaper = paperEntry({ id: 'a', title: 'A', localPdf: 'a.pdf' } as Parameters<typeof paperEntry>[0], 2)
+  const secondPaper = paperEntry({ id: 'b', title: 'B', localPdf: 'b.pdf' } as Parameters<typeof paperEntry>[0], 5)
+  const twoTabs = upsertPaper(upsertPaper([], firstPaper), secondPaper)
+  expect(
+    'opening a second paper keeps the first tab instead of replacing it',
+    twoTabs.length === 2 &&
+      twoTabs[0]!.id === 'a' &&
+      twoTabs[1]!.id === 'b' &&
+      // opening the same paper again refreshes its page, it does not append
+      upsertPaper(twoTabs, paperEntry({ id: 'a', title: 'A', localPdf: 'a.pdf' } as Parameters<typeof paperEntry>[0], 9)).length === 2 &&
+      nextActivePaper(twoTabs, 'a')?.id === 'b' &&
+      nextActivePaper(twoTabs, 'b')?.id === 'a' &&
+      nextActivePaper([firstPaper], 'a') === null,
+    { tabs: twoTabs.map((p) => p.id) }
   )
 
   await w.webContents.executeJavaScript(
@@ -8805,6 +8824,11 @@ export async function runSmoke() {
   )
   log('ft open at page', { want: wantPage, got: landed })
   expect('opening a hit jumps to its page', Number(landed) === wantPage, { want: wantPage, got: landed })
+  const tabCount = await w.webContents.executeJavaScript(
+    'document.querySelectorAll(".paper-tab").length'
+  )
+  log('paper tabs after opening a hit', tabCount)
+  expect('opening a hit leaves the paper open as a tab', Number(tabCount) >= 1, { tabCount })
 
   // The word the list was searched for has to be found again inside the
   // paper.  A hit in the list is a claim about the paper, and the paper is

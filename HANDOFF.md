@@ -513,7 +513,20 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   （给 `position: relative`）而不是格子。
 - 搜索有词时中间栏是结果卡片（`div.res-row`）、清空才回表格（`div.row`），
   卡片与表格行都带 `data-id`；`selected` 在 `filtered` 找不到时回退到 `docs`，
-  右栏标签按 `d.localPdf ? 'pdf' : 'details'`。
+  右栏按 `d.localPdf ? 'pdf' : 'details'` 决定显示哪个页签。
+- **右栏一次只渲染一个 `PdfViewer`**（`reader` 没有 `key`，跨文献复用同一组件；
+  `smoke.ts` 的单 viewer 注释与 `documentScope` 都依赖它）。「打开多篇」不是多个
+  reader，而是 `src/lib/openPapers.ts` 的 `OpenPaper[]`：`id / doc 快照 / page / tab`。
+  `upsertPaper` 同 id 只刷新页码不追加，`nextActivePaper` 决定关闭当前标签后落到哪篇。
+  App 的 `openPaper` 把激活标签投影到 `selId / pinned / rightTab / jump`，
+  `selected` 与 `reader` 的语义不变，冒烟里单 `.pdf-pane`、单个右栏空态、单行
+  `.open` 的断言都仍然成立。所有「打开」动作（全文 / 参考文献 / 标注 / 查重 /
+  回收站 / PDF 内链接）走 `openPaper`；列表行点选是「选中」，仍只 `setSelId`，
+  两者不要混。回收站文献不在 `docs` 里，靠标签里的 `doc` 快照与 `pinned` 兜底。
+- 标签栏是 `.pane-head` **下面独立一行** `.paper-tabs`（`flex: 0 0 auto` +
+  横向滚动），不塞进 `pane-head`：既守住「新功能不挤右栏 `PdfViewer`」的分层，
+  也不会抢走 PDF 的高度。标签按钮文字不能叫「详情」「PDF」「返回列表」，
+  冒烟用 `find(textContent.trim()===...)` 在 `.pane-right button` 里找它们。
 - 逐字段搜（`src/lib/match.ts`）标出命中的字段 + 片段 + `<mark>`，作者命中时
   改用全名显示；Unicode 折叠后的下标要映射回原串再切片。
 - 批量下载并发 2–3、失败跳过、路径攒 10 条 flush 一次再末尾 flush；
