@@ -9,9 +9,14 @@
  * Two things are deliberately kept apart here:
  *  - matching, which may fold punctuation and tolerate one edit;
  *  - offsets into stored text, which must never be taken from a folded copy.
- *    The full-text index and the references index own their own offsets, so
- *    they do not use the near path (see HANDOFF 8.11).
+ *    The full-text corpus and the cached references hay own their own
+ *    offsets, so they match with `wordSpans` / `nearSpans`: the words carry
+ *    their real code-unit positions and nothing is rewritten (HANDOFF 8.11).
  */
+
+/** A near match is a fallback for a short mistyped phrase, not a parser.
+ *  Beyond this many words the anchor scan costs more than it can return. */
+export const MAX_NEAR_WORDS = 8
 
 export type MatchKind = 'exact' | 'near'
 
@@ -82,6 +87,94 @@ export function tokensNear(a: string, b: string): boolean {
   return true
 }
 
+export interface WordSpan {
+  /** Lower-cased word, for comparison only. */
+  word: string
+  /** Offset of the word in the original, unmodified text. */
+  at: number
+  /** Length of the word in the original text. */
+  len: number
+}
+
+/**
+ * Cut a text into words without rewriting it. Each `at` is a code-unit offset
+ * into the exact string passed in, so an index that owns its own offsets (the
+ * full-text corpus, the cached references hay) can use the result directly:
+ * no folded copy is involved, and `at + len` still describes real text.
+ */
+export function wordSpans(text: string): WordSpan[] {
+  const out: WordSpan[] = []
+  const re = /[\p{L}\p{N}]+/gu
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    out.push({ word: m[0].toLowerCase(), at: m.index, len: m[0].length })
+  }
+  return out
+}
+
+/**
+ * The one set of constraints behind a near match, shared by the string form
+ * (`matchQuery`) and the offset form (`nearSpans`). Words are in text order.
+ * Returns the matching word indexes in query order, or null.
+ */
+export function matchWords(words: string[], wanted: string[]): number[] | null {
+  if (!wanted.length) return null
+  const positions: number[] = []
+  let exactWords = 0
+  for (const w of wanted) {
+    let at = -1
+    for (let i = 0; i < words.length; i++) {
+      const h = words[i]!
+      if (h === w) {
+        at = i
+        exactWords++
+        break
+      }
+      // Keep the first near word in case no exact one exists, but keep
+      // looking: an exact hit later in the field is the better anchor.
+      if (at < 0 && tokensNear(w, h)) at = i
+    }
+    if (at < 0) return null
+    positions.push(at)
+  }
+  if (exactWords === 0) return null
+  const span = Math.max(...positions) - Math.min(...positions)
+  if (span >= wanted.length + 2) return null
+  return positions
+}
+
+/**
+ * Same rule as `matchQuery`, but on a text whose offsets matter. The returned
+ * spans point at words that really occur, so `snippetAt(at, len)` and the
+ * document/page lookup stay correct even when the query was misspelled.
+ */
+export function nearSpans(spans: WordSpan[], q: string): WordSpan[] | null {
+  const wanted = queryTokens(q)
+  if (wanted.length > MAX_NEAR_WORDS) return null
+  const positions = matchWords(spans.map((s) => s.word), wanted)
+  if (!positions) return null
+  return positions.map((i) => spans[i]!)
+}
+
+/**
+ * The tightest range in the source text covering every matched word.
+ *
+ * `nearSpans` returns one span per query word, in query order. Cutting a
+ * snippet from the first one would drop a word that happened to come earlier
+ * in the text (or leave out a later one), and asking `pageOf` about the wrong
+ * offset would name the wrong page. Both indexes use this range instead.
+ */
+export function spanBounds(spans: WordSpan[]): { at: number; len: number } {
+  let start = Infinity
+  let end = 0
+  for (const s of spans) {
+    if (s.at < start) start = s.at
+    if (s.at + s.len > end) end = s.at + s.len
+  }
+  if (start === Infinity) return { at: 0, len: 1 }
+  return { at: start, len: Math.max(1, end - start) }
+}
+
 /**
  * Decide how `hay` answers `q`, which is already normalised by the caller.
  *
@@ -103,36 +196,9 @@ export function matchQuery(hay: string, q: string, foldedHay?: string): QueryMat
   }
 
   const wanted = queryTokens(q)
-  if (!wanted.length) return null
   const words = folded.split(' ').filter(Boolean)
-  const positions: number[] = []
-  let exactWords = 0
-  for (const w of wanted) {
-    let at = -1
-    for (let i = 0; i < words.length; i++) {
-      const h = words[i]!
-      if (h === w) {
-        at = i
-        exactWords++
-        break
-      }
-      // Keep the first near word in case no exact one exists, but keep
-      // looking: an exact hit later in the field is the better anchor.
-      if (at < 0 && tokensNear(w, h)) at = i
-    }
-    if (at < 0) return null
-    positions.push(at)
-  }
-  // Every word must be accounted for, and at least one must be exact.
-  // Without the second condition a query made entirely of typos would return
-  // a list of unrelated papers.
-  if (exactWords === 0) return null
-  // The words must also be close together. A three-letter word like "cud"
-  // is one edit away from dozens of words in a long abstract, so without
-  // this check a typo in a two-word title would match every abstract that
-  // happens to contain "can" or "cut" somewhere.
-  const span = Math.max(...positions) - Math.min(...positions)
-  if (span >= wanted.length + 2) return null
+  const positions = matchWords(words, wanted)
+  if (!positions) return null
   return { kind: 'near', terms: [...new Set(positions.map((i) => words[i]!))] }
 }
 

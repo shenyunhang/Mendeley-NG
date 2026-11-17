@@ -165,7 +165,14 @@ import { normaliseQuery, scopeHay } from '../../src/lib/searchScope'
 // A hyphen in a title and a one-character typo used to produce an empty list.
 // The rule is pure, so it is checked here with fixed text as well as through
 // the live search box below (a source-string check cannot prove a match).
-import { allowNearFor, matchQuery, queryMatches } from '../../src/lib/searchMatch'
+import {
+  allowNearFor,
+  matchQuery,
+  nearSpans,
+  queryMatches,
+  spanBounds,
+  wordSpans
+} from '../../src/lib/searchMatch'
 import { splitPersonName } from '../../src/lib/splitPersonName'
 import { uniquePdfPath, writeUniquePdf } from '../../shared/uniquePdfPath'
 
@@ -964,6 +971,22 @@ export async function runSmoke() {
       allowNearFor([nearHay], nearQ) &&
       queryMatches(nearHay, nearQ, true),
     {}
+  )
+  // The two indexes search stored text whose offsets are already pinned down.
+  // A near match must report positions in that same text, or the snippet and
+  // the page number describe something the reader was never shown.
+  const indexedText = 'Qwen-CUA: 深度学习 2025'
+  const indexedSpans = wordSpans(indexedText)
+  const indexedNear = nearSpans(indexedSpans, nearQ)
+  const indexedBounds = spanBounds(indexedNear ?? [])
+  expect(
+    'near spans still point into the unmodified indexed text',
+    !!indexedNear &&
+      indexedSpans.every(
+        (s) => indexedText.slice(s.at, s.at + s.len).toLowerCase() === s.word
+      ) &&
+      indexedText.slice(indexedBounds.at, indexedBounds.at + indexedBounds.len) === 'Qwen-CUA',
+    { indexedSpans, indexedBounds }
   )
 
   await w.webContents.executeJavaScript(

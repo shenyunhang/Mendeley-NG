@@ -101,6 +101,23 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A near hit is not an exact hit. Say so on both panels, and mark the words
+   that really occurred rather than the query the reader mistyped. */
+.ft-near {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 0.667rem;
+  white-space: nowrap;
+}
+.ft-snip mark {
+  background: #ffe066;
+  color: #1a1a1a;
+  border-radius: 2px;
+  padding: 0 1px;
+}
 .ft-more {
   padding-left: 4px;
   font-size: 0.733rem;

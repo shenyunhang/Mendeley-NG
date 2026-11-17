@@ -5,9 +5,14 @@ import {
   allowNearFor,
   foldSeparators,
   matchQuery,
+  matchWords,
+  MAX_NEAR_WORDS,
+  nearSpans,
   queryMatches,
   queryTokens,
-  tokensNear
+  spanBounds,
+  tokensNear,
+  wordSpans
 } from '../src/lib/searchMatch'
 import { matchDoc, markAllTerms, snippetTerms } from '../src/lib/match'
 import { normaliseQuery, scopeHay } from '../src/lib/searchScope'
@@ -150,6 +155,43 @@ describe('allowNearFor and queryMatches', () => {
     expect(queryMatches(hayOf('nothing here'), qOf('qwen'), false)).toBe(false)
     expect(queryMatches(hayOf('nothing here'), qOf('qwen'), true)).toBe(false)
     expect(queryMatches(hayOf('qwen cud'), '', true)).toBe(true)
+  })
+})
+
+describe('offset-preserving tokens for the two indexes', () => {
+  it('keeps real code-unit offsets without rewriting the text', () => {
+    const text = 'Qwen-CUA: 深度学习 2025'
+    const spans = wordSpans(text)
+    expect(spans.map((s) => s.word)).toEqual(['qwen', 'cua', '深度学习', '2025'])
+    expect(spans[0]!.at).toBe(0)
+    expect(spans[1]!.at).toBe(5) // the hyphen is still there in the source
+    for (const s of spans) {
+      expect(text.slice(s.at, s.at + s.len).toLowerCase()).toBe(s.word)
+    }
+  })
+
+  it('finds qwen cud and returns spans that point at real words', () => {
+    const text = 'Qwen-CUA: Native Computer Use Agents'
+    const near = nearSpans(wordSpans(text), 'qwen cud')
+    expect(near?.map((s) => s.word)).toEqual(['qwen', 'cua'])
+    for (const s of near!) {
+      expect(text.slice(s.at, s.at + s.len).toLowerCase()).toBe(s.word)
+    }
+  })
+
+  it('spanBounds covers every hit word even when query order differs', () => {
+    const text = 'alpha qwen cua omega'
+    const near = nearSpans(wordSpans(text), 'cud qwen')!
+    expect(near.map((s) => s.word)).toEqual(['cua', 'qwen'])
+    const b = spanBounds(near)
+    expect(text.slice(b.at, b.at + b.len)).toBe('qwen cua')
+  })
+
+  it('matchWords rejects a long phrase and a word salad', () => {
+    const words = wordSpans('qwen cua native computer use').map((s) => s.word)
+    expect(matchWords(words, ['xwen', 'cud'])).toBeNull()
+    const long = Array.from({ length: MAX_NEAR_WORDS + 1 }, (_, i) => 'word' + i)
+    expect(nearSpans(wordSpans('qwen cua'), long.join(' '))).toBeNull()
   })
 })
 

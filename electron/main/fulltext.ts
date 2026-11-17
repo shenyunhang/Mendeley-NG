@@ -9,6 +9,13 @@ import { app } from 'electron'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { DEFAULT_FT_PAGES, type Doc, type FtHit, type FtStatus } from '../../shared/types'
 import { clampFullTextPages } from '../../shared/fullTextPages'
+import {
+  MAX_NEAR_WORDS,
+  nearSpans,
+  queryTokens,
+  spanBounds,
+  wordSpans
+} from '../../src/lib/searchMatch'
 import { docsWithAllWords, type WordOccurrence } from '../../shared/wordCoverage'
 import { atomicWriteJson } from '../../shared/atomicJson'
 /** One lane is the floor; four is the ceiling even on a many-core box. */
@@ -985,6 +992,45 @@ export function ftSearch(q: string): FtHit[] {
     return e.bounds.length
   }
 
+  /**
+   * Last resort when no exact hit exists: find the words that really occur in
+   * the corpus and use *their* offsets. Nothing in `body`, `m.entries` or the
+   * byte/code-unit anchors is rewritten, so docAt, pageOf and snippetAt still
+   * describe the same text they always did. A folded copy would break that:
+   * offset 100 in a copy is not offset 100 in fulltext.dat.
+   *
+   * At least one query word must occur exactly somewhere in the corpus. That
+   * is both the anchor the shared rule requires and a cheap way to skip a
+   * word-salad query without scanning every paper.
+   */
+  const nearHits = (): FtHit[] => {
+    const wanted = queryTokens(needle)
+    if (!wanted.length || wanted.length > MAX_NEAR_WORDS) return []
+    const anchors = wanted.filter((w) => w.length >= 2 && body.includes(w))
+    if (!anchors.length) return []
+    const out: FtHit[] = []
+    for (const [id, e] of sorted) {
+      const piece = body.slice(e.start, e.start + e.len)
+      if (!anchors.some((a) => piece.includes(a))) continue
+      const near = nearSpans(wordSpans(piece), needle)
+      if (!near || !near.length) continue
+      // Spans are relative to this document's slice. Add its start so pageOf
+      // and snippetAt still read the original corpus, and use the whole
+      // matching range so no hit word falls outside the snippet.
+      const bounds = spanBounds(near)
+      const at = e.start + bounds.at
+      out.push({
+        docId: id,
+        page: pageOf(e, at),
+        snippet: snippetAt(at, bounds.len),
+        near: true,
+        terms: [...new Set(near.map((s) => s.word))]
+      })
+      if (out.length >= MAX_HITS) break
+    }
+    return out
+  }
+
   // one word: walk the whole corpus with indexOf and map each hit back to its
   // document.  This never slices, so it is one pass over the text.
   if (tokens.length === 1) {
@@ -1000,7 +1046,7 @@ export function ftSearch(q: string): FtHit[] {
       // skip the rest of this document's text
       at = found[1].start + found[1].len
     }
-    return hits
+    return hits.length ? hits : nearHits()
   }
 
   // Several words.  The phrase comes first, as one pass over the whole
@@ -1053,5 +1099,5 @@ export function ftSearch(q: string): FtHit[] {
     })
     if (hits.length >= MAX_HITS) break
   }
-  return hits
+  return hits.length ? hits : nearHits()
 }

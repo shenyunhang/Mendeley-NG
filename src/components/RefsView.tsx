@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { normaliseQuery } from '../lib/searchScope'
+import { markAllTerms } from '../lib/match'
 import type { Doc, RefHit } from '../../shared/types'
 
 interface Props {
@@ -18,7 +19,18 @@ interface Props {
 /** A hit reads better with the word that found it marked, and the snippet is
  *  already centred on that word by the index. Lower-casing does not move the
  *  offset on ordinary text, so the cut can be made on the original string. */
-function Snippet({ text, query }: { text: string; query: string }) {
+function Snippet({ text, query, terms }: { text: string; query: string; terms?: string[] }) {
+  // A near hit has no verbatim query inside its snippet, so the index sends
+  // the words that really occur and all of them get marked.
+  if (terms?.length) {
+    return (
+      <>
+        {markAllTerms(text, terms).map((p, i) =>
+          p.hit ? <mark key={i}>{p.t}</mark> : <span key={i}>{p.t}</span>
+        )}
+      </>
+    )
+  }
   // The IPC and the index use the same normalisation; the snippet itself is
   // already normalised. Using the raw query here would silently lose the mark
   // on a term typed with two spaces.
@@ -156,6 +168,11 @@ export default function RefsView({
                     {d?.year ? ` ${d.year}` : ''}
                     {d?.source ? ` · ${d.source}` : ''}
                   </span>
+                  {hs.some((h) => h.near) ? (
+                    <span className="ft-near" title="没有完全匹配的结果，这是按词形相近找到的">
+                      相近
+                    </span>
+                  ) : null}
                 </div>
                 {hs.slice(0, 4).map((h, i) => (
                   <div
@@ -166,7 +183,11 @@ export default function RefsView({
                   >
                     <span className="pg">p{h.page}</span>
                     <span className="ft-snip">
-                      <Snippet text={h.snippet} query={query} />
+                      <Snippet
+                        text={h.snippet}
+                        query={query}
+                        terms={h.near ? h.terms : undefined}
+                      />
                     </span>
                   </div>
                 ))}

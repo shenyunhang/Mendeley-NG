@@ -301,6 +301,10 @@ export interface FtHit {
   docId: string
   page: number
   snippet: string
+  /** True when this came from the near-match fallback, not an exact hit. */
+  near?: boolean
+  /** Words that actually occur, for marking a near hit in the viewer. */
+  terms?: string[]
 }
 
 /** One hit inside a document's cached References section. */
@@ -308,6 +312,10 @@ export interface RefHit {
   docId: string
   page: number
   snippet: string
+  /** True when this came from the near-match fallback, not an exact hit. */
+  near?: boolean
+  /** Words that actually occur, for marking a near hit in the viewer. */
+  terms?: string[]
 }
 
 /** A named column layout for the document table. */

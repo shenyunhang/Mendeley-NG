@@ -663,11 +663,21 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   `snippetTerms` / `authorPartsFor` 用多个词标同一字段并合并重叠区间；`SearchResults`
   从 App 收 `nearTerms: Map<id, string[]>`，卡片加 `.res-near`「相近」标签。冒烟的
   `explained === cards` 要求每张卡都有 `<mark>`，所以这里的高亮不是装饰。
-- **全文与参考文献仍是精确子串**。`fulltext.ts` 的 `at / start / len / bounds / docAt /
-  pageOf / snippetAt` 全指向固定 `fulltext.dat` 的 UTF-16 偏移，由 `byteAt` / `m.bytes`
-  双锚点锁死；`refsindex.ts` 的 `hay` 落盘，`RefsView` 靠 `indexOf(q)` 重定位 `<mark>`。
-  在这两处引入近似匹配会错文档、错页或让卡片失去高亮。要扩展只能做长度保持的
-  1:1 分隔符替换并同步改渲染层，不能改语料或偏移基准。
+- **全文与参考文献用同一套近似规则，但不碰偏移**。`searchMatch.ts` 的 `wordSpans(text)`
+  用 `/[\p{L}\p{N}]+/gu` 切词并保留每个词在**原文**里的 `at/len`，`nearSpans` 复用
+  `matchWords`（每词命中 + 至少一精确 + 邻近），`spanBounds` 给出覆盖全部命中词的最紧
+  区间。`fulltext.ts` 的 `nearHits()` 按 `Entry` 切出该篇文本，把 `at` 加上 `e.start`
+  变回 `fulltext.dat` 的绝对偏移再交给 `pageOf` / `snippetAt`；`refsindex.ts` 在 `hay`
+  上匹配并用**同一个 `hay`** 切片段。两者都不改语料、不升 `version:1`、不重建缓存，
+  旧索引照常加载。
+  **不能用折叠副本取偏移**：`at / start / len / bounds / docAt / pageOf / snippetAt`
+  全指向固定 `fulltext.dat` 的 UTF-16 位置并由 `byteAt` / `m.bytes` 双锚点锁死，副本里
+  的 100 不是原文里的 100，会错文档、错页、错片段。近似路径先用「至少一个词在整篇里
+  精确出现」做快速筛再 tokenize，词数上限 `MAX_NEAR_WORDS`，避免扫全库。
+- **两个视图都要标近似命中**。`FtHit` / `RefHit` 加可选 `near` / `terms`；精确命中路径
+  完全不变，`FullTextView` 只在 `h.near` 时用 `markAllTerms` 标词；`RefsView.Snippet`
+  原来的 `indexOf(q)` 在近义片段里找不到词，改走 `terms`。`.ft-near` 标签说明这不是
+  完全匹配。
 - 范围控件是 `search-wrap` **内部**的原生 `<select>`，不是工具栏直属子元素、不是
   第二个 `<input>`、也不是浮层卡片。三者分别会：多一个 gap 把字号/主题挤出一行、
   打穿冒烟里 `document.querySelector(".toolbar input")` 的唯一性假设、或给

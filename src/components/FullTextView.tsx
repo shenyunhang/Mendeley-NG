@@ -1,6 +1,18 @@
 import { useMemo } from 'react'
 import type { Doc, FtHit, FtStatus } from '../../shared/types'
 import { compareDocs, type SortKey } from '../lib/columns'
+import { markAllTerms } from '../lib/match'
+
+/** A near hit marks the words that really occur, not the mistyped query. */
+function Marked({ text, terms }: { text: string; terms: string[] }) {
+  return (
+    <>
+      {markAllTerms(text, terms).map((p, i) =>
+        p.hit ? <mark key={i}>{p.t}</mark> : <span key={i}>{p.t}</span>
+      )}
+    </>
+  )
+}
 
 interface Props {
   query: string
@@ -295,6 +307,11 @@ export default function FullTextView({
                       {d?.year ? ` ${d.year}` : ''}
                       {d?.source ? ` · ${d.source}` : ''}
                     </span>
+                    {list.some((h) => h.near) ? (
+                      <span className="ft-near" title="没有完全匹配的结果，这是按词形相近找到的">
+                        相近
+                      </span>
+                    ) : null}
                   </div>
                   {list.slice(0, 4).map((h, i) => (
                     <div
@@ -304,7 +321,13 @@ export default function FullTextView({
                       title="打开这一页"
                     >
                       <span className="pg">p{h.page}</span>
-                      <span className="ft-snip">{h.snippet}</span>
+                      <span className="ft-snip">
+                        {h.near && h.terms?.length ? (
+                          <Marked text={h.snippet} terms={h.terms} />
+                        ) : (
+                          h.snippet
+                        )}
+                      </span>
                     </div>
                   ))}
                   {list.length > 4 && (

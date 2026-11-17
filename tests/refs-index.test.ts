@@ -318,3 +318,53 @@ describe('searchRefs', () => {
     expect(hits[0].snippet).not.toContain('  ')
   })
 })
+
+describe('searchRefs near fallback', () => {
+  const cache = (entries: Record<string, unknown>) =>
+    fs.writeFileSync(cachePath, JSON.stringify({ version: 1, entries }))
+
+  const TEXT = '[1] Qwen-CUA: Native Computer Use for (almost) Everything. 2025'
+
+  it('finds Qwen-CUA from "qwen cud" without rewriting the cache', () => {
+    cache({
+      d1: { mtime: 1, size: 1, text: TEXT, hay: TEXT.toLowerCase(), page: 7 }
+    })
+    const before = fs.readFileSync(cachePath, 'utf8')
+    const hits = mod.searchRefs('qwen cud')
+    expect(hits).toHaveLength(1)
+    expect(hits[0].near).toBe(true)
+    expect(hits[0].page).toBe(7)
+    expect(hits[0].terms).toEqual(['qwen', 'cua'])
+    // The snippet is cut from the stored `hay`, so the separator is intact
+    // and the offsets still describe the string that was matched.
+    expect(hits[0].snippet).toContain('qwen-cua')
+    expect(fs.readFileSync(cachePath, 'utf8')).toBe(before)
+    expect(JSON.parse(before).version).toBe(1)
+  })
+
+  it('works on a cache written before the normalised field existed', () => {
+    cache({ d1: { mtime: 1, size: 1, text: TEXT, page: 3 } })
+    const hits = mod.searchRefs('qwen cud')
+    expect(hits).toHaveLength(1)
+    expect(hits[0].near).toBe(true)
+    expect(hits[0].terms).toContain('cua')
+    expect(hits[0].snippet).toContain('qwen-cua')
+  })
+
+  it('leaves exact hits alone and rejects a word salad', () => {
+    cache({
+      d1: { mtime: 1, size: 1, text: TEXT, hay: TEXT.toLowerCase(), page: 2 }
+    })
+    expect(mod.searchRefs('qwen')[0]?.near).toBeUndefined()
+    expect(mod.searchRefs('zzzz qqqq')).toEqual([])
+    expect(mod.searchRefs('zzzz')).toEqual([])
+  })
+
+  it('caps a long phrase instead of scanning every cached bibliography', () => {
+    cache({
+      d1: { mtime: 1, size: 1, text: TEXT, hay: TEXT.toLowerCase(), page: 2 }
+    })
+    const long = Array.from({ length: 10 }, (_, i) => 'word' + i).join(' ')
+    expect(mod.searchRefs(long)).toEqual([])
+  })
+})

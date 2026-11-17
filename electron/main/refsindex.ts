@@ -6,6 +6,13 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { atomicWriteJson } from '../../shared/atomicJson'
 import { isRefHead } from '../../src/lib/refly'
 import { normaliseQuery } from '../../src/lib/searchScope'
+import {
+  MAX_NEAR_WORDS,
+  nearSpans,
+  queryTokens,
+  spanBounds,
+  wordSpans
+} from '../../src/lib/searchMatch'
 import type { Doc, RefHit } from '../../shared/types'
 import { dataDir, loadLibrary } from './store'
 
@@ -395,6 +402,39 @@ export function searchRefs(query: string): RefHit[] {
       from = at + Math.max(1, needle.length)
       perDoc++
     }
+    if (hits.length >= MAX_HITS) break
+  }
+  if (hits.length) return hits
+
+  // No exact hit anywhere. Try the same near rule the catalogue uses, but on
+  // the stored `hay` itself: `nearSpans` returns offsets of words that really
+  // occur in that string, so snippetAt still cuts the same text it matched.
+  // Nothing is rewritten and the cache version stays 1, so old caches keep
+  // loading without a rebuild.
+  const wanted = queryTokens(needle)
+  // A one-word typo has no exact word to anchor it, and the shared rule
+  // rejects those anyway; a very long phrase costs more to scan than it
+  // can return.
+  if (wanted.length < 2 || wanted.length > MAX_NEAR_WORDS) return hits
+  const anchors = wanted.filter((w) => w.length >= 2)
+  for (const docId of Object.keys(c.entries).sort()) {
+    const e = c.entries[docId]!
+    if (!e.text) continue
+    const hay = e.hay ?? normaliseQuery(e.text)
+    if (!anchors.some((a) => hay.includes(a))) continue
+    const near = nearSpans(wordSpans(hay), needle)
+    if (!near || !near.length) continue
+    // Both the match and the slice happen on `hay`, so its offsets are still
+    // the ones snippetAt was written for. Cover every hit word, not just the
+    // first one in query order.
+    const bounds = spanBounds(near)
+    hits.push({
+      docId,
+      page: e.page,
+      snippet: snippetAt(hay, bounds.at, bounds.len),
+      near: true,
+      terms: [...new Set(near.map((s) => s.word))]
+    })
     if (hits.length >= MAX_HITS) break
   }
   return hits
