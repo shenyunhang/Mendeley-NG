@@ -97,9 +97,16 @@
   font-size: 0.733rem;
 }
 .ft-snip {
+  flex: 1;
+  min-width: 0;
+  /* Hit snippets are prose, not labels: two lines plus a tooltip instead of
+     one clipped line. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* A near hit is not an exact hit. Say so on both panels, and mark the words
    that really occurred rather than the query the reader mistyped. */
@@ -334,9 +341,13 @@
 .notes-text {
   flex: 1;
   min-width: 0;
+  /* The sentence that was highlighted is the reason this list exists. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .notes-row .grow {
   flex: 1;

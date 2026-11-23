@@ -13,7 +13,10 @@
   gap: 2px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--row-line);
-  overflow: hidden;
+  /* No overflow: hidden here.  The card is a fixed-height virtual row, and
+     a clip on the card used to swallow the last line silently -- no ellipsis,
+     no tooltip.  Every child now owns its own clamp, so an overflow says so
+     with an ellipsis and offers the full string on hover. */
   cursor: default;
 }
 .res-row:hover {
@@ -32,9 +35,16 @@
 }
 .res-title {
   font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  /* A long title is the thing being scanned for: give it two lines rather
+     than one, and put the whole string on the tooltip. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .res-year {
   flex: 0 0 auto;

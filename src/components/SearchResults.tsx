@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Doc } from '../../shared/types'
 import { isListBlank } from '../lib/listBlank'
-import { matchDoc, type DocMatch, type Part } from '../lib/match'
+import { matchDoc, partsToPlainText, type DocMatch, type Part } from '../lib/match'
 import { normaliseQuery } from '../lib/searchScope'
 
 interface Props {
@@ -176,7 +176,7 @@ export default function SearchResults({
                 }}
               >
                 <div className="res-head">
-                  <span className="res-title">
+                  <span className="res-title" title={partsToPlainText(m.title)}>
                     <Runs parts={m.title} />
                   </span>
                   {nearTerms?.has(d.id) ? (
@@ -187,7 +187,12 @@ export default function SearchResults({
                   {m.year ? <span className="res-year">{m.year}</span> : null}
                 </div>
                 {m.authors.length ? (
-                  <div className="res-authors">
+                  <div
+                    className="res-authors"
+                    title={
+                      partsToPlainText(m.authors) + (m.source ? ` · ${m.source}` : '')
+                    }
+                  >
                     <Runs parts={m.authors} />
                     {m.source ? <span className="res-src"> · {m.source}</span> : null}
                   </div>
@@ -196,7 +201,11 @@ export default function SearchResults({
                     a card that grows to fit every match stops being scannable,
                     and the rest are one click away in the details pane */}
                 {m.fields.slice(0, 2).map((f) => (
-                  <div className="res-field" key={f.label}>
+                  <div
+                    className="res-field"
+                    key={f.label}
+                    title={`${f.label} ${partsToPlainText(f.parts)}`}
+                  >
                     <span className="res-label">{f.label}</span>
                     <Runs parts={f.parts} />
                   </div>

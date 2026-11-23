@@ -772,6 +772,16 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   的 `updateIdleDelayMs()` 只对 `not-available` 返回
   `UPDATE_NOT_AVAILABLE_VISIBLE_MS`，`App.tsx` 据此起定时器并在卸载或下一次
   状态推送时清掉；下载中/已就绪/报错必须留着等人处理。
+- **省略号只决定版式，不决定读者能读到多少**。全站 19 条 `text-overflow: ellipsis`
+  的元素都带全文 `title`：结果卡的标题/作者/命中字段用
+  `match.ts` 的 `partsToPlainText()` 把带 `<mark>` 的分段拼回整句，全文/参考文献
+  命中片段、标注句子、右键菜单头、按 ID 添加的候选标题、命名模板、已保存视图名、
+  阅读器提示各补自己的全文；`tests/truncation-fallback.test.ts` 逐个锁住接线。
+  长散文（`.res-title`、`.ft-snip`、`.notes-text`）改 `-webkit-line-clamp: 2`
+  两行显示并保留 tooltip。结果卡是固定高度的虚拟行：`.res-row` 的
+  `overflow: hidden` 曾把第 4 行**静默**吞掉，现已删掉，`--res-h` 提到
+  `6.4rem` 留出两行标题的空间，每个子块自己 clamp，溢出会显示省略号而不是消失。
+  结果卡没整块改两行 clamp，是为了不破坏 `useVirtualizer` 的固定行高。
 - `body` 就是已有的全文视图：选它切 `view.kind === 'fulltext'` 并把 `query` 单向复制成
   `ftQuery`；「全文」按钮也反向把 `scope` 设成 `body`，两处不能各说各话。
   清空搜索时把 `body` 复位成 `all`，别让下拉写着「PDF 正文」而中间是文献表。

@@ -182,7 +182,7 @@ export default function RefsView({
                     title="打开这一页"
                   >
                     <span className="pg">p{h.page}</span>
-                    <span className="ft-snip">
+                    <span className="ft-snip" title={h.snippet}>
                       <Snippet
                         text={h.snippet}
                         query={query}

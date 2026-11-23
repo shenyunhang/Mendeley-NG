@@ -101,12 +101,17 @@ export default function FullTextView({
     <div className="ft-skipped">
       <span>{status.skipped.length} 篇没能进索引，搜不到的词可能就在其中：</span>
       {status.skipped.slice(0, 6).map((s) => (
-        <span key={s.name} className="ft-skip" title={s.why}>
+        <span key={s.name} className="ft-skip" title={`${s.name} · ${s.why}`}>
           {s.name} · {s.why}
         </span>
       ))}
       {status.skipped.length > 6 ? (
-        <span className="ft-skip">等 {status.skipped.length} 篇</span>
+        <span
+          className="ft-skip"
+          title={status.skipped.map((s) => s.name).join('、')}
+        >
+          等 {status.skipped.length} 篇
+        </span>
       ) : null}
     </div>
   ) : null
@@ -321,7 +326,7 @@ export default function FullTextView({
                       title="打开这一页"
                     >
                       <span className="pg">p{h.page}</span>
-                      <span className="ft-snip">
+                      <span className="ft-snip" title={h.snippet}>
                         {h.near && h.terms?.length ? (
                           <Marked text={h.snippet} terms={h.terms} />
                         ) : (

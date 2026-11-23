@@ -82,7 +82,7 @@ export default function RowMenu({ x, y, head, items, onClose }: Props) {
       style={{ left: pos.left, top: pos.top, width: W }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {head && <div className="row-menu-head">{head}</div>}
+      {head && <div className="row-menu-head" title={head}>{head}</div>}
       {items.map((it, i) =>
         it.sep ? (
           <div key={'s' + i} className="row-menu-sep" />

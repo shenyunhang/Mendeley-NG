@@ -146,7 +146,9 @@ export default function NotesView({
                 >
                   <span className="ann-dot" style={{ background: a.color }} />
                   <span className="pg">p{page}</span>
-                  <span className="notes-text">{label(a)}</span>
+                  <span className="notes-text" title={label(a)}>
+                    {label(a)}
+                  </span>
                   <span className="grow" />
                   <button
                     className="notes-act"

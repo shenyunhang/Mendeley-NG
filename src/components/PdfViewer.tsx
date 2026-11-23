@@ -50,6 +50,14 @@ import type { CiteMark } from '../lib/pdfrefs'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
+/** The reader bar's mode hint.  One wording for both the visible text and its
+ *  tooltip, so a squeezed bar cannot show one sentence and offer another. */
+function readerHint(marking: boolean, annotationCount: number): string {
+  return marking
+    ? `拖选即高亮 · 本页 ${annotationCount} 条`
+    : `拖选即选中文字，可以复制 · 本页 ${annotationCount} 条标注`
+}
+
 export default function PdfViewer({
   doc,
   onLocalPdf,
@@ -1260,7 +1268,11 @@ export default function PdfViewer({
         <button onClick={syncCloud} disabled={busy}>
           云同步标注
         </button>
-        <span className="pdf-hint" style={{ color: 'var(--fg-dim)', marginLeft: 8 }}>
+        <span
+          className="pdf-hint"
+          style={{ color: 'var(--fg-dim)', marginLeft: 8 }}
+          title={justMade ? '已高亮' : readerHint(marking, pageAnns.length)}
+        >
           {justMade ? (
             // what the reader just did, and the way out of it.  It replaces the
             // mode hint for those few seconds because that is the moment the
@@ -1275,10 +1287,8 @@ export default function PdfViewer({
                 撤销
               </button>
             </>
-          ) : marking ? (
-            `拖选即高亮 · 本页 ${pageAnns.length} 条`
           ) : (
-            `拖选即选中文字，可以复制 · 本页 ${pageAnns.length} 条标注`
+            readerHint(marking, pageAnns.length)
           )}
         </span>
       </div>

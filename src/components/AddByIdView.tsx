@@ -186,7 +186,7 @@ export default function AddByIdView({ docs, onClose, onAdded }: Props) {
                     disabled={busy}
                     onChange={() => toggle(k)}
                   />
-                  <span className="t">{c.title}</span>
+                  <span className="t" title={c.title}>{c.title}</span>
                   <span className="n">
                     {c.patch.authors?.[0]?.last_name ?? ''}
                     {c.patch.year ? ` ${c.patch.year}` : ''}

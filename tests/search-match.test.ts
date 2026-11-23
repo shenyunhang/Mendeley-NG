@@ -14,7 +14,7 @@ import {
   tokensNear,
   wordSpans
 } from '../src/lib/searchMatch'
-import { matchDoc, markAllTerms, snippetTerms } from '../src/lib/match'
+import { matchDoc, markAllTerms, partsToPlainText, snippetTerms } from '../src/lib/match'
 import { normaliseQuery, scopeHay } from '../src/lib/searchScope'
 
 /**
@@ -236,5 +236,15 @@ describe('marking a near match', () => {
     const d: Doc = { id: 'd1', title: 'Deep Learning' }
     const m = matchDoc(d, 'deep')
     expect(m.title.filter((p) => p.hit).map((p) => p.t)).toEqual(['Deep'])
+  })
+
+  it('partsToPlainText rebuilds the unmarked sentence behind a tooltip', () => {
+    expect(partsToPlainText([])).toBe('')
+    expect(partsToPlainText([{ t: 'Qwen', hit: true }, { t: '-CUA', hit: false }])).toBe(
+      'Qwen-CUA'
+    )
+    const parts = snippetTerms('a very long abstract about Qwen', ['qwen'])
+    expect(parts).not.toBeNull()
+    expect(partsToPlainText(parts!)).toContain('Qwen')
   })
 })

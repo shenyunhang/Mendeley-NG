@@ -16,6 +16,13 @@ export interface Part {
   hit: boolean
 }
 
+/** The unmarked sentence behind a row of hits.  A tooltip has to carry the
+ *  whole string, not the visible slice: an ellipsis is a decision about
+ *  layout, not about what the reader is allowed to read. */
+export function partsToPlainText(parts: Part[]): string {
+  return parts.map((p) => p.t).join('')
+}
+
 /** A field the query is in, ready to be drawn with the match marked. */
 export interface FieldHit {
   label: string

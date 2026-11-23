@@ -151,7 +151,9 @@ export default function Settings({
         </div>
         <div className="set-row">
           <span className="set-key">命名模板</span>
-          <span className="set-path">{nameTemplate || DEFAULT_PDF_TEMPLATE}</span>
+          <span className="set-path" title={nameTemplate || DEFAULT_PDF_TEMPLATE}>
+            {nameTemplate || DEFAULT_PDF_TEMPLATE}
+          </span>
           <button onClick={onNameTemplate}>修改…</button>
         </div>
         <div className="set-note">

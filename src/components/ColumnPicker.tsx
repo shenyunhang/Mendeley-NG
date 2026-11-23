@@ -107,8 +107,13 @@ export default function ColumnPicker({
         <div className="col-views">
           <div className="group-head">视图</div>
           {views.map((v) => (
-            <div key={v.id} className="ol-row" onClick={() => onApplyView(v)} title={v.cols.join(' · ')}>
-              <span className="name">{v.name}</span>
+            <div
+              key={v.id}
+              className="ol-row"
+              onClick={() => onApplyView(v)}
+              title={`${v.name} · ${v.cols.join(' · ')}`}
+            >
+              <span className="name" title={v.name}>{v.name}</span>
               <span className="acts">
                 <button
                   className="mini"
