@@ -141,7 +141,8 @@ npm run demo               # 造虚构库，重生成 README 的四张截图
 3. `npm run build` 产出 `out/`。`scripts/start.mjs` 只检查 `out/main/index.js` 在不在，
    然后直接起 Electron，所以忘了构建跑的是上一版，而且会**安静地全绿**。
 4. `npm run verify:build` 逐个 `node --check` 主进程与 smoke chunk、确认 worker 在且
-   大于 100 KB、确认 `index.js` 引用的 chunk 真实存在，并核对 `build` / `dist` 的接线。
+   大于 100 KB、确认 `out/renderer/` 下的 cMap 与标准字体资源齐全、确认 `index.js`
+   引用的 chunk 真实存在，并核对 `build` / `dist` / `prebuild` / `asarUnpack` 的接线。
    同一份 `scripts/verify-build.mjs` 被 `ci.yml` 与 `release.yml` 调用，两处门禁不会漂移。
 5. `npm run smoke` 用真实库和真实 PDF，开隐藏窗口逐条断言，日志以
    `[smoke] PASS` / `[smoke] FAIL` 打点，最后出现 `all checks passed` 才算过。
@@ -159,8 +160,10 @@ npm run demo               # 造虚构库，重生成 README 的四张截图
 - `.github/workflows/ci.yml` 在每次 push / PR 依次跑 `typecheck`、`npm test`、`build`，
   再调 `node scripts/verify-build.mjs` 验一遍 `out/`：逐个 `node --check` 主进程与全部
   smoke chunk、确认 `out/preload/index.js` 与 `out/renderer/index.html` 在、确认
-  `pdf.worker.mjs` 大于 100 KB、确认 `index.js` 里 require 的 chunk 文件真实存在，
-  并核对 `build` 仍含 `copy-worker`、`dist` 仍委托 `npm run build`。
+  `pdf.worker.mjs` 大于 100 KB、确认 `index.js` 里 require 的 chunk 文件真实存在、
+  `out/renderer/cmaps/` 与 `standard_fonts/` 都齐，并核对 `build` 仍含 `copy-worker`、
+  `prebuild` / `predev` 仍调 `copy-pdf-assets`、`dist` 仍委托 `npm run build`、
+  `asarUnpack` 仍覆盖两个资源目录。
 - `.github/workflows/release.yml` 在 `v*` tag（或手动触发）打包前先跑
   `npm run typecheck && npm test`，再做同一道产物检查，并拒绝版本与
   `package.json` / `package-lock.json` 不一致或不是 annotated 的 tag；手动触发
@@ -226,6 +229,7 @@ shared/                  三端共享：类型、规则常量、原子写、安�
                          indexedFileRules.ts：两套索引共用的文件判定、片段与进度
                          fulltextRules.ts：全文表的形状、偏移、页码与 worker 故障
                          librarySync.ts：把云端回答变成同步提议的三条纯规则
+                         pdfFontOptions.ts：pdf.js 字体资源的目录名与两种取法
 tests/                   Vitest 单测：shared / renderer-pure / security / refactor-regression
                          main-ipc-system / main-ipc-files（Electron 用替身，捕获 handler）
                          main-library / main-marks（同步 pull、标注与阅读位置的接线）
@@ -235,6 +239,7 @@ tests/                   Vitest 单测：shared / renderer-pure / security / ref
 scripts/
   _shared.mjs           脚本共用：仓库根、Electron 路径、环境清理、UA
   verify-build.mjs      产物校验，ci.yml 与 release.yml 只调这一份
+  copy-pdf-assets.mjs   prebuild / predev 填 Vite publicDir 的 cMap 与标准字体
   ...                   启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
 docs/screenshots/        README 的四张图，由 npm run demo 生成
 analysis/                三份分析报告（架构实现 / 演化 / 第一性原理与巧思，各含 md + 自包含 html）
@@ -434,9 +439,18 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   CI 与 release 另有一道产物门禁，逐个 `node --check` 主进程与 smoke chunk、
   核对 `index.js` 里 require 的 chunk 文件真实存在。复现打包缺件去看装好的包
   （`npx asar list …/resources/app.asar`），不是看源码目录。
+- pdf.js 的字体资源是运行时按 URL 拼文件名取的，不是 JS 模块，Vite 发现不了
+  漏拷：`prebuild` / `predev` 调 `scripts/copy-pdf-assets.mjs` 把
+  `pdfjs-dist/cmaps`（169 个 `.bcmap`）与 `standard_fonts`（16 个 `.pfb`）放进
+  Vite publicDir，构建后落在 `out/renderer/`。所有 `getDocument` 统一从
+  `shared/pdfFontOptions.ts` 取 `cMapUrl` / `cMapPacked` / `standardFontDataUrl`：
+  渲染层按 `document.baseURI` 拼 URL，主进程按 `out/renderer` 拼路径（Node 工厂
+  用 `fs.readFile`，不吃 `file://`）。**安装包必须 `asarUnpack` 这两个目录**——
+  Chromium fetch 不到 `app.asar` 里的文件，Electron 会把请求重定向到
+  `app.asar.unpacked`。缺资源时 CID 字体加载失败，pdf.js 换 ErrorFont，canvas
+  静默丢字形：插图的框线箭头都在、框内文字全空，篇级诊断还不会报错。
 - 诊断不能替文件背锅：库级故障（一轮一篇都没读出来）与篇级失败分开报，
-  面板把 pdf.js 的原话原样显示。`standardFontDataUrl` / `cMapUrl` 未配，
-  部分 PDF 文本抽取质量受损但不致命。
+  面板把 pdf.js 的原话原样显示。
 - `electron-builder` 没有证书时静默跳过签名，安装包照常能跑；用 `npm run signcheck`
   （`Get-AuthenticodeSignature`）问 Windows 拿真实状态，别只看构建成功。
   `release.yml` 里「有证书却没签上」判失败，「没有证书」只警告。

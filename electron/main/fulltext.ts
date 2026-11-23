@@ -7,6 +7,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app } from 'electron'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { pdfFontOptions } from './pdfFonts'
 import { DEFAULT_FT_PAGES, type Doc, type FtHit, type FtStatus } from '../../shared/types'
 import { clampFullTextPages } from '../../shared/fullTextPages'
 import {
@@ -470,7 +471,9 @@ async function extract(file: string, n: number): Promise<Got> {
     // long as the file takes, and the largest PDFs here are 35 MB
     const raw = await fsp.readFile(file)
     const data = new Uint8Array(raw)
-    const d = await pdfjs.getDocument({ data, useSystemFonts: false }).promise
+    const d = await pdfjs
+      .getDocument({ data, useSystemFonts: false, ...pdfFontOptions() })
+      .promise
     // The timer may have fired while getDocument was still resolving. By then
     // the race has already settled and finally has run with an empty box, so
     // nobody else can destroy this document. It has to happen here, before

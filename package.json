@@ -7,11 +7,13 @@
   "license": "MIT",
   "private": true,
   "scripts": {
+    "predev": "node scripts/copy-pdf-assets.mjs",
     "dev": "electron-vite dev",
     "start": "node scripts/start.mjs",
     "smoke": "node scripts/start.mjs --smoke",
     "perf": "node scripts/start.mjs --perf",
     "demo": "node scripts/demo.mjs",
+    "prebuild": "node scripts/copy-pdf-assets.mjs",
     "build": "electron-vite build && node scripts/copy-worker.mjs",
     "verify:build": "node scripts/verify-build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
@@ -64,6 +66,10 @@
       "out/**/*",
       "package.json",
       "assets/icon.png"
+    ],
+    "asarUnpack": [
+      "out/renderer/cmaps/**",
+      "out/renderer/standard_fonts/**"
     ],
     "publish": {
       "provider": "github",

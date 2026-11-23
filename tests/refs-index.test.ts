@@ -111,8 +111,14 @@ describe('buildRefsIndex', () => {
     expect(r.skipped).toEqual([])
     expect(r.indexed).toBe(2) // seeded d1 kept + newly read d2
     expect(m.getDocument).toHaveBeenCalledTimes(1) // only d2, never d1
-    const calledUrl = String((m.getDocument.mock.calls[0][0] as { url: string }).url)
+    const params = m.getDocument.mock.calls[0][0] as Record<string, unknown>
+    const calledUrl = String(params.url)
     expect(calledUrl).toContain('d2.pdf')
+    // CID fonts without /ToUnicode need these resources or pdf.js drops their
+    // glyphs; assert the real call, not just a source string.
+    expect(params.cMapPacked).toBe(true)
+    expect(String(params.cMapUrl)).toMatch(/cmaps\/$/)
+    expect(String(params.standardFontDataUrl)).toMatch(/standard_fonts\/$/)
     // every opened document is destroyed exactly once (paired cleanup)
     expect(m.docs).toHaveLength(1)
     expect(m.docs[0].destroy).toHaveBeenCalledTimes(1)

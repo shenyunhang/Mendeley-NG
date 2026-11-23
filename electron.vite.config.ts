@@ -28,6 +28,10 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(__dirname, 'src'),
+    // pdf.js's binary CMaps and standard fonts are fetched by URL at runtime;
+    // they live in a generated public dir (scripts/copy-pdf-assets.mjs) so the
+    // dev server and the built renderer resolve the same relative paths.
+    publicDir: resolve(__dirname, '.pdfjs-assets'),
     resolve: { alias: { '@shared': resolve(__dirname, 'shared') } },
     plugins: [react()],
     build: {

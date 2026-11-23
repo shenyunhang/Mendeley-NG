@@ -1,5 +1,6 @@
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { pdfFontOptionsFromUrl } from '../../shared/pdfFontOptions'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -16,7 +17,9 @@ export async function extractIds(
     // moving it into the worker.  Handing over a copy keeps the caller's bytes
     // usable, which is what lets one read of a dropped file feed both this
     // step and the upload that follows it.
-    const pdf = await pdfjs.getDocument({ data: data.slice(0) }).promise
+    const pdf = await pdfjs
+      .getDocument({ data: data.slice(0), ...pdfFontOptionsFromUrl(document.baseURI) })
+      .promise
     let text = ''
     for (let i = 1; i <= Math.min(2, pdf.numPages); i++) {
       const page = await pdf.getPage(i)

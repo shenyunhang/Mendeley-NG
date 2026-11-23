@@ -1,4 +1,5 @@
 import { clampToRange } from '../../shared/clamp'
+import { pdfFontOptionsFromUrl } from '../../shared/pdfFontOptions'
 import { reportFailure, FAILURE } from '../../shared/failures'
 import {
   useCallback,
@@ -248,7 +249,10 @@ export default function PdfViewer({
     if (!doc.localPdf) return
     let dead = false
     pdfjs
-      .getDocument({ url: window.api.pdfUrl(doc.localPdf) })
+      .getDocument({
+        url: window.api.pdfUrl(doc.localPdf),
+        ...pdfFontOptionsFromUrl(document.baseURI)
+      })
       .promise.then(async (p) => {
         if (dead) {
           p.destroy()

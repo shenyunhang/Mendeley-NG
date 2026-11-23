@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { pdfFontOptions } from './pdfFonts'
 import { findToken } from './mendeley'
 import {
   dataDir,
@@ -6393,7 +6394,7 @@ export async function runSmoke() {
     for (const d of cands.slice(0, 60)) {
       try {
         const data = new Uint8Array(fs.readFileSync(d.localPdf as string))
-        const pdf = await pdfjs.getDocument({ data, useSystemFonts: false }).promise
+        const pdf = await pdfjs.getDocument({ data, useSystemFonts: false, ...pdfFontOptions() }).promise
         const last = Math.min(pdf.numPages, 12)
         let inner = 0
         let extPage: number | null = null
@@ -6704,7 +6705,7 @@ export async function runSmoke() {
       const d = cands[k]
       try {
         const data = new Uint8Array(fs.readFileSync(d.localPdf as string))
-        const pdf = await pdfjs.getDocument({ data, useSystemFonts: false }).promise
+        const pdf = await pdfjs.getDocument({ data, useSystemFonts: false, ...pdfFontOptions() }).promise
         const last = Math.min(pdf.numPages, 12)
         let page = 0
         for (let i = 1; i <= last && !page; i++) {
@@ -6910,7 +6911,7 @@ export async function runSmoke() {
   /** One paper's list, read the way the reader reads it. */
   const scanPaper = async (d: Doc) => {
     const data = new Uint8Array(fs.readFileSync(d.localPdf as string))
-    const pdf = await pdfjs.getDocument({ data, useSystemFonts: false }).promise
+    const pdf = await pdfjs.getDocument({ data, useSystemFonts: false, ...pdfFontOptions() }).promise
     try {
       let entries = new Map<number, string>()
       let refPage = 0

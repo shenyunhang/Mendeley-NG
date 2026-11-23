@@ -15,6 +15,7 @@ import {
   wordSpans
 } from '../../src/lib/searchMatch'
 import type { Doc, RefHit } from '../../shared/types'
+import { pdfFontOptions } from './pdfFonts'
 import { dataDir, loadLibrary } from './store'
 
 /**
@@ -199,7 +200,8 @@ async function extract(file: string): Promise<Extracted> {
     // so no whole-file read into memory is needed here.
     const d = await pdfjs.getDocument({
       url: pathToFileURL(file).href,
-      useSystemFonts: false
+      useSystemFonts: false,
+      ...pdfFontOptions()
     }).promise
     // The timer may have fired while getDocument was still resolving.  By then
     // finally has run against an empty box, so this document has to be

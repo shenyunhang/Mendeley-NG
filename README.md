@@ -197,7 +197,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 
 | 功能 | 说明 |
 | --- | --- |
-| 读 PDF | pdf.js，按 `devicePixelRatio` 出后备缓冲，高 DPI 下不虚；点进阅读区后 PageUp/PageDown/空格/←→/Home/End 翻页 |
+| 读 PDF | pdf.js，按 `devicePixelRatio` 出后备缓冲，高 DPI 下不虚；随包带 cMap 与标准字体资源，CID 字体插图的框内文字不会只剩空框；点进阅读区后 PageUp/PageDown/空格/←→/Home/End 翻页 |
 | 已打开的文献 | 标签按 VS Code 的固定策略：单击文献列表行、结果卡片或各种命中 → **预览标签（斜体）**，下一次单击会替换它，不会越攒越多；双击文献行、或双击一个预览标签 → **固定标签（非斜体）**，固定标签不会被替换。点标签切回并回到当时打开的那一页（从列表打开的回到上次读到的页），点 × 单独关闭，关掉正在看的会切到相邻那篇 |
 | 篇内查找 | Ctrl+F 在当前 PDF 里找词，命中标橙、显示 n/N，回车跳下一个 |
 | 页内链接 | PDF 自带的超链接可点：内部章节跳转翻页，外部地址交给浏览器。**默认不画框**——一篇几十个链接，满屏蓝框让每句话都像能点——悬停才显形；开着拖选高亮时整层让位 |
@@ -319,7 +319,7 @@ tests/                     Vitest 单测：shared 规则 / 渲染层纯函数 / 
 scripts/
   _shared.mjs              脚本共用：仓库根、Electron 路径、环境清理、UA
   verify-build.mjs         产物校验（ci.yml 与 release.yml 共用这一份）
-  ...                      启动器、token、假库与截图、图标、worker 拷贝、签名自查、钩子
+  ...                      启动器、token、假库与截图、图标、worker 与字体资源拷贝、签名自查、钩子
 docs/screenshots/           README 用的四张图，由 `npm run demo` 生成
 analysis/                  三份分析报告（架构实现 / 演化 / 第一性原理与巧思，各含 md + 自包含 html）
 .github/workflows/
