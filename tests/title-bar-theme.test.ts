@@ -21,7 +21,10 @@ function repoRoot(): string {
 }
 
 const ROOT = repoRoot()
-const read = (p: string): string => fs.readFileSync(path.join(ROOT, p), 'utf-8')
+/** Git on Windows checks text files out with CRLF.  A source-string guard
+ *  that assumes LF only fails on CI, where the same bytes are correct. */
+const read = (p: string): string =>
+  fs.readFileSync(path.join(ROOT, p), 'utf-8').replace(/\r\n/g, '\n')
 
 describe('title bar colours', () => {
   it('dark is the default and light is the only alternative', () => {
@@ -46,6 +49,30 @@ describe('title bar colours', () => {
     const fg = [...css.matchAll(/--fg:\s*(#[0-9a-fA-F]{6});/g)].map((m) => m[1])
     expect(bg2).toEqual([titleBarColorsFor().color, titleBarColorsFor('light').color])
     expect(fg).toEqual([titleBarColorsFor().symbolColor, titleBarColorsFor('light').symbolColor])
+  })
+})
+
+describe('source-string guards survive a Windows checkout', () => {
+  it('no guard matches a literal LF inside a toContain string', () => {
+    // GitHub's windows-latest runner checks out CRLF.  One guard that looked
+    // for '.title-bar {\n  display: none;' passed locally and failed every
+    // CI run for five commits.  Normalising in read() fixes this file; the
+    // guard below stops the same assumption appearing in any other one.
+    const offenders: string[] = []
+    for (const name of fs.readdirSync(path.join(ROOT, 'tests'))) {
+      if (!name.endsWith('.test.ts')) continue
+      const src = fs.readFileSync(path.join(ROOT, 'tests', name), 'utf-8')
+      src.split(/\r?\n/).forEach((line, i) => {
+        for (const match of line.matchAll(/toContain\(([^)]*)\)/g)) {
+          const arg = match[1]
+          if (!arg.includes('\\n')) continue
+          // a bare newline literal is fine: CRLF still contains \n
+          if (/^\s*['"]\\n['"]\s*$/.test(arg)) continue
+          offenders.push(`${name}:${i + 1}`)
+        }
+      })
+    }
+    expect(offenders).toEqual([])
   })
 })
 
@@ -81,7 +108,7 @@ describe('the custom chrome stays wired end to end', () => {
     expect(preload).toContain("process.platform === 'win32'")
     expect(preload).toContain("'custom-title-bar'")
     const css = read('src/styles/titlebar.css')
-    expect(css).toContain('.title-bar {\n  display: none;')
+    expect(css).toMatch(/\.title-bar\s*\{\s*display:\s*none/)
     expect(css).toContain('html.custom-title-bar .title-bar')
     expect(css).toContain('-webkit-app-region: drag')
     expect(css).toContain('flex: 0 0 138px')

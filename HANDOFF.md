@@ -339,6 +339,13 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - 冒烟窗口隐藏且 rAF 节流，等待被测对象用 `until` + 上限而不是固定 sleep；
   前提要单独写一条会说话的断言，前提不成立时别静默跳过后续断言。
 - 跑冒烟时别在旁边跑 `npm run build` / `npm run perf`，它们会改 `out/` 或抢真实库。
+- **源码串护栏不能假设 LF**。`windows-latest` 的 checkout 是 CRLF，
+  `toContain('.title-bar {\n  display: none;')` 本地通过、CI 从 `997c514`
+  起连红五个提交，release 也跟着卡在单测；读文件先把 `\r\n` 归一成 `\n`，
+  `tests/title-bar-theme.test.ts` 另有一条护栏禁止 `toContain` 的参数里再出现
+  `\n`。改这类断言后，用一份 CRLF 副本（`git ls-files` 拷出文本并换行转换、
+  软链 `node_modules`）跑一遍完整 `typecheck`/`test`/`build`/`verify:build`，
+  别只信本地 LF 的绿。
 
 ---
 
