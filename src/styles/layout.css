@@ -31,20 +31,14 @@
 .toolbar > .grow {
   flex: 1 1 auto;
 }
-/* the status line is the one thing that may give: it is prose of unpredictable
-   length and it truncates with an ellipsis rather than pushing the row */
-.toolbar > .status {
-  flex: 0 1 auto;
-}
-/* and the search box is the other: its width was an arbitrary number, and a
-   box that narrows to 140px is still a search box.  Giving way here is what
-   keeps the buttons at the far end — font size, theme — reachable without
-   scrolling the bar, which is why this is the number to come back to when a
-   button is added: the sort card cost 51px and this paid for 20 of it, and
-   the status line the start-up pull leaves behind paid for the other 10.
-   That one is worth a note: a status squeezed to zero width still costs a
-   gap, because gaps belong to the bar and not to the child, so a line that
-   has nothing to say was still ten pixels of overflow. */
+/* The search box is the only thing that may give: its width was an arbitrary
+   number, and a box that narrows to 140px is still a search box.  Giving way
+   here is what keeps the buttons at the far end — font size, theme — reachable
+   without scrolling the bar, which is why this is the number to come back to
+   when a button is added: the sort card cost 51px and this paid for 20 of it.
+   Sync and updater prose used to be shrinkable children here too, capped at
+   44% and ellipsised; both now live in .status-bar below the bar, where all
+   the width belongs to the sentence. */
 .toolbar > .search-wrap {
   flex: 1 1 260px;
   min-width: 140px;

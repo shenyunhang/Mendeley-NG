@@ -4,7 +4,6 @@ import {
   type Doc,
   type FtStatus,
   type SavedView,
-  type SyncStatus,
   type UpdateState
 } from '../../shared/types'
 import ColumnPicker from './ColumnPicker'
@@ -18,7 +17,6 @@ import type { ColKey, SortKey } from '../lib/columns'
 import type { ListFilter } from '../lib/filters'
 import { SCOPE_LABEL, SEARCH_SCOPES, type SearchScope } from '../lib/searchScope'
 import { LIBRARY, type View } from '../lib/view'
-import { updateLine } from '../lib/updateText'
 
 interface Props {
   /** Focused by Ctrl+F from wherever the reader is typing. */
@@ -27,7 +25,6 @@ interface Props {
   // Keeping: the only commands on this bar that need the network.
   busy: boolean
   onSync: (full: boolean) => void
-  status: SyncStatus | null
   upd: UpdateState | null
   onSettings: () => void
   onImportRefs: (entries: Entry[]) => void
@@ -477,17 +474,6 @@ export default function Toolbar(p: Props) {
         全文
       </button>
       <span className="grow" />
-      {p.upd && updateLine(p.upd, p.upd.current ?? '') && (
-        <span
-          className="status"
-          style={{ color: p.upd.phase === 'error' ? 'var(--err)' : 'var(--accent)' }}
-          // the release notes are the interesting half when there is an
-          // update; the two version numbers are already in the text
-          title={p.upd.message ?? (p.upd.current ? `当前版本 ${p.upd.current}` : '')}
-        >
-          {updateLine(p.upd, p.upd.current ?? '')}
-        </span>
-      )}
       <button style={{ padding: '3px 9px' }} title="缩小界面字号" onClick={() => p.onFont(-1)}>
         A−
       </button>
@@ -504,11 +490,6 @@ export default function Toolbar(p: Props) {
       >
         {p.theme === 'light' ? '☀' : '☾'}
       </button>
-      {p.status?.message && (
-        <span className="status" title={p.status.message}>
-          {p.status.message}
-        </span>
-      )}
       <span className="badge">
         {p.filtered.length} / {p.docs.length}
       </span>

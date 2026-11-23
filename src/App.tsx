@@ -91,7 +91,9 @@ import BatchEdit, { type BatchOp } from './components/BatchEdit'
 import Settings from './components/Settings'
 import SetupGuide from './components/SetupGuide'
 import Splitter from './components/Splitter'
+import StatusBar from './components/StatusBar'
 import Toolbar from './components/Toolbar'
+import { updateIdleDelayMs } from './lib/updateText'
 import { extractIds } from './lib/pdfmeta'
 import { buildTree, byName } from './lib/tree'
 import { docForRef, docForUrl, idIndex } from './lib/refly'
@@ -142,6 +144,8 @@ export default function App() {
   const jumpNonce = useRef(0)
   const [err, setErr] = useState<string | null>(null)
   const [upd, setUpd] = useState<UpdateState | null>(null)
+  /** Only "已是最新版本" retires on its own; see lib/updateText.ts. */
+  const updateIdleTimer = useRef<number | null>(null)
   // What the middle of the window is.  Six separate pieces of state used to
   // decide that between them, and the one that was non-null won, which meant
   // every new screen had to be slotted into a chain of ternaries and given a
@@ -410,8 +414,22 @@ export default function App() {
     // Every preference write routes through writeConfig, which cannot reach
     // the error banner by itself.  Hand it the setter once, here.
     setConfigWriteReporter(setErr)
-    const offUpd = window.api.onUpdateState(setUpd)
+    const offUpd = window.api.onUpdateState((s) => {
+      setUpd(s)
+      if (updateIdleTimer.current !== null) {
+        window.clearTimeout(updateIdleTimer.current)
+        updateIdleTimer.current = null
+      }
+      const delay = updateIdleDelayMs(s.phase)
+      if (delay !== null) {
+        updateIdleTimer.current = window.setTimeout(() => {
+          updateIdleTimer.current = null
+          setUpd(null)
+        }, delay)
+      }
+    })
     return () => {
+      if (updateIdleTimer.current !== null) window.clearTimeout(updateIdleTimer.current)
       setConfigWriteReporter(null)
       offUpd()
     }
@@ -2034,7 +2052,6 @@ export default function App() {
         searchRef={searchRef}
         busy={busy}
         onSync={syncAndFetchPdfs}
-        status={status}
         upd={upd}
         onSettings={() => setSettings(true)}
         canRead={!!selected?.localPdf}
@@ -2103,6 +2120,7 @@ export default function App() {
         theme={theme}
         onTheme={toggleTheme}
       />
+      <StatusBar upd={upd} status={status} />
 
       {err && (
         <div className="err">

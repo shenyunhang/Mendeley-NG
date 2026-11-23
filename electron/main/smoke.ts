@@ -508,8 +508,11 @@ export async function runSmoke() {
       '(async()=>{const wait=(m)=>new Promise(r=>setTimeout(r,m));'
       + 'let msg=null;'
       + 'for(let i=0;i<60;i++){'
-      + 'const s=document.querySelector(".toolbar .status");'
-      + 'if(s&&/^(增量同步|同步完成)/.test(s.textContent||"")){msg=s.textContent;break}'
+      // Status prose lives on its own row now; the updater may occupy the
+      // first .status-line, so find the sync line rather than taking the first.
+      + 'const s=[...document.querySelectorAll(".status-line")]'
+      + '.find(e=>/^(增量同步|同步完成)/.test(e.textContent||""));'
+      + 'if(s){msg=s.textContent;break}'
       + 'await wait(500)}'
       + 'return JSON.stringify({msg:msg,err:!!document.querySelector(".err"),'
       + 'token:await window.api.hasToken(),'

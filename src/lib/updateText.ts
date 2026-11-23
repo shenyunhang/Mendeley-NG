@@ -1,4 +1,5 @@
 import type { UpdateState } from '../../shared/types'
+import { UPDATE_NOT_AVAILABLE_VISIBLE_MS } from './timing'
 
 /**
  * The one place that turns an UpdateState into the line of Chinese the reader
@@ -53,4 +54,15 @@ export function updateLine(
 ): string | null {
   if (!upd) return null
   return UPDATE_LINE[upd.phase](upd, current)
+}
+
+/**
+ * Which update lines retire on their own.  Only the answer to a manual
+ * "check for updates" press is prose with nothing left to do; a download, an
+ * error or an installer waiting to be run has to stay until the reader acts.
+ * A named rule rather than a condition buried in an effect, so the phases
+ * that must persist are testable.
+ */
+export function updateIdleDelayMs(phase: UpdatePhase | undefined): number | null {
+  return phase === 'not-available' ? UPDATE_NOT_AVAILABLE_VISIBLE_MS : null
 }

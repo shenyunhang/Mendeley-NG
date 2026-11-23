@@ -225,7 +225,7 @@ src/
   lib/configWrite.ts    渲染层所有配置写入的统一入口
   lib/batch.ts          批量动作的进度节流与失败名单，不碰 React
   styles.css            样式唯一入口，只有一串按原顺序排列的 @import
-  styles/               从原单文件逐字切出的十三个分片，规则顺序不可重排
+  styles/               从原单文件逐字切出的十四个分片，规则顺序不可重排
 shared/                  三端共享：类型、规则常量、原子写、安全策略、索引规则
                          indexedFileRules.ts：两套索引共用的文件判定、片段与进度
                          fulltextRules.ts：全文表的形状、偏移、页码与 worker 故障
@@ -760,6 +760,18 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   第二个 `<input>`、也不是浮层卡片。三者分别会：多一个 gap 把字号/主题挤出一行、
   打穿冒烟里 `document.querySelector(".toolbar input")` 的唯一性假设、或给
   `overlayStack.ts` 的优先级和 `overlay-stack.test.ts` 的 16 种组合再添一层。
+- **同步与更新的文字不进工具栏**。`Toolbar` 是 `flex-wrap: nowrap` 的一行，
+  右端字号/主题按钮必须够得着；以前两条 `.status` 是唯一能缩的子元素，
+  `max-width: 44%` + 省略号让「已是最新版本」「增量同步：…共 5691 条文献」
+  互相抢宽度、两条都只剩半句，且更新条的 `title` 还错写成「当前版本 x」。
+  现在 `StatusBar.tsx` 在工具栏**下面**独占一行，`statusbar.css` 只有
+  `white-space: normal` + `overflow-wrap: anywhere`，没有 `nowrap` / `text-overflow`
+  / 固定高度；两条消息各占一行，全文永远可见。冒烟的
+  `querySelector(".toolbar .status")` 已改成遍历 `.status-line`。
+- 「已是最新版本」是手动点检查更新后的回答，不该挂一整场：`updateText.ts`
+  的 `updateIdleDelayMs()` 只对 `not-available` 返回
+  `UPDATE_NOT_AVAILABLE_VISIBLE_MS`，`App.tsx` 据此起定时器并在卸载或下一次
+  状态推送时清掉；下载中/已就绪/报错必须留着等人处理。
 - `body` 就是已有的全文视图：选它切 `view.kind === 'fulltext'` 并把 `query` 单向复制成
   `ftQuery`；「全文」按钮也反向把 `scope` 设成 `body`，两处不能各说各话。
   清空搜索时把 `body` 复位成 `all`，别让下拉写着「PDF 正文」而中间是文献表。

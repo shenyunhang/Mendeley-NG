@@ -45,6 +45,10 @@ export const READING_POSITION_PERSIST_DEBOUNCE_MS = 600
 /** Quiet pause after launch before an unasked-for update check. */
 export const STARTUP_UPDATE_CHECK_DELAY_MS = 4000
 
+/** "已是最新版本" answers a press of the button; it should not sit in the
+ *  status row for the rest of the session after being read. */
+export const UPDATE_NOT_AVAILABLE_VISIBLE_MS = 6000
+
 /** A clean batch result: long enough to read, short enough not to nag. */
 export const BATCH_CLEAN_MESSAGE_VISIBLE_MS = 2500
 

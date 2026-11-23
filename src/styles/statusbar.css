@@ -1,0 +1,30 @@
+/* ---------- status bar ---------- */
+/* Sync and updater prose lives below the toolbar, not inside it.  No nowrap,
+   no ellipsis and no fixed height: the whole sentence is the point of this
+   row, and it wraps to as many lines as it needs. */
+.status-bar {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.status-line {
+  line-height: 1.4;
+  color: var(--fg-dim);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.status-line + .status-line {
+  margin-top: 2px;
+}
+
+.status-line.update {
+  color: var(--accent);
+}
+
+.status-line.err {
+  color: var(--err);
+}

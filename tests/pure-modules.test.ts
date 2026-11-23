@@ -13,7 +13,8 @@ import {
 } from '../src/lib/export'
 import { parseBibtex, parseRis, safeType } from '../src/lib/importText'
 import { DOC_TYPES, DOC_TYPE_LABELS } from '../src/lib/doctypes'
-import { updateLine } from '../src/lib/updateText'
+import { updateIdleDelayMs, updateLine } from '../src/lib/updateText'
+import { UPDATE_NOT_AVAILABLE_VISIBLE_MS } from '../src/lib/timing'
 
 /**
  * Pure-Node coverage for four modules that carry real rules but were only
@@ -250,5 +251,16 @@ describe('updateText.ts: one wording for every updater phase', () => {
       expect(line === null || typeof line === 'string', phase).toBe(true)
       if (phase !== 'idle') expect(line, phase).not.toBe('')
     }
+  })
+
+  it('only the "already newest" answer retires on its own', () => {
+    expect(updateIdleDelayMs('not-available')).toBe(UPDATE_NOT_AVAILABLE_VISIBLE_MS)
+    expect(UPDATE_NOT_AVAILABLE_VISIBLE_MS).toBeGreaterThan(0)
+    for (const phase of [
+      'idle', 'checking', 'available', 'downloading', 'downloaded', 'error', 'unsupported'
+    ] as UpdateState['phase'][]) {
+      expect(updateIdleDelayMs(phase), phase).toBeNull()
+    }
+    expect(updateIdleDelayMs(undefined)).toBeNull()
   })
 })

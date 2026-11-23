@@ -147,12 +147,7 @@
   padding: 3px 2px;
   max-width: 110px;
 }
-.toolbar .status {
-  font-size: 0.8rem;
-  color: var(--fg-dim);
-  max-width: 44%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* Sync and updater prose is no longer on the toolbar: it has its own row in
+   statusbar.css.  Keeping a `.status` rule here would silently reintroduce
+   the ellipsis that made the end of every sync message unreadable. */
 

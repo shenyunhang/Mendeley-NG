@@ -270,6 +270,7 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 主题 | 深 / 浅两色，☾ / ☀ 切换，会记住；原生滚动条、表单与窗口控制按钮也跟着变 |
 | 设置 | 主题、字号、PDF 目录、命名模板、引文样式、全文索引页数集中在一处 |
 | 工具栏 | 恒为一行，按钮不挤不折行；不常用的命令收在「更多」里 |
+| 状态行 | 同步结果和更新提示排在工具栏下面独占一行，整句换行显示、不截断；「已是最新版本」读过后自动收起 |
 | 图标 | Mendeley 官方图形标记（三个圆点 + 两个上瓣 + 中央圆孔），换成 NG 的紫→青渐变；`npm run icon` 从 `scripts/make-icon.mjs` 里的一份多边形环表生成 SVG / ICO / 两种 PNG |
 
 三处值得单独说的设计取舍：
@@ -305,7 +306,7 @@ src/
   App.tsx                  组装层：把 hooks 解构出来排进 JSX
   global.d.ts              唯一的 IPC 契约 Api
   window.d.ts              Window.api 的 ambient 声明（与 DOM 隔离）
-  components/              视图组件（PdfViewer.tsx 是阅读器、TitleBar.tsx 是标题条）
+  components/              视图组件（PdfViewer.tsx 是阅读器、TitleBar.tsx 是标题条、StatusBar.tsx 是状态行）
   lib/hooks/               React 状态簇，按「谁跟谁一起变」切
   lib/                     与 React 无关的纯规则：PDF 几何与文本、导入导出、
                            列与三栏、检索代次、引文、匹配、树、具名延时与批量预算
