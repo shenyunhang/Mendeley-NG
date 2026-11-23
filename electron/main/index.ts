@@ -12,6 +12,7 @@ import { app, BrowserWindow, net, protocol } from 'electron'
 import { initUpdater, type UpdateState } from './updater'
 import { bringUp, wantsSingleInstance } from './instance'
 import { createWindow, getWin } from './window'
+import { installAppMenu } from './menu'
 import { initFt } from './ftops'
 import { registerIpc, setDemoMode } from './ipc'
 import { runDemo } from './demo'
@@ -51,6 +52,7 @@ app.on('second-instance', () => {
 
 app.whenReady().then(async () => {
   if (!alone) return
+  installAppMenu()
   // Serve local PDFs through our own scheme so webSecurity stays on.  The
   // scheme is not a second file API: only the library's own PDFs may be
   // fetched, so a renderer that somehow learned an arbitrary absolute path

@@ -266,7 +266,8 @@ error 1010，`/oauth/token` 也一样。把响应里的 `access_token` / `refres
 | 功能 | 说明 |
 | --- | --- |
 | 字号 | A−/A+，或 Ctrl+− / Ctrl+=。整站 rem，一个旋钮全跟着变 |
-| 主题 | 深 / 浅两色，☾ / ☀ 切换，会记住；原生滚动条与表单也跟着变 |
+| 标题栏 | Windows 上换成与应用同色的一条 34px 标题条：渐变图标、应用名、「本地优先」标记；最小化/最大化/关闭仍是系统按钮，跟着主题变色。白底英文菜单已去掉，命令都在下面一行工具栏里 |
+| 主题 | 深 / 浅两色，☾ / ☀ 切换，会记住；原生滚动条、表单与窗口控制按钮也跟着变 |
 | 设置 | 主题、字号、PDF 目录、命名模板、引文样式、全文索引页数集中在一处 |
 | 工具栏 | 恒为一行，按钮不挤不折行；不常用的命令收在「更多」里 |
 | 图标 | Mendeley 官方图形标记（三个圆点 + 两个上瓣 + 中央圆孔），换成 NG 的紫→青渐变；`npm run icon` 从 `scripts/make-icon.mjs` 里的一份多边形环表生成 SVG / ICO / 两种 PNG |
@@ -295,6 +296,7 @@ electron/main/            主进程：IPC、本地库、全文索引、自更新
   refsindex.ts            参考文献索引（mtime+size 增量、checkpoint、prune）
   auth.ts / lookup.ts     OAuth 窗口、Crossref / arXiv 查元数据
   window.ts / updater.ts / instance.ts  窗口记忆、检查更新、单实例锁
+  menu.ts                隐藏的中文角色菜单，保住编辑与开发者工具快捷键
   pdfindex.ts / pdfname.ts  "作者 - 年份 - 标题.pdf" 匹配、命名模板
   smoke.ts / perf.ts / demo.ts  开发期自检、性能测量、虚构库截图
   smoke-*.ts             从冒烟入口抽出的纯断言块与共享类型
@@ -303,7 +305,7 @@ src/
   App.tsx                  组装层：把 hooks 解构出来排进 JSX
   global.d.ts              唯一的 IPC 契约 Api
   window.d.ts              Window.api 的 ambient 声明（与 DOM 隔离）
-  components/              视图组件（PdfViewer.tsx 是阅读器）
+  components/              视图组件（PdfViewer.tsx 是阅读器、TitleBar.tsx 是标题条）
   lib/hooks/               React 状态簇，按「谁跟谁一起变」切
   lib/                     与 React 无关的纯规则：PDF 几何与文本、导入导出、
                            列与三栏、检索代次、引文、匹配、树、具名延时与批量预算
@@ -315,6 +317,7 @@ shared/                    三端共享：类型、规则常量、原子写、�
   pathPolicy.ts            协议白名单、导出路径、外链与配置输入的校验规则
   indexedFileRules.ts      两套 PDF 索引共用的文件判定、片段切割与进度节流
   fulltextRules.ts         全文索引表的形状、偏移定位、页码与 worker 故障判定
+  titleBarTheme.ts         标题条高度与两套主题色，与 CSS 变量逐值对齐
 tests/                     Vitest 单测：shared 规则 / 渲染层纯函数 / 安全边界 / 重构差分
 scripts/
   _shared.mjs              脚本共用：仓库根、Electron 路径、环境清理、UA

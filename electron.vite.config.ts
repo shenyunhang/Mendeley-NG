@@ -32,6 +32,10 @@ export default defineConfig({
     // they live in a generated public dir (scripts/copy-pdf-assets.mjs) so the
     // dev server and the built renderer resolve the same relative paths.
     publicDir: resolve(__dirname, '.pdfjs-assets'),
+    // The title strip's logo lives in assets/, one level above the renderer
+    // root.  Whitelisting the repository keeps the dev server from rejecting
+    // that ?url import as a path outside the Vite root.
+    server: { fs: { allow: [resolve(__dirname)] } },
     resolve: { alias: { '@shared': resolve(__dirname, 'shared') } },
     plugins: [react()],
     build: {

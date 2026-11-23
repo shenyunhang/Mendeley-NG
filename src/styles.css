@@ -1,4 +1,5 @@
 @import './styles/base.css';
+@import './styles/titlebar.css';
 @import './styles/layout.css';
 @import './styles/settings.css';
 @import './styles/panes.css';

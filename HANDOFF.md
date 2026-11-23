@@ -195,7 +195,8 @@ npm run demo               # 造虚构库，重生成 README 的四张截图
 ```
 electron/main/
   index.ts              入口：单实例、自定义协议、这次是哪一种启动
-  window.ts             窗口创建与 bounds 记忆、往渲染器推状态
+  window.ts             窗口创建、隐藏的系统标题栏与 bounds 记忆、往渲染器推状态
+  menu.ts               隐藏的中文角色菜单，保住复制/粘贴/开发者工具的快捷键
   instance.ts           单实例锁与第二次点击
   library.ts            同步（增量水印、PDF 挂载、缓存合并）
   mendeley.ts           Mendeley REST 客户端
@@ -212,7 +213,7 @@ src/
   App.tsx               组装层：把 hooks 解构出来排进 JSX
   global.d.ts           唯一的 IPC 契约 Api
   window.d.ts           Window.api 的 ambient 声明（与 DOM 隔离）
-  components/           视图组件，PdfViewer.tsx 是阅读器
+  components/           视图组件，PdfViewer.tsx 是阅读器、TitleBar.tsx 是标题条
   lib/hooks/            React 状态簇，按「谁跟谁一起变」切
   lib/hooks/useOverlayStack.ts  设置面板与三张工具条卡片的状态 + 一次 Esc 关一层
   lib/searchScope.ts    唯一的检索归一化、范围枚举与篇内查找词长
@@ -224,12 +225,13 @@ src/
   lib/configWrite.ts    渲染层所有配置写入的统一入口
   lib/batch.ts          批量动作的进度节流与失败名单，不碰 React
   styles.css            样式唯一入口，只有一串按原顺序排列的 @import
-  styles/               从原单文件逐字切出的十二个分片，规则顺序不可重排
+  styles/               从原单文件逐字切出的十三个分片，规则顺序不可重排
 shared/                  三端共享：类型、规则常量、原子写、安全策略、索引规则
                          indexedFileRules.ts：两套索引共用的文件判定、片段与进度
                          fulltextRules.ts：全文表的形状、偏移、页码与 worker 故障
                          librarySync.ts：把云端回答变成同步提议的三条纯规则
                          pdfFontOptions.ts：pdf.js 字体资源的目录名与两种取法
+                         titleBarTheme.ts：标题条高度与两套主题色（CSS 变量的镜像）
 tests/                   Vitest 单测：shared / renderer-pure / security / refactor-regression
                          main-ipc-system / main-ipc-files（Electron 用替身，捕获 handler）
                          main-library / main-marks（同步 pull、标注与阅读位置的接线）
@@ -607,6 +609,17 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - 颜色写在 inline style 里优先级高于 class，光改 CSS 变量没用，必须删掉 inline
   那行让 `[data-theme=light]` 去翻。
 - 官方标记是别人的商标，公开分发留意使用范围。
+- 窗口顶栏不再用系统那条白底英文菜单：Windows 上 `titleBarStyle: 'hidden'` +
+  `titleBarOverlay` 只留系统画的最小化/最大化/关闭，React 的 `TitleBar.tsx`
+  画同高的 34px 拖拽条（图标、名字、`本地优先` 标记），右侧 138px 留给系统按钮。
+  按钮颜色不是 DOM，CSS 变量管不到：`shared/titleBarTheme.ts` 是唯一一份色值，
+  建窗时和 `config:set` 收到 `theme` 时各刷一次 `setTitleBarOverlay` 与
+  `setBackgroundColor`；`tests/title-bar-theme.test.ts` 断言它与
+  `base.css` 的 `--bg-2` / `--fg` 逐值一致。非 Windows 由 preload 的
+  `html.custom-title-bar` class 把这条 DOM 隐藏掉，仍用系统标题栏。
+- 默认英文菜单不能直接 `setApplicationMenu(null)`：复制、粘贴、全选、重载、
+  开发者工具这些 role 快捷键挂在应用菜单上。`electron/main/menu.ts` 换成中文
+  role 菜单，`autoHideMenuBar: true` 收起它；按 Alt 才会短暂出现。
 
 ### 8.6 窗口、更新、打包与分发
 

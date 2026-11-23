@@ -216,6 +216,34 @@ const api: Api = {
     ipcRenderer.invoke('pdf:openExternal', p) as Promise<{ ok: boolean; error?: string }>
 }
 
+/**
+ * The custom title strip is only drawn where the native frame was actually
+ * hidden.  On other platforms a second strip would sit underneath a real
+ * title bar, so the CSS keeps it hidden unless this class is present.
+ * A DOM class rather than a new Api method: this is a static fact about the
+ * platform, not a capability the renderer should be able to call.
+ */
+if (process.platform === 'win32') {
+  // tsconfig.node.json has no DOM library, so the preload's document is named
+  // structurally rather than pulled in as a global type.  DOMContentLoaded is
+  // the first point at which documentElement is guaranteed to exist.
+  const dom = globalThis as unknown as {
+    document?: {
+      readyState?: string
+      documentElement?: { classList?: { add(name: string): void } }
+      addEventListener?: (
+        type: string,
+        fn: () => void,
+        options?: { once: boolean }
+      ) => void
+    }
+  }
+  const mark = () => dom.document?.documentElement?.classList?.add('custom-title-bar')
+  const d = dom.document
+  if (d?.readyState === 'loading') d.addEventListener?.('DOMContentLoaded', mark, { once: true })
+  else mark()
+}
+
 contextBridge.exposeInMainWorld('api', api)
 
 /** The same interface, so anything importing the preload gets the contract

@@ -31,6 +31,7 @@ import {
   queryMatches
 } from './lib/searchMatch'
 import { createViewGeneration } from './lib/viewGeneration'
+import TitleBar from './components/TitleBar'
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
 import TrashedDocPanel from './components/TrashedDocPanel'
@@ -2028,6 +2029,7 @@ export default function App() {
       }}
       onDrop={onDrop}
     >
+      <TitleBar />
       <Toolbar
         searchRef={searchRef}
         busy={busy}

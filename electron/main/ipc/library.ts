@@ -3,7 +3,7 @@ import { findToken } from '../mendeley'
 import { sync } from '../library'
 import { loadConfig, loadLibrary, saveConfig } from '../store'
 import { setFullTextPages } from '../fulltext'
-import { status } from '../window'
+import { applyTitleBarOverlay, status } from '../window'
 import { safeConfigPatch } from '../../../shared/pathPolicy'
 import type { AppConfig } from '../../../shared/types'
 
@@ -61,6 +61,9 @@ export function registerLibraryIpc() {
     // has to take effect the moment it is written, or the index on disk keeps
     // describing a corpus nobody is asking about any more.
     if (typeof patch.ftPages === 'number') setFullTextPages(patch.ftPages)
+    // The window controls are OS chrome, not DOM: the CSS theme switch in the
+    // renderer cannot recolour them, so the same config write repaints them.
+    if (patch.theme) applyTitleBarOverlay(patch.theme)
     return loadConfig()
   })
 }

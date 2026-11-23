@@ -1,0 +1,61 @@
+/* ---------- custom title bar (Windows) ---------- */
+/* The native frame is hidden and Chromium draws only the min/max/close
+   controls on top of the page.  The strip is hidden on other platforms, where
+   a real title bar is still present -- see the preload's html class. */
+.title-bar {
+  display: none;
+}
+
+html.custom-title-bar .title-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  /* Fixed, not rem: this band has to line up with the OS-drawn controls,
+     whose height does not follow the reader's font-size knob. */
+  height: 34px;
+  flex: 0 0 34px;
+  padding: 0 10px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+html.custom-title-bar .title-bar-mark {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: 0 0 auto;
+}
+
+html.custom-title-bar .title-bar-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+}
+
+html.custom-title-bar .title-bar-sep {
+  width: 1px;
+  height: 0.85rem;
+  flex: 0 0 auto;
+  background: var(--border);
+}
+
+html.custom-title-bar .title-bar-tag {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  line-height: 1.15rem;
+  padding: 0 0.45rem;
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+html.custom-title-bar .title-bar-spacer {
+  flex: 1 1 auto;
+}
+
+/* Reserved for the three native controls; nothing of ours may sit there. */
+html.custom-title-bar .title-bar-controls {
+  flex: 0 0 138px;
+}

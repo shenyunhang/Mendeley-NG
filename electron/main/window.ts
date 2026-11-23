@@ -1,6 +1,7 @@
 import { BrowserWindow, app, screen } from 'electron'
 import path from 'node:path'
 import { loadConfig, saveConfig } from './store'
+import { titleBarColorsFor } from '../../shared/titleBarTheme'
 import type { SyncStatus } from '../../shared/types'
 
 /**
@@ -84,8 +85,30 @@ export function attachWindowMemory(w: BrowserWindow) {
   w.on('close', () => rememberBounds(w))
 }
 
+/**
+ * Repaint the OS-drawn window controls when the reader switches theme.
+ * Chromium owns those glyphs, so a CSS change alone would leave white buttons
+ * on a dark strip; the background colour is repainted too, otherwise a fresh
+ * window flashes the old theme before the first frame.  Non-Windows builds
+ * keep their own title bar and have no overlay to update.
+ */
+export function applyTitleBarOverlay(theme?: 'dark' | 'light') {
+  if (process.platform !== 'win32') return
+  const w = getWin()
+  if (!w) return
+  const c = titleBarColorsFor(theme)
+  try {
+    w.setTitleBarOverlay({ color: c.color, symbolColor: c.symbolColor, height: c.height })
+    w.setBackgroundColor(c.color)
+  } catch {
+    /* an Electron build without overlay support keeps the default chrome */
+  }
+}
+
 export function createWindow() {
   const bounds = savedBounds()
+  const chrome = titleBarColorsFor(loadConfig().theme)
+  const customChrome = process.platform === 'win32'
   const w = new BrowserWindow({
     /**
      * The taskbar and the title bar take this.  `build/icon.ico` is what goes
@@ -100,7 +123,22 @@ export function createWindow() {
     minHeight: 650,
     // no zoomFactor and no DPI overrides on purpose: Chromium already renders
     // at the system scale factor, which is the whole point of this rewrite
-    backgroundColor: '#1e1e1e',
+    backgroundColor: chrome.color,
+    // The default Electron menu is an English File/Edit/View bar drawn on a
+    // white Windows title bar.  Hiding the frame and drawing our own strip
+    // keeps the whole window in the reader's theme; the menu itself is kept
+    // (Chinese, role-based) but auto-hidden so its shortcuts still work.
+    ...(customChrome
+      ? {
+          titleBarStyle: 'hidden' as const,
+          titleBarOverlay: {
+            color: chrome.color,
+            symbolColor: chrome.symbolColor,
+            height: chrome.height
+          }
+        }
+      : {}),
+    autoHideMenuBar: true,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
