@@ -3,27 +3,39 @@
    rewriting this app rather than patching 1.19.8. */
 
 :root {
-  --bg: #1a1a1a;
+  /* A cool, slightly layered palette: the panes are no longer three copies
+     of the same grey.  --bg-2 and --fg are deliberately left alone: the
+     Windows title-bar overlay is OS chrome and its colours live in
+     shared/titleBarTheme.ts, mirrored against exactly these two values. */
+  --bg: #17181c;
   --bg-2: #212121;
-  --bg-3: #2a2a2a;
-  --border: #3a3a3a;
+  --bg-3: #2b2e34;
+  --border: #363a42;
   --fg: #e8e8e8;
   --fg-dim: #a0a0a0;
-  --accent: #4a9eff;
+  --accent: #5aa4ff;
   --accent-dim: #2d5f8f;
+  /* shared polish tokens: one radius scale, soft selection washes, focus
+     rings, floating-panel shadow and a single interaction duration */
+  --radius: 6px;
+  --radius-sm: 4px;
+  --accent-soft: rgba(90, 164, 255, 0.14);
+  --accent-ring: rgba(90, 164, 255, 0.32);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --t: 140ms;
   --warn: #d4a24a;
   --ok: #5cb85c;
   /* named slots for what used to be literals: a second theme only works if
      every colour is a variable */
-  --row-line: #2c2c2c;
-  --hover: #262626;
-  --btn-hover: #353535;
+  --row-line: #2c2f35;
+  --hover: #24272c;
+  --btn-hover: #34383f;
   --mini-hover: #3d3d3d;
   --muted: #555;
   --multi: #2b3a4d;
   --pdf-bg: #151515;
   --pdf-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
-  --panel-head: #1e1e1e;
+  --panel-head: #1c1e22;
   --panel: #1b1f27;
   --cand-hover: #262b34;
   --msg-bg: #1c2430;
@@ -36,7 +48,6 @@
   --star-on: #ffd43b;
   --star-off: #4d4d4d;
   --row-h: 2rem;
-  /* one search result: a title, the authors, and up to two matched fields */
   /* one search result: a title (up to two lines), the authors and two
      matched fields.  Sized for the tallest honest card so the row never has
      to clip the last line without saying so. */
@@ -48,19 +59,22 @@
 }
 
 :root[data-theme='light'] {
-  --bg: #f4f5f7;
+  --bg: #f5f6f9;
   --bg-2: #ffffff;
-  --bg-3: #eceff3;
-  --border: #d6dae0;
+  --bg-3: #eceff4;
+  --border: #d9dee6;
   --fg: #1c1e21;
   --fg-dim: #666b72;
   --accent: #0b62d6;
   --accent-dim: #c9ddf7;
+  --accent-soft: rgba(11, 98, 214, 0.10);
+  --accent-ring: rgba(11, 98, 214, 0.28);
+  --shadow-pop: 0 12px 32px rgba(24, 38, 60, 0.18);
   --warn: #a0641a;
   --ok: #2e7d32;
-  --row-line: #e4e7ec;
-  --hover: #e8ebf0;
-  --btn-hover: #e2e5ea;
+  --row-line: #e6e9ef;
+  --hover: #eef1f6;
+  --btn-hover: #e4e8ef;
   --mini-hover: #dfe3e9;
   --muted: #b6bcc4;
   --multi: #cfe2f8;
@@ -101,19 +115,22 @@ button {
   background: var(--bg-3);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   padding: 5px 11px;
   cursor: pointer;
+  transition: background-color var(--t) ease, border-color var(--t) ease,
+    box-shadow var(--t) ease, color var(--t) ease;
 }
 button:hover:not(:disabled) {
   background: var(--btn-hover);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 button:disabled {
   opacity: 0.45;
   cursor: default;
 }
 button.primary {
-  background: var(--accent-dim);
+  background: var(--accent-soft);
   border-color: var(--accent);
 }
 
@@ -125,11 +142,52 @@ textarea {
   background: var(--bg-3);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   padding: 5px 8px;
+  transition: border-color var(--t) ease, box-shadow var(--t) ease;
 }
+/* A ring instead of a hard outline: the old 1px accent line made every
+   focused field look like a validation error.  box-shadow adds no size, so
+   the toolbar and the fixed-height rows keep their measured geometry. */
 input:focus,
-textarea:focus {
-  outline: 1px solid var(--accent);
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+/* Thin, quiet scrollbars that still brighten under the pointer. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg-dim) 30%, transparent);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--fg-dim) 50%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
 

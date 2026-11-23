@@ -11,12 +11,14 @@
   cursor: pointer;
   font-size: 0.867rem;
   white-space: nowrap;
+  transition: background-color var(--t) ease, box-shadow var(--t) ease;
 }
 .folder-row:hover {
   background: var(--bg-3);
 }
 .folder-row.sel {
-  background: var(--accent-dim);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .folder-row .name {
   overflow: hidden;

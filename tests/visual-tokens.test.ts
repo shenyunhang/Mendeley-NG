@@ -1,0 +1,103 @@
+import { describe, expect, it } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
+
+/**
+ * The polish pass is deliberately token-driven: one radius scale, one soft
+ * selection wash, one focus ring and one floating-panel shadow, defined for
+ * both palettes.  These guards stop a future edit from reintroducing the
+ * saturated blue selection or a hard-coded shadow in one theme only.
+ */
+function repoRoot(): string {
+  let dir = process.cwd()
+  for (let i = 0; i < 6; i++) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) return dir
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return process.cwd()
+}
+
+const ROOT = repoRoot()
+const read = (p: string): string =>
+  fs.readFileSync(path.join(ROOT, p), 'utf-8').replace(/\r\n/g, '\n')
+
+const dark = () => {
+  const css = read('src/styles/base.css')
+  return css.slice(0, css.indexOf(":root[data-theme='light']"))
+}
+const light = () => {
+  const css = read('src/styles/base.css')
+  return css.slice(css.indexOf(":root[data-theme='light']"))
+}
+
+describe('both palettes carry the same polish tokens', () => {
+  for (const token of ['--radius', '--radius-sm', '--accent-soft', '--accent-ring', '--shadow-pop', '--t']) {
+    it(`${token} is defined in :root`, () => expect(dark()).toContain(`${token}:`))
+  }
+
+  for (const token of ['--accent-soft', '--accent-ring', '--shadow-pop']) {
+    it(`${token} is redefined for the light theme`, () => expect(light()).toContain(`${token}:`))
+  }
+
+  it('the OS title bar colours stay mirrored with shared/titleBarTheme.ts', () => {
+    expect(dark()).toContain('--bg-2: #212121;')
+    expect(dark()).toContain('--fg: #e8e8e8;')
+    expect(light()).toContain('--bg-2: #ffffff;')
+    expect(light()).toContain('--fg: #1c1e21;')
+  })
+
+  it('the two palettes are genuinely different', () => {
+    expect(dark()).toContain('--row-line: #2c2f35;')
+    expect(light()).toContain('--row-line: #e6e9ef;')
+  })
+})
+
+describe('selection stays a soft wash with an edge, not a filled blue row', () => {
+  const selected: [string, string][] = [
+    ['src/styles/overlays.css', '.row.sel'],
+    ['src/styles/results.css', '.res-row.sel'],
+    ['src/styles/tree.css', '.folder-row.sel']
+  ]
+  for (const [file, selector] of selected) {
+    it(`${selector} uses the soft token`, () => {
+      const css = read(file)
+      const block = css.slice(css.indexOf(selector))
+      expect(block.slice(0, block.indexOf('}'))).toContain('var(--accent-soft)')
+      expect(block.slice(0, block.indexOf('}'))).toContain('inset 2px 0 0 var(--accent)')
+    })
+  }
+
+  it('the active paper tab uses a top edge', () => {
+    const css = read('src/styles/panes.css')
+    expect(css).toContain('inset 0 2px 0 var(--accent)')
+  })
+
+  it('the primary command is emphasised without changing geometry', () => {
+    const css = read('src/styles/layout.css')
+    const block = css.slice(css.indexOf('.toolbar > .reading-button'))
+    expect(block.slice(0, block.indexOf('}'))).toContain('var(--accent-soft)')
+    // the smoke test measures this button; a polish pass must not resize it
+    expect(block.slice(0, block.indexOf('}'))).toContain('padding: 0.45rem 1.2rem;')
+  })
+})
+
+describe('interaction details', () => {
+  it('focus uses a ring and motion can be turned off', () => {
+    const css = read('src/styles/base.css')
+    expect(css).toContain('box-shadow: 0 0 0 2px var(--accent-ring)')
+    expect(css).toContain('@media (prefers-reduced-motion: reduce)')
+  })
+
+  it('floating panels share one shadow', () => {
+    for (const file of [
+      'src/styles/layout.css',
+      'src/styles/overlays.css',
+      'src/styles/settings.css',
+      'src/styles/first-run.css'
+    ]) {
+      expect(read(file), file).toContain('box-shadow: var(--shadow-pop)')
+    }
+  })
+})

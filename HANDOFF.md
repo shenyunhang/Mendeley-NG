@@ -319,6 +319,12 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   在 16 px 检验形状，不设彩色底板；`assets/logo.svg` 保持在 4 KiB 以内，否则
   `.about-logo` 会从内联 data URL 变成外链。
 - README 截图只许用 `npm run demo` 生成的四张虚构库图，不许对真实库拍照。
+- 隐藏窗口不主动重绘，`capturePage()` 可能交回上一帧：`demo.ts` 的 `shot()`
+  先等两帧再截图，否则详情面板明明有值、图片里却是一排空输入框。浅色那张还要
+  临时关掉 CSS 过渡——隐藏窗口不会把过渡推进到终点，按钮会留在深色配色，
+  拍出半深半浅的图。这两处只影响截图脚本，产品里的过渡照常保留。
+- 加了过渡的组件改主题色时留意 `--bg-2` / `--fg`：它们是
+  `shared/titleBarTheme.ts` 里系统标题栏按钮颜色的镜像，不能只改 CSS。
 
 ### 测试纪律
 
@@ -335,6 +341,11 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - 回退验证的判据是红点逐条一致、基线连跑多轮；先怀疑机器、再怀疑代码、最后怀疑
   自己的改动，方法是撤掉改动再跑一遍，而不是盯数字猜。
 - 桩打在被测代码的输入侧，不打在被测代码身上；对照的两端必须来自同一个对象。
+- 冒烟里「按年份翻方向」的断言读的是**可见**结果卡的 `.res-year`。`sortValue`
+  把没年份的文献当成 0，升序时它们排在最前；`--res-h` 从 5.2 提到 6.4rem 后
+  一屏卡片变少，整屏都是无年份文献，`yearsShown()` 直接返回空数组，
+  连红两条断言。修法是把列表滚到第一批有年份的卡片再读，判据（真实年份严格
+  升序、首尾年份对调）一个都没放宽。别改成「配置里 dir 翻了就算过」。
 - 写下的诊断动手前要复核一次；文档不写死会变的数字。
 - 冒烟窗口隐藏且 rAF 节流，等待被测对象用 `until` + 上限而不是固定 sleep；
   前提要单独写一条会说话的断言，前提不成立时别静默跳过后续断言。
@@ -615,6 +626,17 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   dasharray；矢量和位图要真的画进 canvas 读回像素比过。
 - 颜色写在 inline style 里优先级高于 class，光改 CSS 变量没用，必须删掉 inline
   那行让 `[data-theme=light]` 去翻。
+- **视觉打磨是令牌驱动的**。`base.css` 的 `:root` 与 `[data-theme=light]` 各自定义
+  `--radius` / `--radius-sm` / `--accent-soft` / `--accent-ring` / `--shadow-pop` / `--t`；
+  选中态（`.row.sel`、`.res-row.sel`、`.folder-row.sel`）从整块 `--accent-dim`
+  蓝底换成半透明 wash + `inset 2px 0 0` 竖条，活动标签用顶部竖条。主命令
+  `toolbar > .reading-button` 用 accent wash 强调，但**padding 一个像素没动**——
+  冒烟量的是按钮几何。`--bg-2` / `--fg` 刻意保持不变，它们是
+  `shared/titleBarTheme.ts` 里系统标题栏按钮颜色的镜像，
+  `tests/title-bar-theme.test.ts` 逐值盯着；改这两个值必须同步改 TS。
+  焦点用 `box-shadow` ring 而非 `outline`，滚动条细化，所有过渡在
+  `prefers-reduced-motion: reduce` 下关掉。`tests/visual-tokens.test.ts` 锁住
+  两套主题都有令牌、浮层共用一份阴影、选中态不再回到饱和蓝。
 - 官方标记是别人的商标，公开分发留意使用范围。
 - 窗口顶栏不再用系统那条白底英文菜单：Windows 上 `titleBarStyle: 'hidden'` +
   `titleBarOverlay` 只留系统画的最小化/最大化/关闭，React 的 `TitleBar.tsx`

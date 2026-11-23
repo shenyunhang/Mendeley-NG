@@ -242,8 +242,8 @@
   padding: 6px 8px;
   background: var(--panel-head);
   border: 1px solid var(--sep);
-  border-radius: 6px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
   font-size: 0.8rem;
   line-height: 1.45;
 }

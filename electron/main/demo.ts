@@ -35,6 +35,11 @@ export async function runDemo() {
 
   const shot = async (name: string) => {
     await new Promise((r) => setTimeout(r, 400))
+    // A hidden window is not repainting on a schedule.  capturePage can hand
+    // back the previous frame, which is how a details pane full of populated
+    // inputs came out as a picture of empty boxes.  Two animation frames force
+    // the paint before the bitmap is taken.
+    await run('(async()=>{await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))})()')
     // The capture comes back at the display's scale factor — 1.5 on the
     // machine these were first taken on — which is twice the pixels a README
     // will ever show.  Back to CSS pixels, so the repo carries what is needed.
@@ -119,7 +124,16 @@ export async function runDemo() {
   // rewriting the config it was given.
   await clickButton('button', '/^返回列表$/')
   await wait(600)
-  await run('(()=>{document.documentElement.dataset.theme="light";return 1})()')
+  // A hidden window does not drive CSS transitions to completion, so every
+  // control that animates its background would still be wearing the dark
+  // palette in the light screenshot.  The run disables transitions only for
+  // this last picture; the app itself keeps them.
+  await run(
+    '(()=>{const s=document.createElement("style");'
+    + 's.textContent="*,*::before,*::after{transition:none!important;animation:none!important}";'
+    + 'document.head.appendChild(s);'
+    + 'document.documentElement.dataset.theme="light";return 1})()'
+  )
   await shot('04-library-light')
 
   log('done')

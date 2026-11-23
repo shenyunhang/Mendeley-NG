@@ -11,10 +11,10 @@
 .modal {
   background: var(--bg-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 14px 16px;
   min-width: 320px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-pop);
 }
 
 .modal-head {
@@ -180,8 +180,8 @@
   overflow: auto;
   background: var(--bg-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
   font-size: 0.8rem;
 }
 .col-picker-head {
@@ -317,9 +317,9 @@
   min-width: 16px;
   text-align: center;
   padding: 0 4px;
-  border-radius: 8px;
-  background: var(--accent-dim);
-  color: var(--fg);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
   font-size: 0.667rem;
   font-weight: 400;
 }
@@ -376,6 +376,7 @@
    every row and there was nothing in the stylesheet to override. */
 .row {
   border-bottom: 1px solid var(--row-line);
+  transition: background-color var(--t) ease, box-shadow var(--t) ease;
 }
 /* A table this long gives no other hint of which row a click will land on. */
 .row:hover {
@@ -385,8 +386,10 @@
   background: var(--multi);
 }
 /* last, so a row that is both selected and part of a multi-selection reads
-   as the one being read rather than as one of the batch */
+   as the one being read rather than as one of the batch.  A soft wash plus a
+   2px edge says "selected" without painting the whole row a saturated blue. */
 .row.sel {
-  background: var(--accent-dim);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 

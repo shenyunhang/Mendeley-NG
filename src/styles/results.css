@@ -18,6 +18,7 @@
      no tooltip.  Every child now owns its own clamp, so an overflow says so
      with an ellipsis and offers the full string on hover. */
   cursor: default;
+  transition: background-color var(--t) ease, box-shadow var(--t) ease;
 }
 .res-row:hover {
   background: var(--hover);
@@ -26,7 +27,8 @@
   background: var(--multi);
 }
 .res-row.sel {
-  background: var(--accent-dim);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .res-head {
   display: flex;
@@ -231,7 +233,7 @@
 .badge {
   font-size: 0.733rem;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: 999px;
   background: var(--bg-3);
   color: var(--fg-dim);
 }

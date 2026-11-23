@@ -1,6 +1,6 @@
 /* ---------- folder tree: nesting and per-row actions ---------- */
 .folder-row.drag {
-  background: var(--accent-dim);
+  background: var(--accent-soft);
   outline: 1px solid var(--accent);
 }
 .folder-row .twisty {

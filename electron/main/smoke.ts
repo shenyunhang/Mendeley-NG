@@ -2327,8 +2327,26 @@ export async function runSmoke() {
   expect('the card is still open for a second press', (await pickSort('year')) === 1, 'year')
   await new Promise((r) => setTimeout(r, 1200))
   const flipped = await sortCfg()
+  // A paper with no year sorts as 0, so in ascending order the undated ones
+  // come first.  Result cards are taller now and a viewport full of undated
+  // papers used to leave yearsShown() with nothing to check.  Scroll to the
+  // first dated card instead of relaxing the assertion: it still has to read
+  // real years in real ascending order.
+  let datedShown = 0
+  for (let i = 0; i < 30 && datedShown < 2; i++) {
+    datedShown = Number(
+      await w.webContents.executeJavaScript(
+        '(()=>{const wrap=document.querySelector(".res-wrap");'
+        + 'if(!wrap)return 0;'
+        + 'const years=document.querySelectorAll(".res-year").length;'
+        + 'if(years>1)return years;'
+        + 'wrap.scrollTop+=wrap.clientHeight;return 0})()'
+      )
+    )
+    if (datedShown < 2) await new Promise((r) => setTimeout(r, 150))
+  }
   const yAsc = await yearsShown()
-  log('years after pressing it again', { flipped, yAsc })
+  log('years after pressing it again', { flipped, datedShown, yAsc })
   expect('pressing the same key again turns it around', monotonic(yAsc, 1), yAsc)
   expect(
     'turning it around really moves the papers',

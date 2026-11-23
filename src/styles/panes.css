@@ -174,12 +174,16 @@ body.resizing {
   max-width: 190px;
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
+  transition: background-color var(--t) ease, border-color var(--t) ease,
+    box-shadow var(--t) ease;
 }
+/* A top edge, like a browser tab, rather than a filled blue chip. */
 .paper-tab.active {
   border-color: var(--accent);
-  background: var(--accent-dim);
+  background: var(--accent-soft);
+  box-shadow: inset 0 2px 0 var(--accent);
 }
 /* A preview tab is italic, VS Code style: the reader can tell at a glance
    which tab the next single click will replace. */
