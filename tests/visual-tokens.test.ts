@@ -83,6 +83,36 @@ describe('selection stays a soft wash with an edge, not a filled blue row', () =
   })
 })
 
+describe('the second pass keeps the same visual language', () => {
+  it('column headers separate themselves from the data', () => {
+    const table = read('src/components/DocTable.tsx')
+    expect(table).toContain("background: 'var(--panel-head)'")
+    expect(table).toContain("boxShadow: sort.key === c.sort ? 'inset 0 -2px 0 var(--accent)'")
+    expect(read('src/styles/table.css')).toContain('.col-head > div:hover')
+  })
+
+  it('labels and pane headers gain hierarchy without new colours', () => {
+    const details = read('src/styles/details.css')
+    expect(details.slice(details.indexOf('.field label'), details.indexOf('.field input')))
+      .toContain('letter-spacing: 0.02em')
+    const panes = read('src/styles/panes.css')
+    expect(panes.slice(panes.indexOf('.pane-head {')).slice(0, 260)).toContain('font-weight: 600')
+    expect(panes).toContain('.pane-head button.primary')
+    expect(panes).toContain('inset 0 -2px 0 var(--accent)')
+  })
+
+  it('full-pane empty states are cards and compact hints stay compact', () => {
+    const results = read('src/styles/results.css')
+    expect(results).toContain('.empty:not([style])')
+    expect(results.slice(results.indexOf('.empty:not([style])')).slice(0, 180))
+      .toContain('var(--radius)')
+  })
+
+  it('the update status line carries the same accent edge', () => {
+    expect(read('src/styles/statusbar.css')).toContain('inset 2px 0 0 var(--accent)')
+  })
+})
+
 describe('interaction details', () => {
   it('focus uses a ring and motion can be turned off', () => {
     const css = read('src/styles/base.css')

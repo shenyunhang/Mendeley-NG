@@ -4,6 +4,13 @@
   overflow: auto;
   min-height: 0;
 }
+/* The header cells carry their layout inline (the grid tracks come from
+   column widths).  Only the hover feedback lives here: the header is a
+   control surface, and a column that reacts to the pointer reads as
+   clickable even before its title tooltip appears. */
+.col-head > div:hover {
+  background: var(--hover);
+}
 .tbl {
   width: 100%;
   border-collapse: collapse;

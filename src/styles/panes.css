@@ -144,12 +144,19 @@ body.resizing {
 .pane-head {
   padding: 6px 10px;
   font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--fg-dim);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+}
+/* The 详情 / PDF switch is a tab, not a pair of ordinary buttons: the active
+   one gets an edge that reads even when the accent wash is very soft. */
+.pane-head button.primary {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 /* Papers opened from a hit or a link each keep a tab. The row is fixed-height

@@ -637,6 +637,13 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   焦点用 `box-shadow` ring 而非 `outline`，滚动条细化，所有过渡在
   `prefers-reduced-motion: reduce` 下关掉。`tests/visual-tokens.test.ts` 锁住
   两套主题都有令牌、浮层共用一份阴影、选中态不再回到饱和蓝。
+- **第二遍打磨只动层级，不动尺寸**。列头从 `--bg-2` 换成更深的
+  `--panel-head`、字距加 `0.02em`、hover 反馈、排序列用 `inset 0 -2px 0`
+  下划线而不是只靠颜色；详情面板字段标签与 `.pane-head` 加字重/字距，
+  「详情 / PDF」的活动按钮补一条底边；更新状态行加 `inset 2px 0 0` 竖条。
+  空状态用 `.empty:not([style])` 变成虚线卡片——列表里那些紧凑提示自己
+  带 inline padding，正好用 `[style]` 做免类名的例外，不必在十几个调用点
+  各加一个 class。全部是颜色 / 字重 / 内阴影，几何一律没碰。
 - 官方标记是别人的商标，公开分发留意使用范围。
 - 窗口顶栏不再用系统那条白底英文菜单：Windows 上 `titleBarStyle: 'hidden'` +
   `titleBarOverlay` 只留系统画的最小化/最大化/关闭，React 的 `TitleBar.tsx`

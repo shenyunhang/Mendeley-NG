@@ -188,6 +188,17 @@
   color: var(--fg-dim);
   font-size: 0.867rem;
   text-align: center;
+  line-height: 1.6;
+}
+/* A full-pane empty message is a quiet card, not a line of grey text lost in
+   the middle of a pane.  The compact in-list hints set their own padding
+   inline to stay chip-sized, so that inline style attribute is the opt-out:
+   no extra class to remember at a dozen call sites. */
+.empty:not([style]) {
+  margin: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
 }
 /* an empty table is a question, not a statement: what is being shown is that
    nothing matched, and the useful part is what to do about it */

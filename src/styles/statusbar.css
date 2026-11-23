@@ -23,6 +23,10 @@
 
 .status-line.update {
   color: var(--accent);
+  /* a thin edge ties the update line to the accent used by the primary
+     command, without turning the whole row into a coloured banner */
+  box-shadow: inset 2px 0 0 var(--accent);
+  padding-left: 8px;
 }
 
 .status-line.err {

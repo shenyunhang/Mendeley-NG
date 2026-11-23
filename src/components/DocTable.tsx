@@ -213,7 +213,8 @@ export default function DocTable({
         style={{
           display: 'grid',
           gridTemplateColumns: COLS,
-          background: 'var(--bg-2)',
+          // slightly deeper than the rows: the header is chrome, not data
+          background: 'var(--panel-head)',
           borderBottom: '1px solid var(--border)',
           flex: '0 0 auto',
           // the header and the rows are two scroll boxes; the one below drives
@@ -246,7 +247,11 @@ export default function DocTable({
               padding: '6px 8px',
               fontSize: '0.8rem',
               fontWeight: 600,
+              letterSpacing: '0.02em',
               color: sort.key === c.sort ? 'var(--accent)' : 'var(--fg-dim)',
+              // the sorted column gets a quiet underline instead of relying
+              // on colour alone to carry the state
+              boxShadow: sort.key === c.sort ? 'inset 0 -2px 0 var(--accent)' : 'none',
               cursor: c.sort ? 'pointer' : 'default',
               userSelect: 'none',
               overflow: 'hidden'
