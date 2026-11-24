@@ -4,14 +4,17 @@ import type { Doc } from '../shared/types'
 import {
   allowNearFor,
   foldSeparators,
+  fullTextQueryWords,
   matchQuery,
   matchWords,
   MAX_NEAR_WORDS,
   nearSpans,
   queryMatches,
   queryTokens,
+  SHORT_WORD_LENGTH,
   spanBounds,
   tokensNear,
+  wordBoundaryMatch,
   wordSpans
 } from '../src/lib/searchMatch'
 import { matchDoc, markAllTerms, partsToPlainText, snippetTerms } from '../src/lib/match'
@@ -36,6 +39,41 @@ describe('foldSeparators and queryTokens', () => {
   it('splits a query into words without empty tokens', () => {
     expect(queryTokens('  qwen   cud  ')).toEqual(['qwen', 'cud'])
     expect(queryTokens('...')).toEqual([])
+  })
+})
+
+describe('fullTextQueryWords splits a query once for every pass', () => {
+  it('keeps punctuation in a coverage word and folds it for the near pass', () => {
+    expect(fullTextQueryWords('qwen3.5 te')).toEqual({
+      coverageWords: ['qwen3.5', 'te'],
+      nearWords: ['qwen3', '5', 'te']
+    })
+    expect(fullTextQueryWords('qwen3 te')).toEqual({
+      coverageWords: ['qwen3', 'te'],
+      nearWords: ['qwen3', 'te']
+    })
+    expect(fullTextQueryWords('qwen-cua agents').nearWords).toEqual(['qwen', 'cua', 'agents'])
+  })
+})
+
+describe('wordBoundaryMatch keeps short tokens out of the middle of words', () => {
+  it('a short word matches a word start but not a substring inside one', () => {
+    expect(SHORT_WORD_LENGTH).toBe(3)
+    const text = 'attention state later technical text te'
+    const insideAttention = text.indexOf('te')
+    expect(wordBoundaryMatch(text, insideAttention, 'te')).toBe(false)
+    const startTechnical = text.indexOf('technical')
+    expect(wordBoundaryMatch(text, startTechnical, 'te')).toBe(true)
+    const alone = text.lastIndexOf('te')
+    expect(wordBoundaryMatch(text, alone, 'te')).toBe(true)
+  })
+
+  it('a full-length word has to end where the corpus word ends', () => {
+    expect(wordBoundaryMatch('qwen3.5-omni model', 0, 'qwen3.5')).toBe(true)
+    expect(wordBoundaryMatch('qwen30 model', 0, 'qwen3')).toBe(false)
+    expect(wordBoundaryMatch('a qwen3 model', 2, 'qwen3')).toBe(true)
+    expect(wordBoundaryMatch('qwen3 深度', 0, 'qwen3')).toBe(true)
+    expect(wordBoundaryMatch('qwen3深度', 0, 'qwen3')).toBe(false)
   })
 })
 

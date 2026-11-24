@@ -60,7 +60,9 @@ EndNote XML）、笔记、标注和 PDF 写进一个文件夹，附一份说明�
 ![PDF 阅读与标注](docs/screenshots/02-reader-dark.png)
 
 **全文检索**——搜的是 PDF 正文而不是书目字段。命中按篇分组，带页码和上下文，
-点一条直接翻到那一页。
+点一条直接翻到那一页。多词查询把整短语命中排在最前，后面追加「词散落在同一篇」
+与一次编辑距离的近似命中；两字母前缀只按词首匹配，不会单独缩小结果，想精确找某个
+版本请输完整版本号（`qwen3.5`，而不是 `qwen3.5 te`）。
 
 ![全文检索](docs/screenshots/03-fulltext-dark.png)
 
@@ -346,7 +348,9 @@ electron.vite.config.ts    main / preload / renderer 三段构建配置
 `src/lib/searchScope.ts` 的 `normaliseQuery` 一份，书目、参考文献、篇内查找与保存
 搜索都走它；两套 PDF 索引的「同一份文件」「片段切割」「进度节流」共用
 `shared/indexedFileRules.ts`，全文索引表的形状与只读规则在 `shared/fulltextRules.ts`；
-合并补字段与批量预算是纯规则，各自带一份旧表达式逐值差分测试。IPC 契约只在
+全文检索的分词只在 `src/lib/searchMatch.ts` 的 `fullTextQueryWords` 定义一次，整短语、
+词覆盖与近似三条路径各自取它给的词表；合并补字段与批量预算是纯规则，各自带一份旧
+表达式逐值差分测试。IPC 契约只在
 `src/global.d.ts` 定义一份，preload 编译期照它校验；所有尺寸用 rem，字号旋钮才有效；
 `contextIsolation: true`，renderer 拿不到 node，所有能力走 `window.api`。
 

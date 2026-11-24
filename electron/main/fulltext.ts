@@ -12,9 +12,11 @@ import { DEFAULT_FT_PAGES, type Doc, type FtHit, type FtStatus } from '../../sha
 import { clampFullTextPages } from '../../shared/fullTextPages'
 import {
   MAX_NEAR_WORDS,
+  SHORT_WORD_LENGTH,
+  fullTextQueryWords,
   nearSpans,
-  queryTokens,
   spanBounds,
+  wordBoundaryMatch,
   wordSpans
 } from '../../src/lib/searchMatch'
 import { docsWithAllWords, type WordOccurrence } from '../../shared/wordCoverage'
@@ -892,8 +894,11 @@ export function ftSearch(q: string): FtHit[] {
   const body = text()
   if (!body) return []
   const sorted = Object.entries(m.entries).sort((a, b) => a[1].start - b[1].start)
-  const tokens = needle.split(' ')
+  const { coverageWords, nearWords } = fullTextQueryWords(needle)
   const hits: FtHit[] = []
+  /** Every document already listed, so the broader answers can be appended
+   *  after the exact ones without showing a paper twice. */
+  const already = new Set<string>()
 
   /** Offsets only mean anything on the original corpus; the shared rule
    *  slices there and folds whitespace afterwards. */
@@ -917,9 +922,16 @@ export function ftSearch(q: string): FtHit[] {
    */
   const nearHits = (limit = MAX_HITS, skip?: Set<string>): FtHit[] => {
     if (limit <= 0) return []
-    const wanted = queryTokens(needle)
+    const wanted = nearWords
     if (!wanted.length || wanted.length > MAX_NEAR_WORDS) return []
-    const anchors = wanted.filter((w) => w.length >= 2 && body.includes(w))
+    // A two-letter anchor starts a word in nearly every paper. Walking a
+    // window around "te" for all of them kept this synchronous handler busy
+    // for over a second on a single keystroke, so anchor only on the words
+    // that narrow the search. A query made entirely of short words has no
+    // anchor and gets no near answers.
+    const anchors = wanted.filter(
+      (w) => w.length >= SHORT_WORD_LENGTH && body.includes(w)
+    )
     if (!anchors.length) return []
     const out: FtHit[] = []
     // The shared rule keeps every hit word within a handful of tokens of an
@@ -979,8 +991,9 @@ export function ftSearch(q: string): FtHit[] {
   }
 
   // one word: walk the whole corpus with indexOf and map each hit back to its
-  // document.  This never slices, so it is one pass over the text.
-  if (tokens.length === 1) {
+  // document.  This never slices, so it is one pass over the text. A single
+  // word keeps its punctuation: "qwen3.5" is one name, not "qwen3" plus "5".
+  if (coverageWords.length === 1) {
     for (let at = body.indexOf(needle); at !== -1; at = body.indexOf(needle, at + 1)) {
       const found = docAt(sorted, at)
       if (!found) continue
@@ -996,38 +1009,57 @@ export function ftSearch(q: string): FtHit[] {
     return hits.length ? hits : nearHits()
   }
 
-  // Several words.  The phrase comes first, as one pass over the whole
-  // corpus; only if that finds nothing does it fall back to "every word
-  // present in the same document".
+  // Several words. The literal phrase is the best answer, but it no longer
+  // owns the whole list: a phrase that happens to occur twice in somebody's
+  // bibliography used to hide every paper that mentioned the words apart.
+  // Exact phrase hits come first, then the coverage answers, then the near
+  // ones; every paper is listed at most once.
   //
-  // The fallback used to slice out each document and search the slices.
+  // The coverage pass used to slice out each document and search the slices.
   // That is 5245 slices of a 60 MB string per keystroke, which is 60 MB of
   // copying and a few hundred million character comparisons — enough to
-  // stall the main process for seconds on every letter typed.  Walking the
+  // stall the main process for seconds on every letter typed. Walking the
   // whole string once per word instead, and asking `docAt` which document
   // each offset belongs to, does the same job with no copying at all.
-  const phrase: { docId: string; page: number; snippet: string }[] = []
   for (let at = body.indexOf(needle); at !== -1; at = body.indexOf(needle, at + 1)) {
     const found = docAt(sorted, at)
     if (!found) continue
-    phrase.push({
+    hits.push({
       docId: found[0],
       page: pageOf(found[1], at),
       snippet: snippetAt(at, needle.length)
     })
-    if (phrase.length >= MAX_HITS) break
+    already.add(found[0])
+    if (hits.length >= MAX_HITS) return hits
     // the rest of this document cannot hold another hit worth listing
     at = found[1].start + found[1].len
   }
-  if (phrase.length) return phrase
 
   // A bitmask of hit words used to be a 32-bit int: `(1 << 32) - 1 === 0`,
   // so a query with 32 or more words matched nothing at all. The rule is a
   // pure function now, checked with 32 and 33 words on every run.
+  //
+  // Each word has to begin a word in the corpus. A two-letter token used to
+  // be an unqualified substring, so "te" matched the middle of "attention"
+  // in nearly every paper and the answer was decided by the other word alone.
+  //
+  // Long words are sparse, so they are scanned over the whole corpus once.
+  // A short word occurs hundreds of thousands of times; walking all of them
+  // kept this synchronous handler busy for half a second. Instead it is only
+  // looked for inside the documents the long words already selected.
   const occurrences: WordOccurrence[] = []
-  for (let w = 0; w < tokens.length; w++) {
-    const t = tokens[w]!
+  const longWords: string[] = []
+  const shortWords: string[] = []
+  for (const t of coverageWords) {
+    (t.length >= SHORT_WORD_LENGTH ? longWords : shortWords).push(t)
+  }
+  for (let w = 0; w < longWords.length; w++) {
+    const t = longWords[w]!
     for (let at = body.indexOf(t); at !== -1; ) {
+      if (!wordBoundaryMatch(body, at, t)) {
+        at = body.indexOf(t, at + 1)
+        continue
+      }
       const found = docAt(sorted, at)
       if (!found) {
         at = body.indexOf(t, at + 1)
@@ -1037,22 +1069,40 @@ export function ftSearch(q: string): FtHit[] {
       at = body.indexOf(t, found[1].start + found[1].len)
     }
   }
-  for (const [id, at] of docsWithAllWords(occurrences, tokens.length)) {
+  const candidates = longWords.length
+    ? docsWithAllWords(occurrences, longWords.length)
+    : new Map(sorted.map(([id, e]) => [id, e.start]))
+  for (let s = 0; s < shortWords.length; s++) {
+    const t = shortWords[s]!
+    const word = longWords.length + s
+    for (const [id] of candidates) {
+      const e = m.entries[id]!
+      const end = e.start + e.len
+      for (let at = body.indexOf(t, e.start); at !== -1 && at < end; at = body.indexOf(t, at + 1)) {
+        if (!wordBoundaryMatch(body, at, t)) continue
+        occurrences.push({ docId: id, word, at })
+        break
+      }
+    }
+  }
+  for (const [id, at] of docsWithAllWords(occurrences, coverageWords.length)) {
+    if (already.has(id)) continue
     const e = m.entries[id]!
     hits.push({
       docId: id,
       page: pageOf(e, at),
-      snippet: snippetAt(at, tokens[0]!.length)
+      snippet: snippetAt(at, coverageWords[0]!.length)
     })
+    already.add(id)
     if (hits.length >= MAX_HITS) break
   }
-  // The exact phrase was not in the corpus, so "every word in one paper" is
-  // the best exact answer there is. But those words may be scattered across
-  // a page, while the paper the reader actually wanted has them adjacent
-  // with a hyphen and one typo. Append those near hits after the exact ones:
-  // both answers stay visible, and the near ones say so on the card. Nothing
-  // is replaced, and an exact hit is never shown twice under two labels.
-  const already = new Set(hits.map((h) => h.docId))
+  // The words may be scattered across a page, while the paper the reader
+  // actually wanted has them adjacent with a hyphen and one typo. Append
+  // those near hits after the exact ones: both answers stay visible, and the
+  // near ones say so on the card. Nothing is replaced, and an exact hit is
+  // never shown twice under two labels. A list that already hit the cap has
+  // no room left, so the window scan is not worth starting at all.
+  if (hits.length >= MAX_HITS) return hits
   hits.push(...nearHits(MAX_HITS - hits.length, already))
   return hits
 }

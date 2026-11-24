@@ -203,4 +203,16 @@ describe('the index module owns the state, not the rules', () => {
     expect(src).toContain('clearedWhileBuilding = applyDeferred()')
     expect((src.match(/saveMeta\(fresh\)/g) ?? []).length).toBe(2)
   })
+
+  it('both indexes take their query words from the same splitter', () => {
+    const full = read('electron/main/fulltext.ts')
+    const refs = read('electron/main/refsindex.ts')
+    expect(full).toContain('fullTextQueryWords(needle)')
+    expect(refs).toContain('fullTextQueryWords(needle)')
+    // One pass must not invent its own tokenisation, and an exact phrase
+    // must not cut the list short before the other passes have answered.
+    expect(full).not.toContain("needle.split(' ')")
+    expect(full).not.toContain('if (phrase.length) return phrase')
+    expect(full).toContain('wordBoundaryMatch(body, at, t)')
+  })
 })

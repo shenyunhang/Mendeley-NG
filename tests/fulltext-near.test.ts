@@ -167,13 +167,73 @@ describe('ftSearch near fallback', () => {
     expect(hits[0]!.terms).toEqual(['qwen', 'cua'])
   })
 
-  it('does not append near hits when the exact phrase was found', () => {
-    const body = 'a short paper about qwen cua agents, with qwen-cua nearby'
+  it('keeps an exact phrase first and still appends the near answers', () => {
+    const first = 'a short paper about qwen cua agents'
+    const second = 'first page words here. qwen-cud: native computer use agents'
+    const gap = ' | '
+    const body = first + gap + second
+    const secondStart = first.length + gap.length
     writeIndex(body, {
-      d1: { start: 0, len: body.length, bounds: [body.length] }
+      d1: { start: 0, len: first.length, bounds: [first.length] },
+      d2: { start: secondStart, len: second.length, bounds: [body.length] }
     })
+
     const hits = mod.ftSearch('qwen cua')
-    expect(hits.length).toBeGreaterThan(0)
+    expect(hits).toHaveLength(2)
+    expect(hits[0]!.docId).toBe('d1')
+    expect(hits[0]!.near).toBeUndefined()
+    expect(hits[1]!.docId).toBe('d2')
+    expect(hits[1]!.near).toBe(true)
+    expect(new Set(hits.map((h) => h.docId)).size).toBe(hits.length)
+  })
+
+  it('an exact phrase no longer hides the coverage answers', () => {
+    const first = 'alpha beta gamma'
+    const second = 'beta gamma alpha'
+    const gap = ' | '
+    const body = first + gap + second
+    const secondStart = first.length + gap.length
+    writeIndex(body, {
+      d1: { start: 0, len: first.length, bounds: [first.length] },
+      d2: { start: secondStart, len: second.length, bounds: [body.length] }
+    })
+
+    const hits = mod.ftSearch('alpha beta')
+    expect(hits.map((h) => h.docId)).toEqual(['d1', 'd2'])
     expect(hits.every((h) => h.near === undefined)).toBe(true)
+  })
+
+  it('a short token matches a word start but not the middle of a word', () => {
+    const first = 'a model of attention state later'
+    const second = 'a model of technical text'
+    const gap = ' | '
+    const body = first + gap + second
+    const secondStart = first.length + gap.length
+    writeIndex(body, {
+      d1: { start: 0, len: first.length, bounds: [first.length] },
+      d2: { start: secondStart, len: second.length, bounds: [body.length] }
+    })
+
+    // "te" occurs inside attention/state/later in the first paper. It used
+    // to count as a hit there, leaving the other word to decide the list.
+    const hits = mod.ftSearch('model te')
+    expect(hits.map((h) => h.docId)).toEqual(['d2'])
+  })
+
+  it('a version number stays one coverage word', () => {
+    const first = 'a model called qwen3.5 is technical today'
+    const second = 'a model called qwen3 is technical today'
+    const gap = ' | '
+    const body = first + gap + second
+    const secondStart = first.length + gap.length
+    writeIndex(body, {
+      d1: { start: 0, len: first.length, bounds: [first.length] },
+      d2: { start: secondStart, len: second.length, bounds: [body.length] }
+    })
+
+    // Folding the dot for the coverage pass would turn "qwen3.5" into
+    // "qwen3" plus "5" and pull in every paper about the older version.
+    const hits = mod.ftSearch('qwen3.5 te')
+    expect(hits.map((h) => h.docId)).toEqual(['d1'])
   })
 })

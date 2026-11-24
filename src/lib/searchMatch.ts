@@ -45,6 +45,65 @@ export function queryTokens(q: string): string[] {
 }
 
 /**
+ * One full-text query, split once for every pass that reads it.
+ *
+ * Three passes look at the same words: the literal phrase (`indexOf`), the
+ * coverage pass (every word in one paper) and the near pass (one edit per
+ * word). `coverageWords` keeps punctuation inside a token because `qwen3.5`
+ * is one name a reader means; `nearWords` folds it because a dot or a hyphen
+ * in the PDF must not stop a mistyped phrase from matching. Both lists are
+ * made here, so no pass invents its own splitting.
+ */
+export interface FullTextQueryWords {
+  /** Space-separated tokens; punctuation inside a token is kept. */
+  coverageWords: string[]
+  /** Word-folded tokens; punctuation separates words. */
+  nearWords: string[]
+}
+
+export function fullTextQueryWords(needle: string): FullTextQueryWords {
+  return {
+    coverageWords: needle.split(' ').filter(Boolean),
+    nearWords: queryTokens(needle)
+  }
+}
+
+/** A word shorter than this matches the start of a longer word instead of a
+ *  whole word. Below it a whole-word rule would make `te` useless (it is
+ *  almost never a word on its own), while a substring rule matches the middle
+ *  of `attention` in nearly every paper. */
+export const SHORT_WORD_LENGTH = 3
+
+const UNICODE_WORD_CHAR = /[\p{L}\p{N}]/u
+
+/** The same character class as `wordSpans`, with a fast ASCII path: the
+ *  coverage pass asks this about hundreds of thousands of candidate offsets. */
+function isWordChar(ch: string | undefined): boolean {
+  if (!ch) return false
+  const code = ch.charCodeAt(0)
+  if (code < 128) {
+    return (
+      (code >= 48 && code <= 57) ||
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122)
+    )
+  }
+  return UNICODE_WORD_CHAR.test(ch)
+}
+
+/**
+ * Whether `word` at `at` begins a word in `text`. Words of
+ * `SHORT_WORD_LENGTH` or more must also end there; shorter ones may be the
+ * start of a longer word. `text` is the original corpus, so the caller can
+ * use `at` as an offset without translating it back from a folded copy.
+ */
+export function wordBoundaryMatch(text: string, at: number, word: string): boolean {
+  if (isWordChar(text[at - 1])) return false
+  if (word.length < SHORT_WORD_LENGTH) return true
+  return !isWordChar(text[at + word.length])
+}
+
+/**
  * One word is close enough to another: identical, or a single edit.
  *
  * Words shorter than three characters are never approximated: with `cud`

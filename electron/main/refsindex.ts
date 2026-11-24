@@ -9,8 +9,8 @@ import { isRefHead } from '../../src/lib/refly'
 import { normaliseQuery } from '../../src/lib/searchScope'
 import {
   MAX_NEAR_WORDS,
+  fullTextQueryWords,
   nearSpans,
-  queryTokens,
   spanBounds,
   wordSpans
 } from '../../src/lib/searchMatch'
@@ -407,7 +407,7 @@ export function searchRefs(query: string): RefHit[] {
   // occur in that string, so snippetAt still cuts the same text it matched.
   // Nothing is rewritten and the cache version stays 1, so old caches keep
   // loading without a rebuild.
-  const wanted = queryTokens(needle)
+  const wanted = fullTextQueryWords(needle).nearWords
   // A one-word typo has no exact word to anchor it, and the shared rule
   // rejects those anyway; a very long phrase costs more to scan than it
   // can return.
