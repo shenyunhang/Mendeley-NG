@@ -123,21 +123,52 @@ export function sortValue(d: Doc, key: SortKey): string | number {
   return d.year ?? 0
 }
 
+/** A sort value plus whether it is a real value at all.  A missing year is
+ *  not the year 0: it is no answer, and no answer belongs at the end of the
+ *  list whichever way the reader turned it.  `created` keeps its old rule
+ *  (an empty ISO string sorts first) because that is a different key with a
+ *  different meaning. */
+export interface SortKeyForDoc {
+  value: string | number
+  missing: boolean
+}
+
+export function sortKeyFor(d: Doc, key: SortKey): SortKeyForDoc {
+  return { value: sortValue(d, key), missing: key === 'year' && !d.year }
+}
+
 /**
- * Two documents under one key.  Equal keys fall back to the title, so that
- * the four hundred papers from the same year come out in an order a reader
- * can predict instead of in whatever order the array happened to be in.
+ * The one comparison rule, shared by the pure module and by App's
+ * precomputed sort.  Equal keys fall back to the title, so that the four
+ * hundred papers from the same year come out in an order a reader can
+ * predict instead of in whatever order the array happened to be in.
  */
+export function compareSortKeys(
+  a: SortKeyForDoc,
+  b: SortKeyForDoc,
+  dir: 1 | -1,
+  titleA: string,
+  titleB: string
+): number {
+  // missing values go last in BOTH directions, so `dir` must not reach here
+  if (a.missing !== b.missing) return a.missing ? 1 : -1
+  if (a.value === b.value) return TITLE_ORDER.compare(titleA, titleB)
+  return (a.value < b.value ? -1 : 1) * dir
+}
+
 export function compareDocs(
   a: Doc,
   b: Doc,
   key: SortKey,
   dir: 1 | -1
 ): number {
-  const va = sortValue(a, key)
-  const vb = sortValue(b, key)
-  if (va === vb) return TITLE_ORDER.compare(a.title ?? '', b.title ?? '')
-  return (va < vb ? -1 : 1) * dir
+  return compareSortKeys(
+    sortKeyFor(a, key),
+    sortKeyFor(b, key),
+    dir,
+    a.title ?? '',
+    b.title ?? ''
+  )
 }
 
 export interface ColumnDef {

@@ -47,9 +47,9 @@ import FullTextView from './components/FullTextView'
 import RefsView from './components/RefsView'
 import {
   SORT_DEFAULT_DIR,
-  TITLE_ORDER,
+  compareSortKeys,
   normaliseCols,
-  sortValue,
+  sortKeyFor,
   type ColKey,
   type SortKey
 } from './lib/columns'
@@ -731,17 +731,16 @@ export default function App() {
       )
     }
     const { key, dir } = sort
-    const val = (d: Doc): string | number => sortValue(d, key)
     // The key is taken once per document and carried through the sort.
-    // Calling `val` from inside the comparator is the expensive way round:
-    // it runs about n·log n times rather than n, and each of those builds
-    // a lower-cased string that is then thrown away.  Over five thousand
-    // papers that is the difference between one pass and twelve.
-    const rows = out.map((d) => ({ d, v: val(d) }))
-    rows.sort((a, b) => {
-      if (a.v === b.v) return TITLE_ORDER.compare(a.d.title ?? '', b.d.title ?? '')
-      return (a.v < b.v ? -1 : 1) * dir
-    })
+    // Calling sortKeyFor from inside the comparator is the expensive way
+    // round: it runs about n·log n times rather than n, and each of those
+    // builds a lower-cased string that is then thrown away.  The comparison
+    // itself is shared with lib/columns.ts, so the list and the pure rule
+    // cannot disagree about where a missing year belongs.
+    const rows = out.map((d) => ({ d, k: sortKeyFor(d, key) }))
+    rows.sort((a, b) =>
+      compareSortKeys(a.k, b.k, dir, a.d.title ?? '', b.d.title ?? '')
+    )
     return rows.map((r) => r.d)
   }, [docs, folderId, query, sort, filters, haystack, foldedHay])
 

@@ -7904,28 +7904,29 @@ export async function runSmoke() {
       /共\s*\d+\s*个/.test(String(fi.count ?? '')),
     fi
   )
-  // The matches are on the page, so the count belongs over the page, in the
-  // corner the eye goes to.  Checked geometrically rather than by reading the
-  // stylesheet, because what matters is where it lands, not what it says.
+  // It used to float over the top right of the page and hide the first lines
+  // of the paper.  What has to be checked now is not the stylesheet but the
+  // rectangles: the bar sits directly above the page and overlaps none of it.
   const findBox = JSON.parse(
     await w.webContents.executeJavaScript(
       '(()=>{const f=document.querySelector(".pdf-find");'
       + 'const p=document.querySelector(".pdf-body");if(!f||!p)return "{}";'
       + 'const a=f.getBoundingClientRect(),b=p.getBoundingClientRect();'
       + 'return JSON.stringify({pos:getComputedStyle(f).position,'
-      + 'fromRight:Math.round(b.right-a.right),fromTop:Math.round(a.top-b.top),'
-      + 'inside:a.top>=b.top-1&&a.right<=b.right+1})})()'
+      + 'above:Math.round(b.top-a.bottom),'
+      + 'overlap:a.bottom>b.top+1&&a.top<b.bottom-1,'
+      + 'width:Math.round(a.width)})})()'
     )
   )
   log('find bar placement', findBox)
   expect(
-    'the find bar floats over the top right of the page',
-    findBox.pos === 'absolute' && findBox.inside === true && findBox.fromRight < 40,
+    'the find bar sits above the page instead of floating over it',
+    findBox.pos !== 'absolute' && findBox.pos !== 'fixed' && findBox.overlap === false,
     findBox
   )
   expect(
-    'and it is at the top of it, not halfway down',
-    typeof findBox.fromTop === 'number' && findBox.fromTop >= 0 && findBox.fromTop < 40,
+    'and it is directly above it, not left floating in a gap',
+    typeof findBox.above === 'number' && findBox.above >= -1 && findBox.above <= 2,
     findBox
   )
   // A squeezed control does not clip its label, it stands it up: Chinese wraps
@@ -11249,9 +11250,17 @@ export async function runSmoke() {
         docsWithAllWords(occurrences(9).filter((o) => o.word !== 4), 9).size === 0,
         {}
       )
+      // The old guard looked for `docsWithAllWords(occurrences, tokens.length)`.
+      // That string died when the query was split once into coverageWords and
+      // nearWords: the coverage pass now counts longWords first and then
+      // checks the full coverageWords set, and exact phrase hits are appended
+      // rather than returned early.  All three facts are asserted here, so
+      // the guard is stricter than it was, not weaker.
       expect(
         'full-text search uses the unbounded rule and no bitmask',
-        ftSrc.includes('docsWithAllWords(occurrences, tokens.length)') &&
+        ftSrc.includes('docsWithAllWords(occurrences, longWords.length)') &&
+          ftSrc.includes('docsWithAllWords(occurrences, coverageWords.length)') &&
+          !ftSrc.includes('if (phrase.length) return phrase') &&
           !ftSrc.includes('rec.mask') &&
           !ftSrc.includes('1 << w'),
         {}

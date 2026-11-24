@@ -15,6 +15,8 @@ import {
   normaliseSort,
   sortValue,
   compareDocs,
+  sortKeyFor,
+  compareSortKeys,
   COLUMNS,
   COL_BY_KEY,
   DEFAULT_COLS,
@@ -295,6 +297,70 @@ describe('columns: sort, columns and widths are normalised by one registry', () 
     const apple = doc({ id: 'b', title: 'Apple', year: 2000 })
     expect(compareDocs(zebra, apple, 'year', 1)).toBe(TITLE_ORDER.compare('Zebra', 'Apple'))
     expect(compareDocs(zebra, apple, 'year', 1)).toBeGreaterThan(0)
+  })
+
+  it('a missing year goes last in both directions', () => {
+    const dated = doc({ id: 'a', title: 'A', year: 1999 })
+    const undated = doc({ id: 'b', title: 'B' })
+    expect(compareDocs(dated, undated, 'year', 1)).toBeLessThan(0)
+    expect(compareDocs(dated, undated, 'year', -1)).toBeLessThan(0)
+    expect(compareDocs(undated, dated, 'year', 1)).toBeGreaterThan(0)
+    expect(compareDocs(undated, dated, 'year', -1)).toBeGreaterThan(0)
+    // two undated papers still fall back to the title collator
+    expect(
+      compareDocs(doc({ id: 'z', title: 'Zebra' }), doc({ id: 'a', title: 'Apple' }), 'year', 1)
+    ).toBe(TITLE_ORDER.compare('Zebra', 'Apple'))
+  })
+
+  it('sortKeyFor marks only a missing year as missing', () => {
+    expect(sortKeyFor(doc({ year: 2020 }), 'year')).toEqual({ value: 2020, missing: false })
+    expect(sortKeyFor(doc({}), 'year')).toEqual({ value: 0, missing: true })
+    expect(sortKeyFor(doc({ year: 0 }), 'year')).toEqual({ value: 0, missing: true })
+    expect(sortKeyFor(doc({}), 'created')).toEqual({ value: '', missing: false })
+    expect(sortKeyFor(doc({}), 'starred')).toEqual({ value: 0, missing: false })
+    expect(sortKeyFor(doc({ title: 'T' }), 'title')).toEqual({ value: 't', missing: false })
+  })
+
+  it('the shared rule matches the old comparator for every real value', () => {
+    // the old expression, copied verbatim before the extraction
+    const oldCompare = (
+      a: Doc,
+      b: Doc,
+      key: (typeof SORT_KEYS)[number],
+      dir: 1 | -1
+    ): number => {
+      const va = sortValue(a, key)
+      const vb = sortValue(b, key)
+      if (va === vb) return TITLE_ORDER.compare(a.title ?? '', b.title ?? '')
+      return (va < vb ? -1 : 1) * dir
+    }
+    const docs = [
+      doc({ id: 'a', title: 'Alpha', year: 2001, created: '2020-01-01T00:00:00Z', starred: true }),
+      doc({ id: 'b', title: 'Beta', year: 1998, created: '2019-01-01T00:00:00Z' }),
+      doc({ id: 'c', title: 'Alpha', year: 2001, created: '2021-01-01T00:00:00Z' })
+    ]
+    for (const key of SORT_KEYS) {
+      for (const dir of [1, -1] as const) {
+        for (const a of docs) {
+          for (const b of docs) {
+            expect(compareDocs(a, b, key, dir), `${key}/${dir}/${a.id}/${b.id}`).toBe(
+              oldCompare(a, b, key, dir)
+            )
+          }
+        }
+      }
+    }
+  })
+
+  it('and the difference is real where the old rule was wrong', () => {
+    const dated = doc({ id: 'a', title: 'A', year: 1999 })
+    const undated = doc({ id: 'b', title: 'B' })
+    const old = (a: Doc, b: Doc, dir: 1 | -1): number =>
+      (sortValue(a, 'year') < sortValue(b, 'year') ? -1 : 1) * dir
+    expect(old(undated, dated, 1)).toBeLessThan(0) // old: undated first when ascending
+    expect(compareDocs(undated, dated, 'year', 1)).toBeGreaterThan(0) // new: last
+    expect(compareSortKeys(sortKeyFor(undated, 'year'), sortKeyFor(dated, 'year'), 1, 'B', 'A'))
+      .toBeGreaterThan(0)
   })
 
   it('COLUMNS and COL_BY_KEY expose every column with its label and track', () => {

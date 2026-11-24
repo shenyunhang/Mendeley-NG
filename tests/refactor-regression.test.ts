@@ -226,3 +226,35 @@ describe('batch runner moved out of the component', () => {
     expect(progress).toBe(0)
   })
 })
+
+/** The other shared-rule extraction: App used to inline the same comparator
+ *  that lib/columns.ts owns.  A missing year must be handled in ONE place,
+ *  or the library list and any other caller quietly disagree. */
+describe('the sort rule has one owner', () => {
+  const rootUp = (): string => {
+    let dir = process.cwd()
+    for (let i = 0; i < 6; i++) {
+      if (fs.existsSync(path.join(dir, 'package.json'))) return dir
+      const parent = path.dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+    return process.cwd()
+  }
+  const read = (p: string): string =>
+    fs.readFileSync(path.join(rootUp(), p), 'utf-8').replace(/\r\n/g, '\n')
+
+  it('App.tsx delegates to compareSortKeys and no longer inlines the comparison', () => {
+    const app = read('src/App.tsx')
+    expect(app).toContain('sortKeyFor(d, key)')
+    expect(app).toContain('compareSortKeys(a.k, b.k, dir')
+    expect(app).not.toContain('(a.v < b.v ? -1 : 1) * dir')
+  })
+
+  it('columns.ts keeps the missing-value rule next to the comparator', () => {
+    const columns = read('src/lib/columns.ts')
+    expect(columns).toContain('key === \'year\' && !d.year')
+    expect(columns).toContain('if (a.missing !== b.missing) return a.missing ? 1 : -1')
+    expect(columns).toContain('export function compareSortKeys(')
+  })
+})

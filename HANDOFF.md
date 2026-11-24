@@ -342,14 +342,23 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   自己的改动，方法是撤掉改动再跑一遍，而不是盯数字猜。
 - 桩打在被测代码的输入侧，不打在被测代码身上；对照的两端必须来自同一个对象。
 - 冒烟里「按年份翻方向」的断言读的是**可见**结果卡的 `.res-year`。`sortValue`
-  把没年份的文献当成 0，升序时它们排在最前；`--res-h` 从 5.2 提到 6.4rem 后
+  曾把没年份的文献当成 0，升序时它们排在最前；`--res-h` 从 5.2 提到 6.4rem 后
   一屏卡片变少，整屏都是无年份文献，`yearsShown()` 直接返回空数组，
-  连红两条断言。修法是把列表滚到第一批有年份的卡片再读，判据（真实年份严格
-  升序、首尾年份对调）一个都没放宽。别改成「配置里 dir 翻了就算过」。
+  连红两条断言。产品侧现已让无年份文献两个方向都排最后（见 §8.3）；冒烟仍保留
+  「滚到第一批有年份的卡片再读」作为兜底，判据（真实年份严格升序、首尾年份
+  对调）一个都没放宽。别改成「配置里 dir 翻了就算过」。
 - 写下的诊断动手前要复核一次；文档不写死会变的数字。
 - 冒烟窗口隐藏且 rAF 节流，等待被测对象用 `until` + 上限而不是固定 sleep；
   前提要单独写一条会说话的断言，前提不成立时别静默跳过后续断言。
 - 跑冒烟时别在旁边跑 `npm run build` / `npm run perf`，它们会改 `out/` 或抢真实库。
+- 安装版开着又必须跑冒烟时，**别直接 `SMOKE_ALLOW_OTHER_INSTANCE=1`**：两份会写同一个
+  `config.json`，红是随机的。改用隔离数据目录——把
+  `<userData>/library`（约 80MB，含 library.json / fulltext.dat）拷到临时
+  `--user-data-dir` 下，再用 `MENDELEY_TOKEN_PATH=<真实目录>/token.json` 指向**原文件**
+  （不复制凭据），最后 `SMOKE_ALLOW_OTHER_INSTANCE=1 npm run smoke -- --no-sync
+  --user-data-dir=<临时目录>`。这样守卫仍会提示「另一份在跑」，但两边写的不是同一个
+  config，降级是安全的；`findToken()` 也会返回 true，启动同步那两条断言不会误红。
+  跑完删临时目录。
 - **源码串护栏不能假设 LF**。`windows-latest` 的 checkout 是 CRLF，
   `toContain('.title-bar {\n  display: none;')` 本地通过、CI 从 `997c514`
   起连红五个提交，release 也跟着卡在单测；读文件先把 `\r\n` 归一成 `\n`，
@@ -547,6 +556,12 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 
 - 排序要有不属于任何一列的入口（工具条「排序」卡片），全文结果与文献列表共用同一个
   排序；默认方向按键定，方向写成文字不只用箭头。
+- **比较规则只有一份**：`columns.ts` 的 `sortKeyFor()` / `compareSortKeys()`，
+  `App.tsx` 预计算键之后也调它，不再内联 `(a.v < b.v ? -1 : 1) * dir`。
+  `sortKeyFor` 只对 `year` 标 `missing`（`created` 的空串仍按旧规则排最前，
+  `starred` 的 0 是真实值不是缺失）。缺失年份在**两个方向都排最后**，
+  所以这一支比较不能乘 `dir`；`tests/renderer-pure.test.ts` 把旧表达式逐行抄进
+  测试做了逐值对照，并单独证明差异真实存在，`refactor-regression.test.ts` 锁住接线。
 - 工具条一行放不下靠 `.toolbar > .search` 的 `min-width` 让步（其余
   `flex: 0 0 auto`），别压扁按钮。
 - 中文控件被挤会站起来（min-content 是一个字宽），`.toolbar` / `.pdf-bar` 统一
@@ -874,6 +889,13 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   `at + Math.max(1, needle.length)`，单字查询才不会死循环。短文本仍可能
   四条的片段完全相同（±80 的窗口覆盖了全文），要区分得让 `RefHit` 带上
   命中在片段内的偏移，尚未做。
+- **PDF 查找栏的位置**：原来 `.pdf-find` 是 `.pdf-body` 里的 `position: absolute`
+  浮层，压住页面右上角正文。现改为 `.pdf-bar` 与 `.pdf-body` 之间的**独立一行**
+  （`flex: 0 0 auto`、底边框、`--panel-head` 底），代价是打开时页面下移一行，
+  换来正文一个字都不被盖住。关键是它在 `.pdf-scroll` **外面**：页顶偏移、
+  命中矩形、连续滚动都只在滚动盒内部量，这一行不会动到任何坐标；冒烟的
+  「find bar placement」断言改成量两个矩形是否 `overlap === false`
+  且 `b.top - a.bottom` 在 ±2px 内，判据没有放宽，只是换了设计。
 - **PDF 查找栏**：`usePdfFind` 每页命中就 `publish` 画高亮，早期实现却要等全篇
   扫完才 `setFindOpen(true)`，于是几十到上百页的论文会先出现橙框、很久之后才有
   写着词的查找栏（`box: 0`）。首次 publish 已证明词就在这篇里，此时就开框；

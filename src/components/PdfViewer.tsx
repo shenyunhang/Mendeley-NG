@@ -1334,6 +1334,49 @@ export default function PdfViewer({
         </div>
       )}
 
+      {/* A row of its own, above the page.  It used to float over the top
+          right of the PDF and hid the first lines of the paper; taking one
+          row costs a little height but covers no text.  It stays OUTSIDE
+          .pdf-scroll on purpose: page tops, hit rectangles and continuous
+          scrolling are all measured inside that box, so nothing downstream
+          has to learn about this row. */}
+      {findOpen && (
+        <div className="pdf-find">
+          <input
+            ref={findInput}
+            value={findQ}
+            placeholder="在这篇 PDF 里查找…"
+            onChange={(e) => setFindQ(e.target.value)}
+          />
+          <button
+            disabled={!findHits.length}
+            title="上一个 (Shift+Enter)"
+            onClick={() => gotoHit(findAt - 1)}
+          >
+            ↑
+          </button>
+          <button
+            disabled={!findHits.length}
+            title="下一个 (Enter / F3)"
+            onClick={() => gotoHit(findAt + 1)}
+          >
+            ↓
+          </button>
+          <span className="find-count">
+            {findBusy
+              ? '查找中…'
+              : findHits.length
+                ? `第 ${findAt + 1} 个匹配 · 共 ${findHits.length} 个`
+                : findQ.trim().length >= 2
+                  ? '无匹配'
+                  : ''}
+          </span>
+          <button title="关闭 (Esc)" onClick={closeFind}>
+            ×
+          </button>
+        </div>
+      )}
+
       {/* a card is pinned to a spot on the page, so the page moving out from
           under it has to take it with it */}
       <div className="pdf-body" onWheel={closeCite}>
@@ -1455,42 +1498,6 @@ export default function PdfViewer({
           </div>
         )}
 
-        {findOpen && (
-          <div className="pdf-find">
-            <input
-              ref={findInput}
-              value={findQ}
-              placeholder="在这篇 PDF 里查找…"
-              onChange={(e) => setFindQ(e.target.value)}
-            />
-            <button
-              disabled={!findHits.length}
-              title="上一个 (Shift+Enter)"
-              onClick={() => gotoHit(findAt - 1)}
-            >
-              ↑
-            </button>
-            <button
-              disabled={!findHits.length}
-              title="下一个 (Enter / F3)"
-              onClick={() => gotoHit(findAt + 1)}
-            >
-              ↓
-            </button>
-            <span className="find-count">
-              {findBusy
-                ? '查找中…'
-                : findHits.length
-                  ? `第 ${findAt + 1} 个匹配 · 共 ${findHits.length} 个`
-                  : findQ.trim().length >= 2
-                    ? '无匹配'
-                    : ''}
-            </span>
-            <button title="关闭 (Esc)" onClick={closeFind}>
-              ×
-            </button>
-          </div>
-        )}
       </div>
 
       {/* The card hangs off the pane rather than the page: the paper sits in a
