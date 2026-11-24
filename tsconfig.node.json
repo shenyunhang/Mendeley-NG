@@ -18,6 +18,7 @@
     "tests/**/*.ts",
     "electron.vite.config.ts",
     "vitest.config.ts",
+    "src/lib/allDocumentFields.ts",
     "src/lib/annotationMerge.ts",
     "src/lib/annotationNote.ts",
     "src/lib/batch.ts",

@@ -23,6 +23,9 @@ export interface Doc {
     pmid?: string
     isbn?: string
     issn?: string
+    scopus?: string
+    sgr?: string
+    pui?: string
   }
   citation_key?: string
   file_attached?: boolean
@@ -47,6 +50,26 @@ export interface Doc {
   tags?: string[]
   starred?: boolean
   read?: boolean
+  /** Catalogue fields the editable form never drew. The details pane lists
+   *  them read-only under 全部字段; they are not part of any PATCH body.
+   *  `notes` here is a cloud field on one record, not the local note kept in
+   *  notes.json. */
+  accessed?: string
+  month?: number
+  day?: number
+  city?: string
+  genre?: string
+  source_type?: string
+  institution?: string
+  series?: string
+  medium?: string
+  notes?: string
+  editors?: Author[]
+  profile_id?: string
+  authored?: boolean
+  confirmed?: boolean
+  hidden?: boolean
+  private_publication?: boolean
   /** filled in by us, not by Mendeley */
   localPdf?: string
 }

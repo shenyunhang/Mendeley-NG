@@ -41,7 +41,8 @@ describe('every clipped string still has a way to be read', () => {
     ['src/components/PdfViewer.tsx', 'title={justMade ? \'已高亮\' : readerHint(marking'],
     ['src/components/FullTextView.tsx', 'title={`${s.name} · ${s.why}`}'],
     ['src/components/DetailsPanel.tsx', 'className="source-link"'],
-    ['src/components/DetailsPanel.tsx', 'title={link.url}']
+    ['src/components/DetailsPanel.tsx', 'title={link.url}'],
+    ['src/components/DetailsPanel.tsx', 'className="all-fields-name" title={f.name}']
   ]
 
   for (const [file, needle] of sites) {

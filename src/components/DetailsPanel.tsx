@@ -9,6 +9,7 @@ import {
 import { byName } from '../lib/tree'
 import { DOC_TYPES, DOC_TYPE_LABELS } from '../lib/doctypes'
 import { documentSourceLinks } from '../lib/documentSourceLinks'
+import { allDocumentFields } from '../lib/allDocumentFields'
 
 interface Props {
   doc: Doc
@@ -74,6 +75,9 @@ export default function DetailsPanel({
   })
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  // The full record is open by default; a reader can fold it away to get the
+  // editable form back to its full height.
+  const [fieldsOpen, setFieldsOpen] = useState(true)
   // A candidate list carries the id of the paper that was looked up, so a
   // list that somehow outlives its paper cannot even be drawn (155 / 174).
   const [cands, setCands] = useState<ForDocument<MetaCandidate[]> | null>(null)
@@ -245,6 +249,8 @@ export default function DetailsPanel({
   // Derived from the saved record, not from `form`: an address being typed
   // into the editable link box is not a source until it has been saved.
   const sourceLinks = documentSourceLinks(doc)
+  // The whole cached record, including fields the editable form never drew.
+  const allFields = allDocumentFields(doc)
 
   const findMeta = async () => {
     const id = doc.id
@@ -592,6 +598,37 @@ export default function DetailsPanel({
             </>
           ) : null}
         </div>
+      </div>
+
+      {/* Outside `.details` on purpose: the full record stays on screen while
+          the editable form scrolls above it. It is not a `.field`: the details
+          smoke checks read that list as the editable form. */}
+      <div className="all-fields">
+        <div className="all-fields-head">
+          <span>全部字段</span>
+          <span className="all-fields-count">{allFields.length} 项 · 只读</span>
+          <button
+            className="all-fields-toggle"
+            onClick={() => setFieldsOpen((v) => !v)}
+            title={fieldsOpen ? '收起全部字段' : '展开全部字段'}
+          >
+            {fieldsOpen ? '收起' : '展开'}
+          </button>
+        </div>
+        {fieldsOpen ? (
+          <div className="all-fields-list">
+            {allFields.map((f, i) => (
+              <div className="all-fields-row" key={`${f.name}-${i}`}>
+                <span className="all-fields-name" title={f.name}>
+                  {f.name}
+                </span>
+                <span className="all-fields-value" title={f.value}>
+                  {f.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div className="meta-actions">

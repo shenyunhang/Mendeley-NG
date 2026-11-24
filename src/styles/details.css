@@ -72,6 +72,59 @@
   font-size: 0.733rem;
   color: var(--fg-dim);
 }
+/* The full cached record sits below the scrolling form, so it stays visible
+   no matter how far that form is scrolled. It is not a `.field`, so the smoke
+   checks still see only the fields a reader can edit. Long values wrap and
+   the list scrolls inside its own box. */
+.all-fields {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
+}
+.all-fields-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.45rem;
+  background: var(--panel-head);
+  font-size: 0.733rem;
+  font-weight: 500;
+}
+.all-fields-count {
+  flex: 1;
+  color: var(--fg-dim);
+  font-weight: 400;
+}
+.all-fields-toggle {
+  flex: 0 0 auto;
+  padding: 0 0.35rem;
+  font-size: 0.733rem;
+}
+.all-fields-list {
+  max-height: 9rem;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  font-size: 0.733rem;
+}
+.all-fields-row {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  gap: 0.4rem;
+  padding: 0.15rem 0.45rem;
+  border-top: 1px solid var(--row-line);
+}
+.all-fields-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-dim);
+}
+.all-fields-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--fg);
+}
 .meta-actions {
   display: flex;
   gap: 8px;
