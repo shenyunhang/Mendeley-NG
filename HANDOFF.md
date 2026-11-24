@@ -214,7 +214,7 @@ src/
   global.d.ts           唯一的 IPC 契约 Api
   window.d.ts           Window.api 的 ambient 声明（与 DOM 隔离）
   components/           视图组件，PdfViewer.tsx 是阅读器、TitleBar.tsx 是工具栏内的窗口身份片段
-  lib/allDocumentFields.ts  把缓存记录展开成字段名/值行，供详情面板只读展示
+  lib/allDocumentFields.ts  把缓存记录展开成字段名/值行，并把编辑还原成 PATCH body
   lib/hooks/            React 状态簇，按「谁跟谁一起变」切
   lib/hooks/useOverlayStack.ts  设置面板与三张工具条卡片的状态 + 一次 Esc 关一层
   lib/searchScope.ts    唯一的检索归一化、范围枚举与篇内查找词长
@@ -429,12 +429,12 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   `websites[i]`、`identifiers.doi` / `doi`、`identifiers.arxiv` / `arxiv`
   逐条推导，标签就是字段名，重复地址也各占一条，不写回云端。
 - 详情面板的「全部字段」区块把缓存记录的每个键都列出来：`identifiers` 展开成
-  点号路径、标量数组展开成 `field[i]`、作者 / 编辑按一行列出全部成员。除了上面
-  那组可编辑字段，其余字段（`accessed` / `month` / `day` / `city` / `genre` /
-  `source_type` / `institution` / `series` / `medium` / `notes` / `editors`、
-  `identifiers` 里的 `isbn` / `issn` / `pmid` / `scopus` / `sgr` / `pui`，以及
-  `profile_id` 和 `authored` / `confirmed` / `hidden` / `private_publication`
-  标志）只读展示，不进任何 PATCH body。
+  点号路径、标量数组展开成 `field[i]`、作者 / 编辑按一行列出全部成员。除上方表单
+  与专用控件已拥有的字段（`title` / `year` / `keywords` / `tags` / `folder_uuids` /
+  `identifiers.doi` 等）和系统字段（`id` / `created` / `last_modified` /
+  `profile_id` / `file_attached` / `localPdf` / 各项布尔标志）外都可编辑，改动随
+  「保存到云端」一起 PATCH；点号路径合回父对象、索引路径重建数组、数字与布尔按
+  原类型还原。云端不接受的字段会在回包里弹回原值，不要假装它保存成功。
 - `POST /documents` 只接受固定 `type` 集合，用 `DOC_TYPES` 白名单做下拉；库里有但
   白名单没有的值留空并显示「（未设）」，别顶成第一项。
 - 标注坐标是绝对 PDF 点，`top_left` 存 y 更小的那个点即视觉左下角，

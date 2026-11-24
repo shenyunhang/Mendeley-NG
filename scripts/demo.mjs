@@ -278,7 +278,18 @@ const docs = PAPERS.map((p, i) => {
     year,
     source: venue,
     abstract: ABSTRACT,
-    identifiers: { doi: `10.5555/demo.${year}.${String(i + 1).padStart(3, '0')}` },
+    // Fields the details pane lists under 全部字段. Without them the demo
+    // screenshots would show an empty read-only block instead of the inputs.
+    identifiers: {
+      doi: `10.5555/demo.${year}.${String(i + 1).padStart(3, '0')}`,
+      isbn: `9785555${String(i + 1).padStart(4, '0')}`
+    },
+    accessed: `2024-${String(1 + (i % 12)).padStart(2, '0')}-01`,
+    month: 1 + (i % 12),
+    day: 1 + (i % 27),
+    city: 'Columbus',
+    genre: 'Synthetic Results',
+    websites: [`https://example.org/demo-${String(i + 1).padStart(3, '0')}`],
     citation_key: `demo${year}${String.fromCharCode(97 + (i % 26))}`,
     type: i % 4 === 0 ? 'journal' : 'conference_proceedings',
     folder_uuids: [byName.get(folder), i % 5 === 0 ? byName.get('Writing') : null].filter(Boolean),

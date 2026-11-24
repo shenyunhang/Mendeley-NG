@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { allDocumentFields } from '../src/lib/allDocumentFields'
+import { allDocumentFields, documentFieldsToPatch } from '../src/lib/allDocumentFields'
 import type { Doc } from '../shared/types'
 
 const paper = (patch: Record<string, unknown>): Doc => ({ id: 'paper-1', ...patch } as Doc)
@@ -48,22 +48,22 @@ describe('every cached field becomes a row', () => {
       }
     })
     expect(names(d)).toEqual([
-      'id',
-      'identifiers.doi',
       'identifiers.arxiv',
       'identifiers.pmid',
       'identifiers.isbn',
       'identifiers.issn',
       'identifiers.scopus',
       'identifiers.sgr',
-      'identifiers.pui'
+      'identifiers.pui',
+      'id',
+      'identifiers.doi'
     ])
     expect(valueOf(d, 'identifiers.scopus')).toBe('S1')
   })
 
   it('expands scalar arrays into indexed names and marks empty ones', () => {
     const d = paper({ websites: ['https://example.org/a', 'https://example.org/b'], tags: [] })
-    expect(names(d)).toEqual(['id', 'websites[0]', 'websites[1]', 'tags'])
+    expect(names(d)).toEqual(['websites[0]', 'websites[1]', 'id', 'tags'])
     expect(valueOf(d, 'websites[1]')).toBe('https://example.org/b')
     expect(valueOf(d, 'tags')).toBe('[]')
   })
@@ -80,6 +80,16 @@ describe('every cached field becomes a row', () => {
     expect(names(d)).toEqual(['id', 'authors', 'editors'])
     expect(valueOf(d, 'authors')).toBe('Ge, Tiezheng; He, Kaiming; Anonymous')
     expect(valueOf(d, 'editors')).toBe('Hua, Gang')
+  })
+
+  it('puts editable rows first and keeps cache order inside each group', () => {
+    const d = paper({
+      title: 't',
+      accessed: '2026-01-02',
+      city: 'Columbus',
+      hidden: false
+    })
+    expect(names(d)).toEqual(['accessed', 'city', 'id', 'title', 'hidden'])
   })
 
   it('marks missing, empty and object-shaped values instead of hiding them', () => {
@@ -146,14 +156,84 @@ describe('every cached field becomes a row', () => {
   })
 })
 
-describe('the details pane draws the full record', () => {
+describe('edited rows become a patch body', () => {
+  it('marks only the fields this block owns as editable', () => {
+    const d = paper({
+      title: 't',
+      created: '2026-01-01',
+      profile_id: 'p',
+      localPdf: 'paper.pdf',
+      authors: [{ last_name: 'Ge' }],
+      identifiers: { doi: '10.1/a', arxiv: '2511.20347', isbn: '123' },
+      websites: ['https://a', 'https://b'],
+      keywords: ['x'],
+      tags: ['t'],
+      folder_uuids: ['f'],
+      accessed: '2026-01-02',
+      month: 11,
+      city: 'Columbus',
+      hidden: false
+    })
+    const byName = new Map(allDocumentFields(d).map((f) => [f.name, f.editable]))
+    for (const name of [
+      'accessed', 'month', 'city', 'identifiers.isbn', 'identifiers.arxiv', 'websites[0]'
+    ]) {
+      expect(byName.get(name), name).toBe(true)
+    }
+    for (const name of [
+      'id', 'title', 'created', 'profile_id', 'localPdf', 'authors', 'hidden',
+      'identifiers.doi', 'keywords[0]', 'tags[0]', 'folder_uuids[0]'
+    ]) {
+      expect(byName.get(name), name).toBe(false)
+    }
+  })
+
+  it('keeps the cached type of numbers and booleans', () => {
+    const d = paper({ month: 11, day: 25, hidden: false })
+    const fields = allDocumentFields(d)
+    expect(
+      documentFieldsToPatch({ month: '12', day: '', hidden: 'true' }, fields, d)
+    ).toEqual({ month: 12, day: '', hidden: true })
+  })
+
+  it('merges identifier edits without dropping the other identifiers', () => {
+    const d = paper({ identifiers: { doi: '10.1/a', arxiv: '2511.20347' } })
+    const fields = allDocumentFields(d)
+    expect(documentFieldsToPatch({ 'identifiers.arxiv': '2601.00001' }, fields, d)).toEqual({
+      identifiers: { doi: '10.1/a', arxiv: '2601.00001' }
+    })
+  })
+
+  it('rebuilds an array from indexed edits and keeps untouched entries', () => {
+    const d = paper({ websites: ['https://a', 'https://b', 'https://c'] })
+    const fields = allDocumentFields(d)
+    expect(documentFieldsToPatch({ 'websites[1]': 'https://changed' }, fields, d)).toEqual({
+      websites: ['https://a', 'https://changed', 'https://c']
+    })
+  })
+
+  it('returns an empty body when nothing changed', () => {
+    const d = paper({ city: 'Columbus' })
+    expect(documentFieldsToPatch({}, allDocumentFields(d), d)).toEqual({})
+  })
+})
+
+describe('the details pane edits the full record', () => {
   const panel = () => read('src/components/DetailsPanel.tsx')
 
-  it('uses the pure rule and marks the block read-only', () => {
+  it('draws inputs and saves the edits with the form', () => {
     expect(panel()).toContain('allDocumentFields(doc)')
+    expect(panel()).toContain('documentFieldsToPatch(dirtyFieldEdits, allFields, doc)')
     expect(panel()).toContain('className="all-fields"')
+    expect(panel()).toContain('className="all-fields-input"')
     expect(panel()).toContain('className="all-fields-name" title={f.name}')
-    expect(panel()).toContain('项 · 只读')
+    expect(panel()).toContain('setFieldEdits({})')
+    expect(panel()).toContain('fieldDirty')
+    expect(panel()).toContain('可编辑 {editableCount} 项')
+  })
+
+  it('keeps the DOI the form owns when another identifier is edited', () => {
+    expect(panel()).toContain('doi: form.doi.trim()')
   })
 
   it('stays visible below the scrolling form and can be folded away', () => {

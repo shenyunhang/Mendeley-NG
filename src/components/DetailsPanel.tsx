@@ -9,7 +9,7 @@ import {
 import { byName } from '../lib/tree'
 import { DOC_TYPES, DOC_TYPE_LABELS } from '../lib/doctypes'
 import { documentSourceLinks } from '../lib/documentSourceLinks'
-import { allDocumentFields } from '../lib/allDocumentFields'
+import { allDocumentFields, documentFieldsToPatch } from '../lib/allDocumentFields'
 
 interface Props {
   doc: Doc
@@ -78,6 +78,8 @@ export default function DetailsPanel({
   // The full record is open by default; a reader can fold it away to get the
   // editable form back to its full height.
   const [fieldsOpen, setFieldsOpen] = useState(true)
+  // Edits to the full record, keyed by the field name shown in each row.
+  const [fieldEdits, setFieldEdits] = useState<Record<string, string>>({})
   // A candidate list carries the id of the paper that was looked up, so a
   // list that somehow outlives its paper cannot even be drawn (155 / 174).
   const [cands, setCands] = useState<ForDocument<MetaCandidate[]> | null>(null)
@@ -125,6 +127,7 @@ export default function DetailsPanel({
       keywords: (doc.keywords ?? []).join(', ')
     })
     setMsg(null)
+    setFieldEdits({})
     setCands(null)
     setLooking(false)
     setSaving(false)
@@ -143,6 +146,20 @@ export default function DetailsPanel({
       .catch(() => undefined)
   }, [doc.id])
 
+  // The whole cached record, including fields the editable form never drew.
+  const allFields = allDocumentFields(doc)
+  // Only rows that really changed, and only rows this block owns. Typing a
+  // value back to its original text must not light up the save button.
+  const dirtyFieldEdits: Record<string, string> = {}
+  for (const [name, next] of Object.entries(fieldEdits)) {
+    const f = allFields.find((x) => x.name === name)
+    if (!f || !f.editable) continue
+    const initial = f.raw == null || f.raw === '' ? '' : f.value
+    if (next !== initial) dirtyFieldEdits[name] = next
+  }
+  const fieldDirty = Object.keys(dirtyFieldEdits).length > 0
+  const editableCount = allFields.filter((f) => f.editable).length
+
   const dirty =
     form.title !== (doc.title ?? '') ||
     form.authors !== authorsToText(doc) ||
@@ -156,7 +173,8 @@ export default function DetailsPanel({
     form.pages !== (doc.pages ?? '') ||
     form.publisher !== (doc.publisher ?? '') ||
     form.url !== (doc.url ?? '') ||
-    form.keywords !== (doc.keywords ?? []).join(', ')
+    form.keywords !== (doc.keywords ?? []).join(', ') ||
+    fieldDirty
 
   const save = async () => {
     const id = doc.id
@@ -187,10 +205,21 @@ export default function DetailsPanel({
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean)
+    const fieldPatch = documentFieldsToPatch(dirtyFieldEdits, allFields, doc)
+    Object.assign(body, fieldPatch)
+    // The form owns identifiers.doi; editing another identifier below must
+    // not overwrite the DOI the reader just typed above.
+    if (form.doi.trim() && fieldPatch.identifiers) {
+      body.identifiers = {
+        ...(fieldPatch.identifiers as Record<string, unknown>),
+        doi: form.doi.trim()
+      }
+    }
     try {
       const updated = await window.api.patchDoc(id, body)
       if (!scope.current.isCurrent(id)) return
       onSaved({ ...doc, ...updated })
+      setFieldEdits({})
       setMsg('已保存到云端')
     } catch (e) {
       if (!scope.current.isCurrent(id)) return
@@ -249,9 +278,6 @@ export default function DetailsPanel({
   // Derived from the saved record, not from `form`: an address being typed
   // into the editable link box is not a source until it has been saved.
   const sourceLinks = documentSourceLinks(doc)
-  // The whole cached record, including fields the editable form never drew.
-  const allFields = allDocumentFields(doc)
-
   const findMeta = async () => {
     const id = doc.id
     setLooking(true)
@@ -606,7 +632,12 @@ export default function DetailsPanel({
       <div className="all-fields">
         <div className="all-fields-head">
           <span>全部字段</span>
-          <span className="all-fields-count">{allFields.length} 项 · 只读</span>
+          <span
+            className="all-fields-count"
+            title="可编辑字段与上方表单一起保存；云端不接受的字段保存后会弹回原值"
+          >
+            {allFields.length} 项 · 可编辑 {editableCount} 项
+          </span>
           <button
             className="all-fields-toggle"
             onClick={() => setFieldsOpen((v) => !v)}
@@ -622,9 +653,23 @@ export default function DetailsPanel({
                 <span className="all-fields-name" title={f.name}>
                   {f.name}
                 </span>
-                <span className="all-fields-value" title={f.value}>
-                  {f.value}
-                </span>
+                {f.editable ? (
+                  <input
+                    className="all-fields-input"
+                    value={fieldEdits[f.name] ?? (f.raw == null || f.raw === '' ? '' : f.value)}
+                    onChange={(e) =>
+                      setFieldEdits({ ...fieldEdits, [f.name]: e.target.value })
+                    }
+                    title={f.name}
+                  />
+                ) : (
+                  <span
+                    className="all-fields-value"
+                    title="由上方表单、专用控件或云端管理，不在这里编辑"
+                  >
+                    {f.value}
+                  </span>
+                )}
               </div>
             ))}
           </div>

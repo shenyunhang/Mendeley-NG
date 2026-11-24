@@ -125,6 +125,12 @@
   white-space: pre-wrap;
   color: var(--fg);
 }
+.all-fields-input {
+  width: 100%;
+  min-width: 0;
+  padding: 0 0.25rem;
+  font-size: 0.733rem;
+}
 .meta-actions {
   display: flex;
   gap: 8px;
