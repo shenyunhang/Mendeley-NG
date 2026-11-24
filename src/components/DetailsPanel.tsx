@@ -8,6 +8,7 @@ import {
 } from '../lib/documentScope'
 import { byName } from '../lib/tree'
 import { DOC_TYPES, DOC_TYPE_LABELS } from '../lib/doctypes'
+import { documentSourceLinks } from '../lib/documentSourceLinks'
 
 interface Props {
   doc: Doc
@@ -241,6 +242,9 @@ export default function DetailsPanel({
   }
 
   const owned = new Set(doc.folder_uuids ?? [])
+  // Derived from the saved record, not from `form`: an address being typed
+  // into the editable link box is not a source until it has been saved.
+  const sourceLinks = documentSourceLinks(doc)
 
   const findMeta = async () => {
     const id = doc.id
@@ -452,6 +456,30 @@ export default function DetailsPanel({
             placeholder="https://…"
             onChange={(e) => setForm({ ...form, url: e.target.value })}
           />
+          {/* `websites` and the identifiers are not the same field as `url`.
+              They stay read-only here: showing a source must never turn an
+              unsaved edit into a write to the cloud. */}
+          <div className="source-links">
+            {sourceLinks.length ? (
+              sourceLinks.map((link) => (
+                <a
+                  key={link.url}
+                  className="source-link"
+                  href={link.url}
+                  title={link.url}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    void window.api.openExternal(link.url)
+                  }}
+                >
+                  <span className="source-link-kind">{link.label}</span>
+                  <span className="source-link-url">{link.url}</span>
+                </a>
+              ))
+            ) : (
+              <span className="source-links-empty">暂无来源链接</span>
+            )}
+          </div>
         </div>
         <div className="field">
           <label>标签（逗号分隔）</label>
@@ -559,21 +587,6 @@ export default function DetailsPanel({
               >
                 用系统程序打开
               </button>
-            </>
-          ) : null}
-          {doc.doi ? (
-            <>
-              <br />
-              <a
-                href={'https://doi.org/' + doc.doi}
-                onClick={(e) => {
-                  e.preventDefault()
-                  window.api.openExternal('https://doi.org/' + doc.doi)
-                }}
-                style={{ color: 'var(--accent)' }}
-              >
-                https://doi.org/{doc.doi}
-              </a>
             </>
           ) : null}
         </div>

@@ -30,6 +30,7 @@
     "src/lib/budgets.ts",
     "src/lib/continuousScroll.ts",
     "src/lib/documentScope.ts",
+    "src/lib/documentSourceLinks.ts",
     "src/lib/doctypes.ts",
     "src/lib/dupes.ts",
     "src/lib/export.ts",

@@ -56,18 +56,10 @@ export function resolveInside(
   return isPathWithin(root, joined, platform) ? joined : null
 }
 
-/** Only web addresses may be handed to the OS shell.  `file:`, `smb:`,
- *  `javascript:` and every other scheme are refused rather than filtered,
- *  because the set of dangerous schemes is not a fixed list. */
-export function isSafeExternalUrl(raw: unknown): boolean {
-  if (typeof raw !== 'string' || !raw) return false
-  try {
-    const u = new URL(raw)
-    return u.protocol === 'https:' || u.protocol === 'http:'
-  } catch {
-    return false
-  }
-}
+/** The external URL rule lives in its own module because the renderer needs
+ *  it too, and this file's `node:path` import cannot go into the browser
+ *  bundle. Re-exported so the main process keeps its one existing import. */
+export { isSafeExternalUrl } from './externalUrl'
 
 /**
  * May the custom protocol serve this file?

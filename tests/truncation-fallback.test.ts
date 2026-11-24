@@ -39,7 +39,9 @@ describe('every clipped string still has a way to be read', () => {
     ['src/components/Settings.tsx', 'title={nameTemplate || DEFAULT_PDF_TEMPLATE}'],
     ['src/components/ColumnPicker.tsx', 'title={`${v.name} · ${v.cols.join'],
     ['src/components/PdfViewer.tsx', 'title={justMade ? \'已高亮\' : readerHint(marking'],
-    ['src/components/FullTextView.tsx', 'title={`${s.name} · ${s.why}`}']
+    ['src/components/FullTextView.tsx', 'title={`${s.name} · ${s.why}`}'],
+    ['src/components/DetailsPanel.tsx', 'className="source-link"'],
+    ['src/components/DetailsPanel.tsx', 'title={link.url}']
   ]
 
   for (const [file, needle] of sites) {

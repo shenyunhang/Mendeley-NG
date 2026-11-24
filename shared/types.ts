@@ -34,7 +34,13 @@ export interface Doc {
   volume?: string
   issue?: string
   publisher?: string
+  /** The link the reader saved on purpose. */
   url?: string
+  /** Where Mendeley keeps the links it collected when the paper was added
+   *  (arXiv PDF pages, publisher pages). It is not `url`: a paper can have a
+   *  full `websites` list and an empty `url`, which is why the details pane
+   *  derives its source links separately. */
+  websites?: string[]
   keywords?: string[]
   /** The three per-user flags.  All three are writable and come back with
    *  `view=all`, unlike `keywords`, which is publisher metadata. */

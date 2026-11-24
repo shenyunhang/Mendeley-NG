@@ -33,6 +33,41 @@
   max-height: 260px;
   line-height: 1.5;
 }
+/* Sources Mendeley already knows about sit under the editable link. The URL
+   is clipped to the panel width, so the anchor carries the full address as
+   its tooltip. */
+.source-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+}
+.source-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: 0.733rem;
+}
+.source-link-kind {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+}
+.source-link-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-links-empty {
+  font-size: 0.733rem;
+  color: var(--fg-dim);
+}
 .meta-actions {
   display: flex;
   gap: 8px;
