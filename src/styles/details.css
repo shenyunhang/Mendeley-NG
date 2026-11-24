@@ -59,6 +59,7 @@
 }
 .source-link-kind {
   flex: 0 0 auto;
+  white-space: nowrap;
   color: var(--fg-dim);
 }
 .source-link-url {

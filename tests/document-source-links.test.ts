@@ -39,7 +39,12 @@ describe('a paper shows every source field as its own link', () => {
       'https://doi.org/10.1000/abc',
       'https://arxiv.org/abs/2511.20347'
     ])
-    expect(links.map((l) => l.label)).toEqual(['链接', '来源 1', 'DOI', 'arXiv'])
+    expect(links.map((l) => l.label)).toEqual([
+      'url',
+      'websites[0]',
+      'identifiers.doi',
+      'identifiers.arxiv'
+    ])
   })
 
   it('shows all the other fields when the editable url is empty', () => {
@@ -50,8 +55,8 @@ describe('a paper shows every source field as its own link', () => {
       })
     )
     expect(links).toEqual([
-      { url: 'https://arxiv.org/pdf/2511.20347', label: '来源 1', origin: 'websites' },
-      { url: 'https://arxiv.org/abs/2511.20347', label: 'arXiv', origin: 'arxiv' }
+      { url: 'https://arxiv.org/pdf/2511.20347', label: 'websites[0]', origin: 'websites' },
+      { url: 'https://arxiv.org/abs/2511.20347', label: 'identifiers.arxiv', origin: 'arxiv' }
     ])
   })
 
@@ -65,14 +70,14 @@ describe('a paper shows every source field as its own link', () => {
         })
       )
     ).toEqual([
-      { url: 'https://doi.org/10.1000/new', label: 'DOI', origin: 'doi' },
-      { url: 'https://doi.org/10.1000/legacy', label: 'DOI（顶层）', origin: 'doi' },
-      { url: 'https://arxiv.org/abs/2511.20347', label: 'arXiv', origin: 'arxiv' },
-      { url: 'https://arxiv.org/abs/2001.00001', label: 'arXiv（顶层）', origin: 'arxiv' }
+      { url: 'https://doi.org/10.1000/new', label: 'identifiers.doi', origin: 'doi' },
+      { url: 'https://doi.org/10.1000/legacy', label: 'doi', origin: 'doi' },
+      { url: 'https://arxiv.org/abs/2511.20347', label: 'identifiers.arxiv', origin: 'arxiv' },
+      { url: 'https://arxiv.org/abs/2001.00001', label: 'arxiv', origin: 'arxiv' }
     ])
     expect(
       documentSourceLinks(paper({ doi: '10.1000/legacy', arxiv: '2001.00001' })).map((l) => l.label)
-    ).toEqual(['DOI（顶层）', 'arXiv（顶层）'])
+    ).toEqual(['doi', 'arxiv'])
   })
 
   it('shows every websites entry rather than only the first', () => {
@@ -85,7 +90,7 @@ describe('a paper shows every source field as its own link', () => {
         ]
       })
     )
-    expect(links.map((l) => l.label)).toEqual(['来源 1', '来源 2', '来源 3'])
+    expect(links.map((l) => l.label)).toEqual(['websites[0]', 'websites[1]', 'websites[2]'])
     expect(links.map((l) => l.url)).toEqual([
       'https://arxiv.org/pdf/2511.20347',
       'https://example.org/publisher',
@@ -99,8 +104,8 @@ describe('a paper shows every source field as its own link', () => {
         paper({ websites: ['https://arxiv.org/abs/2511.20347'], identifiers: { arxiv: '2511.20347' } })
       )
     ).toEqual([
-      { url: 'https://arxiv.org/abs/2511.20347', label: '来源 1', origin: 'websites' },
-      { url: 'https://arxiv.org/abs/2511.20347', label: 'arXiv', origin: 'arxiv' }
+      { url: 'https://arxiv.org/abs/2511.20347', label: 'websites[0]', origin: 'websites' },
+      { url: 'https://arxiv.org/abs/2511.20347', label: 'identifiers.arxiv', origin: 'arxiv' }
     ])
   })
 
@@ -154,6 +159,18 @@ describe('the details pane draws the derived links', () => {
   it('gives every link a key of its own, since two can share one address', () => {
     expect(panel()).toContain('sourceLinks.map((link, index) =>')
     expect(panel()).toContain('key={`${link.origin}-${index}`}')
+  })
+
+  const descriptiveLabel = '来源 ${i + 1}'
+  it('the detector really catches an old descriptive label', () => {
+    expect('add(site, `来源 ${i + 1}`)').toContain(descriptiveLabel)
+  })
+  it('labels are the field names themselves', () => {
+    expect(rule()).not.toContain(descriptiveLabel)
+    expect(rule()).toContain("add(doc.url, 'url', 'url')")
+    expect(rule()).toContain('websites[${i}]')
+    expect(rule()).toContain("'identifiers.doi'")
+    expect(rule()).toContain("'identifiers.arxiv'")
   })
 
   const dedupeSet = 'const seen = new Set<string>()'

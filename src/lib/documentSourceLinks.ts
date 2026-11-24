@@ -10,16 +10,16 @@ import { isSafeExternalUrl } from '../../shared/externalUrl'
  * shows an empty link box on a paper whose source is one click away.
  *
  * Every field is drawn as its own link. Two fields that happen to resolve to
- * the same address are still two entries, because the label says which field
- * each one came from. Nothing is written back: typing into the editable field
- * and pressing save patches `url`, while this list keeps showing the saved
- * record until that save succeeds.
+ * the same address are still two entries, each labelled with the field's own
+ * name. Nothing is written back: typing into the editable field and pressing
+ * save patches `url`, while this list keeps showing the saved record until
+ * that save succeeds.
  */
 export type DocumentSourceLinkOrigin = 'url' | 'websites' | 'doi' | 'arxiv'
 
 export interface DocumentSourceLink {
   url: string
-  /** A short word naming the field the link came from. */
+  /** The field's own name, or its indexed path for an entry of `websites`. */
   label: string
   origin: DocumentSourceLinkOrigin
 }
@@ -41,9 +41,11 @@ const arxivId = (raw: string): string =>
 /**
  * One entry per field, in catalogue order: `url`, every `websites` entry, the
  * DOI in `identifiers`, a legacy top-level DOI, the arXiv id in `identifiers`,
- * and a legacy top-level arXiv id. Same-address entries are kept rather than
- * collapsed into one. Only the scheme is checked: `file:`, `javascript:` and
- * every other non-http(s) address must never reach the OS shell.
+ * and a legacy top-level arXiv id. The label is the name of the field that
+ * produced it, so two entries with the same address remain distinguishable.
+ * Same-address entries are kept rather than collapsed into one. Only the
+ * scheme is checked: `file:`, `javascript:` and every other non-http(s)
+ * address must never reach the OS shell.
  */
 export function documentSourceLinks(doc: Doc): DocumentSourceLink[] {
   const out: DocumentSourceLink[] = []
@@ -54,30 +56,30 @@ export function documentSourceLinks(doc: Doc): DocumentSourceLink[] {
     out.push({ url, label, origin })
   }
 
-  add(doc.url, 'url', '链接')
+  add(doc.url, 'url', 'url')
   const websites = doc.websites ?? []
   for (let i = 0; i < websites.length; i++) {
-    add(websites[i], 'websites', `来源 ${i + 1}`)
+    add(websites[i], 'websites', `websites[${i}]`)
   }
 
   const identifierDoi = doc.identifiers?.doi
   if (identifierDoi) {
     const id = doiId(identifierDoi)
-    if (id) add('https://doi.org/' + id, 'doi', 'DOI')
+    if (id) add('https://doi.org/' + id, 'doi', 'identifiers.doi')
   }
   if (doc.doi) {
     const id = doiId(doc.doi)
-    if (id) add('https://doi.org/' + id, 'doi', 'DOI（顶层）')
+    if (id) add('https://doi.org/' + id, 'doi', 'doi')
   }
 
   const identifierArxiv = doc.identifiers?.arxiv
   if (identifierArxiv) {
     const id = arxivId(identifierArxiv)
-    if (id) add('https://arxiv.org/abs/' + id, 'arxiv', 'arXiv')
+    if (id) add('https://arxiv.org/abs/' + id, 'arxiv', 'identifiers.arxiv')
   }
   if (doc.arxiv) {
     const id = arxivId(doc.arxiv)
-    if (id) add('https://arxiv.org/abs/' + id, 'arxiv', 'arXiv（顶层）')
+    if (id) add('https://arxiv.org/abs/' + id, 'arxiv', 'arxiv')
   }
 
   return out
