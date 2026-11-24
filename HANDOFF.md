@@ -422,6 +422,11 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   `Content-Disposition: attachment; filename="..."`），一次建条目并自动附件。
   multipart 会被拒且报错有误导性；服务端会自己从 PDF 抽元数据，别用文件名回填标题。
   `doi` / `arxiv` 写在顶层无效，真字段是 `identifiers`。
+- 云端把导入时收集的来源地址放在 `websites` 数组里，`url` 是另一个可编辑字段；
+  本地缓存里几乎每篇的 `url` 都是空的。详情面板的「链接」输入框读写 `url`，
+  它下面那组只读来源链接由 `src/lib/documentSourceLinks.ts` 从 `url`、每个
+  `websites[i]`、`identifiers.doi` / `doi`、`identifiers.arxiv` / `arxiv`
+  逐条推导，标签就是字段名，重复地址也各占一条，不写回云端。
 - `POST /documents` 只接受固定 `type` 集合，用 `DOC_TYPES` 白名单做下拉；库里有但
   白名单没有的值留空并显示「（未设）」，别顶成第一项。
 - 标注坐标是绝对 PDF 点，`top_left` 存 y 更小的那个点即视觉左下角，
