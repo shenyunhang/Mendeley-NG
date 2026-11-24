@@ -44,6 +44,9 @@
 }
 .source-link {
   display: inline-flex;
+  /* One field per row: with four or more sources, side-by-side chips would
+     squeeze every address into an ellipsis instead of showing them. */
+  flex: 1 1 100%;
   align-items: baseline;
   gap: 0.3rem;
   min-width: 0;

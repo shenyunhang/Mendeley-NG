@@ -9,8 +9,9 @@ import { isSafeExternalUrl } from '../../shared/externalUrl'
  * most papers imported from arXiv, so a details pane that draws only `url`
  * shows an empty link box on a paper whose source is one click away.
  *
- * Every link here is derived from what the catalogue already knows. Nothing is
- * written back, and the editable field keeps its own meaning: typing into it
+ * Every field is drawn as its own link. Two fields that happen to resolve to
+ * the same address are still two entries, because the label says which field
+ * each one came from. Nothing is written back: typing into the editable field
  * and pressing save patches `url`, while this list keeps showing the saved
  * record until that save succeeds.
  */
@@ -18,16 +19,9 @@ export type DocumentSourceLinkOrigin = 'url' | 'websites' | 'doi' | 'arxiv'
 
 export interface DocumentSourceLink {
   url: string
-  /** A short word naming where the link came from. */
+  /** A short word naming the field the link came from. */
   label: string
   origin: DocumentSourceLinkOrigin
-}
-
-const ORIGIN_LABEL: Record<DocumentSourceLinkOrigin, string> = {
-  url: '链接',
-  websites: '来源',
-  doi: 'DOI',
-  arxiv: 'arXiv'
 }
 
 /** DOIs arrive as bare ids, `doi:` strings and full resolver URLs. */
@@ -45,30 +39,46 @@ const arxivId = (raw: string): string =>
     .trim()
 
 /**
- * Sources in the order a reader would try them: a link saved on purpose, the
- * links Mendeley collected, then the resolver URLs implied by the identifiers.
- * Duplicates and anything that is not an http(s) address are left out, so the
- * list never offers a second copy of one address or a scheme the shell refuses.
+ * One entry per field, in catalogue order: `url`, every `websites` entry, the
+ * DOI in `identifiers`, a legacy top-level DOI, the arXiv id in `identifiers`,
+ * and a legacy top-level arXiv id. Same-address entries are kept rather than
+ * collapsed into one. Only the scheme is checked: `file:`, `javascript:` and
+ * every other non-http(s) address must never reach the OS shell.
  */
 export function documentSourceLinks(doc: Doc): DocumentSourceLink[] {
   const out: DocumentSourceLink[] = []
-  const seen = new Set<string>()
-  const add = (raw: unknown, origin: DocumentSourceLinkOrigin) => {
+  const add = (raw: unknown, origin: DocumentSourceLinkOrigin, label: string) => {
     if (typeof raw !== 'string') return
     const url = raw.trim()
-    if (!url || !isSafeExternalUrl(url) || seen.has(url)) return
-    seen.add(url)
-    out.push({ url, label: ORIGIN_LABEL[origin], origin })
+    if (!url || !isSafeExternalUrl(url)) return
+    out.push({ url, label, origin })
   }
 
-  if (doc.url) add(doc.url, 'url')
-  for (const site of doc.websites ?? []) add(site, 'websites')
+  add(doc.url, 'url', '链接')
+  const websites = doc.websites ?? []
+  for (let i = 0; i < websites.length; i++) {
+    add(websites[i], 'websites', `来源 ${i + 1}`)
+  }
 
-  const doi = doiId(doc.identifiers?.doi ?? doc.doi ?? '')
-  if (doi) add('https://doi.org/' + doi, 'doi')
+  const identifierDoi = doc.identifiers?.doi
+  if (identifierDoi) {
+    const id = doiId(identifierDoi)
+    if (id) add('https://doi.org/' + id, 'doi', 'DOI')
+  }
+  if (doc.doi) {
+    const id = doiId(doc.doi)
+    if (id) add('https://doi.org/' + id, 'doi', 'DOI（顶层）')
+  }
 
-  const arxiv = arxivId(doc.identifiers?.arxiv ?? doc.arxiv ?? '')
-  if (arxiv) add('https://arxiv.org/abs/' + arxiv, 'arxiv')
+  const identifierArxiv = doc.identifiers?.arxiv
+  if (identifierArxiv) {
+    const id = arxivId(identifierArxiv)
+    if (id) add('https://arxiv.org/abs/' + id, 'arxiv', 'arXiv')
+  }
+  if (doc.arxiv) {
+    const id = arxivId(doc.arxiv)
+    if (id) add('https://arxiv.org/abs/' + id, 'arxiv', 'arXiv（顶层）')
+  }
 
   return out
 }

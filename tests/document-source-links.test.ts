@@ -24,8 +24,8 @@ const ROOT = repoRoot()
 const read = (p: string): string =>
   fs.readFileSync(path.join(ROOT, p), 'utf-8').replace(/\r\n/g, '\n')
 
-describe('a paper keeps every source it can be opened at', () => {
-  it('puts a saved link first, then the collected links, then identifiers', () => {
+describe('a paper shows every source field as its own link', () => {
+  it('draws url, websites and both identifiers, one link each', () => {
     const links = documentSourceLinks(
       paper({
         url: 'https://example.org/paper',
@@ -39,29 +39,68 @@ describe('a paper keeps every source it can be opened at', () => {
       'https://doi.org/10.1000/abc',
       'https://arxiv.org/abs/2511.20347'
     ])
-    expect(links.map((l) => l.label)).toEqual(['链接', '来源', 'DOI', 'arXiv'])
+    expect(links.map((l) => l.label)).toEqual(['链接', '来源 1', 'DOI', 'arXiv'])
   })
 
-  it('falls back to websites when the editable url is empty, as arXiv imports are', () => {
+  it('shows all the other fields when the editable url is empty', () => {
     const links = documentSourceLinks(
       paper({
         websites: ['https://arxiv.org/pdf/2511.20347'],
         identifiers: { arxiv: '2511.20347' }
       })
     )
-    expect(links[0]).toMatchObject({ url: 'https://arxiv.org/pdf/2511.20347', origin: 'websites' })
-    expect(links).toHaveLength(2)
+    expect(links).toEqual([
+      { url: 'https://arxiv.org/pdf/2511.20347', label: '来源 1', origin: 'websites' },
+      { url: 'https://arxiv.org/abs/2511.20347', label: 'arXiv', origin: 'arxiv' }
+    ])
   })
 
-  it('prefers identifiers over the legacy top-level fields and uses them as a fallback', () => {
+  it('shows identifiers and the legacy top-level fields as separate links', () => {
     expect(
       documentSourceLinks(
-        paper({ doi: '10.1000/legacy', arxiv: '2001.00001', identifiers: { doi: '10.1000/new', arxiv: '2511.20347' } })
-      ).map((l) => l.url)
-    ).toEqual(['https://doi.org/10.1000/new', 'https://arxiv.org/abs/2511.20347'])
-    expect(documentSourceLinks(paper({ doi: '10.1000/legacy', arxiv: '2001.00001' })).map((l) => l.url)).toEqual([
-      'https://doi.org/10.1000/legacy',
-      'https://arxiv.org/abs/2001.00001'
+        paper({
+          doi: '10.1000/legacy',
+          arxiv: '2001.00001',
+          identifiers: { doi: '10.1000/new', arxiv: '2511.20347' }
+        })
+      )
+    ).toEqual([
+      { url: 'https://doi.org/10.1000/new', label: 'DOI', origin: 'doi' },
+      { url: 'https://doi.org/10.1000/legacy', label: 'DOI（顶层）', origin: 'doi' },
+      { url: 'https://arxiv.org/abs/2511.20347', label: 'arXiv', origin: 'arxiv' },
+      { url: 'https://arxiv.org/abs/2001.00001', label: 'arXiv（顶层）', origin: 'arxiv' }
+    ])
+    expect(
+      documentSourceLinks(paper({ doi: '10.1000/legacy', arxiv: '2001.00001' })).map((l) => l.label)
+    ).toEqual(['DOI（顶层）', 'arXiv（顶层）'])
+  })
+
+  it('shows every websites entry rather than only the first', () => {
+    const links = documentSourceLinks(
+      paper({
+        websites: [
+          'https://arxiv.org/pdf/2511.20347',
+          'https://example.org/publisher',
+          'https://qwen.ai/blog?id=sapo'
+        ]
+      })
+    )
+    expect(links.map((l) => l.label)).toEqual(['来源 1', '来源 2', '来源 3'])
+    expect(links.map((l) => l.url)).toEqual([
+      'https://arxiv.org/pdf/2511.20347',
+      'https://example.org/publisher',
+      'https://qwen.ai/blog?id=sapo'
+    ])
+  })
+
+  it('keeps a repeated address instead of collapsing it into one link', () => {
+    expect(
+      documentSourceLinks(
+        paper({ websites: ['https://arxiv.org/abs/2511.20347'], identifiers: { arxiv: '2511.20347' } })
+      )
+    ).toEqual([
+      { url: 'https://arxiv.org/abs/2511.20347', label: '来源 1', origin: 'websites' },
+      { url: 'https://arxiv.org/abs/2511.20347', label: 'arXiv', origin: 'arxiv' }
     ])
   })
 
@@ -77,14 +116,6 @@ describe('a paper keeps every source it can be opened at', () => {
     for (const [patch, url] of cases) {
       expect(documentSourceLinks(paper(patch)).map((l) => l.url)).toEqual([url])
     }
-  })
-
-  it('does not repeat one address twice', () => {
-    expect(
-      documentSourceLinks(
-        paper({ websites: ['https://arxiv.org/abs/2511.20347'], identifiers: { arxiv: '2511.20347' } })
-      )
-    ).toEqual([{ url: 'https://arxiv.org/abs/2511.20347', label: '来源', origin: 'websites' }])
   })
 
   it('refuses non-web schemes, blank strings and non-string websites entries', () => {
@@ -110,6 +141,7 @@ describe('a paper keeps every source it can be opened at', () => {
 
 describe('the details pane draws the derived links', () => {
   const panel = () => read('src/components/DetailsPanel.tsx')
+  const rule = () => read('src/lib/documentSourceLinks.ts')
 
   it('uses the pure rule and keeps the editable link field', () => {
     expect(panel()).toContain('documentSourceLinks(doc)')
@@ -117,6 +149,31 @@ describe('the details pane draws the derived links', () => {
     expect(panel()).toContain('className="source-links"')
     expect(panel()).toContain('title={link.url}')
     expect(panel()).toContain('void window.api.openExternal(link.url)')
+  })
+
+  it('gives every link a key of its own, since two can share one address', () => {
+    expect(panel()).toContain('sourceLinks.map((link, index) =>')
+    expect(panel()).toContain('key={`${link.origin}-${index}`}')
+  })
+
+  const dedupeSet = 'const seen = new Set<string>()'
+  it('the detector really catches a de-duplication set', () => {
+    expect('function f() { ' + dedupeSet + ' }').toContain(dedupeSet)
+  })
+  it('the rule has no de-duplication step', () => {
+    expect(rule()).not.toContain(dedupeSet)
+    expect(rule()).toContain('out.push({ url, label, origin })')
+  })
+
+  const eitherOr = 'doc.identifiers?.doi ?? doc.doi'
+  it('the detector really catches an either-or identifier lookup', () => {
+    expect('const doi = ' + eitherOr).toContain(eitherOr)
+  })
+  it('identifiers and top-level fields are not collapsed into one lookup', () => {
+    expect(rule()).not.toContain(eitherOr)
+    expect(rule()).toContain('const identifierDoi = doc.identifiers?.doi')
+    expect(rule()).toContain('if (identifierDoi)')
+    expect(rule()).toContain('if (doc.doi)')
   })
 
   const legacyDoiLink = "href={'https://doi.org/' + doc.doi}"

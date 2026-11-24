@@ -456,14 +456,16 @@ export default function DetailsPanel({
             placeholder="https://…"
             onChange={(e) => setForm({ ...form, url: e.target.value })}
           />
-          {/* `websites` and the identifiers are not the same field as `url`.
-              They stay read-only here: showing a source must never turn an
-              unsaved edit into a write to the cloud. */}
+          {/* Every source field is its own entry, including two fields that
+              resolve to the same address; the label names the field. `websites`
+              and the identifiers are not `url`, and they stay read-only here:
+              showing a source must never turn an unsaved edit into a write to
+              the cloud. */}
           <div className="source-links">
             {sourceLinks.length ? (
-              sourceLinks.map((link) => (
+              sourceLinks.map((link, index) => (
                 <a
-                  key={link.url}
+                  key={`${link.origin}-${index}`}
                   className="source-link"
                   href={link.url}
                   title={link.url}
