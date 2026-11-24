@@ -213,7 +213,7 @@ src/
   App.tsx               组装层：把 hooks 解构出来排进 JSX
   global.d.ts           唯一的 IPC 契约 Api
   window.d.ts           Window.api 的 ambient 声明（与 DOM 隔离）
-  components/           视图组件，PdfViewer.tsx 是阅读器、TitleBar.tsx 是标题条
+  components/           视图组件，PdfViewer.tsx 是阅读器、TitleBar.tsx 是工具栏内的窗口身份片段
   lib/hooks/            React 状态簇，按「谁跟谁一起变」切
   lib/hooks/useOverlayStack.ts  设置面板与三张工具条卡片的状态 + 一次 Esc 关一层
   lib/searchScope.ts    唯一的检索归一化、范围枚举与篇内查找词长
@@ -231,7 +231,7 @@ shared/                  三端共享：类型、规则常量、原子写、安�
                          fulltextRules.ts：全文表的形状、偏移、页码与 worker 故障
                          librarySync.ts：把云端回答变成同步提议的三条纯规则
                          pdfFontOptions.ts：pdf.js 字体资源的目录名与两种取法
-                         titleBarTheme.ts：标题条高度与两套主题色（CSS 变量的镜像）
+                         titleBarTheme.ts：单行 chrome 的高度与两套主题色（CSS 变量的镜像）
 tests/                   Vitest 单测：shared / renderer-pure / security / refactor-regression
                          main-ipc-system / main-ipc-files（Electron 用替身，捕获 handler）
                          main-library / main-marks（同步 pull、标注与阅读位置的接线）
@@ -661,13 +661,24 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   各加一个 class。全部是颜色 / 字重 / 内阴影，几何一律没碰。
 - 官方标记是别人的商标，公开分发留意使用范围。
 - 窗口顶栏不再用系统那条白底英文菜单：Windows 上 `titleBarStyle: 'hidden'` +
-  `titleBarOverlay` 只留系统画的最小化/最大化/关闭，React 的 `TitleBar.tsx`
-  画同高的 34px 拖拽条（图标、名字、`本地优先` 标记），右侧 138px 留给系统按钮。
-  按钮颜色不是 DOM，CSS 变量管不到：`shared/titleBarTheme.ts` 是唯一一份色值，
-  建窗时和 `config:set` 收到 `theme` 时各刷一次 `setTitleBarOverlay` 与
-  `setBackgroundColor`；`tests/title-bar-theme.test.ts` 断言它与
-  `base.css` 的 `--bg-2` / `--fg` 逐值一致。非 Windows 由 preload 的
-  `html.custom-title-bar` class 把这条 DOM 隐藏掉，仍用系统标题栏。
+  `titleBarOverlay` 只留系统画的最小化/最大化/关闭。原来是「34px 标题条 +
+  一行工具栏」两行，现已**合并成唯一一行** `.toolbar`（固定 46px）：
+  `TitleBar.tsx` 的 `TitleBar` 只渲染身份（图标、名字、`本地优先`），
+  作为工具栏第一个子元素；`TitleBarControls` 在最后占 138px 给系统按钮。
+  `shared/titleBarTheme.ts` 的 `TITLE_BAR_HEIGHT = 46` 必须与 `.toolbar`
+  的 `height` 相等，否则系统控件垂直不对齐；色值仍是唯一一份，
+  建窗时和 `config:set` 收到 `theme` 时各刷一次 `setTitleBarOverlay` /
+  `setBackgroundColor`，`tests/title-bar-theme.test.ts` 断言它与
+  `base.css` 的 `--bg-2` / `--fg` 逐值一致。
+  合并需要约 300px：身份 176 + 控件 138。腾法是把字号/主题簇、「全量」和
+  「撤销」收进「更多」（`筛选 / 排序 / 列` 实测仍放得下，留在栏上），
+  计数徽标保留在栏上——冒烟的筛选测试从 `.badge` 读 `\d+ / \d+` 判断收窄
+  前后数量，藏进菜单会让 `shown()` 读到 0。搜索框自动从 218 缩到约 184px，
+  冒烟的一行 / 不折行 / `overflow <= 0` 判据一个没放宽。
+  拖拽区只在 `.title-bar-identity`、`.toolbar > .grow`、`.title-bar-controls`
+  三处——`.toolbar` 本身若设 drag，里面的浮层菜单会继承 drag 而点不动。
+  非 Windows 由 preload 的 `html.custom-title-bar` class 把身份和控件占位
+  一并隐藏，仍用系统标题栏。
 - 默认英文菜单不能直接 `setApplicationMenu(null)`：复制、粘贴、全选、重载、
   开发者工具这些 role 快捷键挂在应用菜单上。`electron/main/menu.ts` 换成中文
   role 菜单，`autoHideMenuBar: true` 收起它；按 Alt 才会短暂出现。

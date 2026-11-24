@@ -31,7 +31,6 @@ import {
   queryMatches
 } from './lib/searchMatch'
 import { createViewGeneration } from './lib/viewGeneration'
-import TitleBar from './components/TitleBar'
 import FolderTree from './components/FolderTree'
 import TrashView from './components/TrashView'
 import TrashedDocPanel from './components/TrashedDocPanel'
@@ -2046,7 +2045,8 @@ export default function App() {
       }}
       onDrop={onDrop}
     >
-      <TitleBar />
+      {/* One chrome row: the toolbar carries the window identity at its left
+          and reserves room for the OS controls at its right. */}
       <Toolbar
         searchRef={searchRef}
         busy={busy}

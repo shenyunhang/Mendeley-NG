@@ -9,10 +9,14 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  /* Fixed height: on Windows this is the window's only chrome row and the
+     OS-drawn min/max/close controls are placed against it.  The shared
+     TITLE_BAR_HEIGHT must stay equal to this number. */
+  height: 46px;
+  flex: 0 0 46px;
+  padding: 0 12px;
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
-  flex: 0 0 auto;
   /* one row, always.  A bar that wraps pushes the library down a row every
      time the window narrows a little, and the table underneath is the thing
      being read */
@@ -31,14 +35,19 @@
 .toolbar > .grow {
   flex: 1 1 auto;
 }
+/* The empty middle of the single chrome row is where the window is dragged.
+   Nothing else in the bar is a drag region: menus, inputs and buttons have
+   to keep their clicks. */
+html.custom-title-bar .toolbar > .grow {
+  -webkit-app-region: drag;
+}
 /* The search box is the only thing that may give: its width was an arbitrary
    number, and a box that narrows to 140px is still a search box.  Giving way
-   here is what keeps the buttons at the far end — font size, theme — reachable
-   without scrolling the bar, which is why this is the number to come back to
-   when a button is added: the sort card cost 51px and this paid for 20 of it.
-   Sync and updater prose used to be shrinkable children here too, capped at
-   44% and ellipsised; both now live in .status-bar below the bar, where all
-   the width belongs to the sentence. */
+   here is what lets the app identity at the left and the 138px reserved for
+   the OS window controls at the right share the row with every command.
+   When the two rows were merged, the font/theme cluster and 全量 moved into
+   更多 and the box paid for the rest.  Sync and updater prose is a separate
+   .status-bar below this row. */
 .toolbar > .search-wrap {
   flex: 1 1 260px;
   min-width: 140px;
@@ -103,8 +112,9 @@
    for. Give it a bigger target than the network actions beside it: a larger
    label, a little more weight and more room around both axes. Sizes are in
    rem so the font-size knob still moves it. The bar stays one row — only the
-   search box gives way — and the extra width is small enough that the far-end
-   buttons remain reachable without scrolling (checked by smoke).  The soft
+   search box gives way — and the extra width is small enough that the
+   reserved window-control band stays reachable without scrolling (smoke
+   measures this).  The soft
    accent wash is what makes the primary action findable at a glance; it uses
    colour and an inset ring rather than extra padding, so the geometry the
    smoke test measures does not change. */

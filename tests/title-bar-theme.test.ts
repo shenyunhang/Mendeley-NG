@@ -40,7 +40,7 @@ describe('title bar colours', () => {
       symbolColor: '#1c1e21',
       height: TITLE_BAR_HEIGHT
     })
-    expect(TITLE_BAR_HEIGHT).toBe(34)
+    expect(TITLE_BAR_HEIGHT).toBe(46)
   })
 
   it('the shared colours are exactly the CSS --bg-2 and --fg values', () => {
@@ -102,16 +102,46 @@ describe('the custom chrome stays wired end to end', () => {
     expect(menu).not.toContain("label: 'File'")
   })
 
-  it('the strip is rendered only where the frame is hidden', () => {
-    expect(read('src/App.tsx')).toContain('<TitleBar />')
+  it('the identity is part of the single toolbar row, only where the frame is hidden', () => {
+    const toolbar = read('src/components/Toolbar.tsx')
+    expect(toolbar).toContain('<TitleBar />')
+    expect(toolbar).toContain('<TitleBarControls />')
+    // no second strip above the bar
+    expect(read('src/App.tsx')).not.toContain('<TitleBar />')
     const preload = read('electron/preload/index.ts')
     expect(preload).toContain("process.platform === 'win32'")
     expect(preload).toContain("'custom-title-bar'")
     const css = read('src/styles/titlebar.css')
-    expect(css).toMatch(/\.title-bar\s*\{\s*display:\s*none/)
-    expect(css).toContain('html.custom-title-bar .title-bar')
+    expect(css).toMatch(/\.title-bar-identity,\s*\.title-bar-controls\s*\{\s*display:\s*none/)
+    expect(css).toContain('html.custom-title-bar .title-bar-identity')
+    expect(css).toContain('html.custom-title-bar .title-bar-controls')
     expect(css).toContain('-webkit-app-region: drag')
     expect(css).toContain('flex: 0 0 138px')
     expect(read('src/styles.css')).toContain("@import './styles/titlebar.css';")
+  })
+
+  it('the OS controls line up with the one row', () => {
+    expect(TITLE_BAR_HEIGHT).toBe(46)
+    const layout = read('src/styles/layout.css')
+    expect(layout).toMatch(/\.toolbar\s*\{[\s\S]*?height: 46px;/)
+    expect(layout).toContain('html.custom-title-bar .toolbar > .grow')
+  })
+
+  it('the commands displaced by the merge are still reachable', () => {
+    const toolbar = read('src/components/Toolbar.tsx')
+    for (const label of ['全量同步', '缩小界面字号', '放大界面字号', '切到深色主题']) {
+      expect(toolbar, label).toContain(label)
+    }
+    expect(toolbar).toContain('p.onSync(true)')
+    expect(toolbar).toContain('p.onUndo()')
+    expect(toolbar).toContain('p.onFont(-1)')
+    expect(toolbar).toContain('p.onFont(1)')
+    expect(toolbar).toContain('p.onTheme()')
+    // the library count is still on the bar; the filter smoke reads it
+    expect(toolbar).toContain('{p.filtered.length} / {p.docs.length}')
+    // no A-/A+/theme buttons left directly on the bar
+    expect(toolbar).not.toContain('title="缩小界面字号"')
+    expect(toolbar).not.toContain('title="放大界面字号"')
+    expect(toolbar).not.toContain("p.theme === 'light' ? '☀' : '☾'")
   })
 })

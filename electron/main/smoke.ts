@@ -1679,12 +1679,20 @@ export async function runSmoke() {
   // Every undo step is the inverse of a call that wrote to the cloud, so the
   // run cannot exercise one without moving the user's library.  It can still
   // check the button is there and idle.
+  // Undo moved into 更多 when the title strip and the toolbar became one row.
+  // The offer still has to be there and idle; open the menu to look, then
+  // close it again so the rest of the run starts from the same state.
   const undoBtn = JSON.parse(
     await w.webContents.executeJavaScript(
-      '(()=>{const b=[...document.querySelectorAll(".toolbar button")]'
+      '(async()=>{const more=[...document.querySelectorAll(".toolbar button")]'
+      + '.find(x=>x.textContent.trim().startsWith("更多"));'
+      + 'if(!more)return JSON.stringify({found:false});'
+      + 'more.click();await new Promise(r=>setTimeout(r,200));'
+      + 'const b=[...document.querySelectorAll(".menu-pop button")]'
       + '.find(x=>x.textContent.trim().startsWith("撤销"));'
-      + 'if(!b)return JSON.stringify({found:false});'
-      + 'return JSON.stringify({found:true,disabled:b.disabled,title:b.title})})()'
+      + 'const out=b?JSON.stringify({found:true,disabled:b.disabled,title:b.title})'
+      + ':JSON.stringify({found:false});'
+      + 'more.click();return out})()'
     )
   )
   log('undo button', undoBtn)

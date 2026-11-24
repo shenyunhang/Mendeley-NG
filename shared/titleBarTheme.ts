@@ -10,7 +10,9 @@
  * checks the CSS still matches.
  */
 
-export const TITLE_BAR_HEIGHT = 34
+/** The single chrome row is the toolbar itself.  Its height has to match
+ *  .toolbar's fixed height so the OS-drawn min/max/close controls line up. */
+export const TITLE_BAR_HEIGHT = 46
 
 export interface TitleBarColors {
   /** Overlay and pre-render window background; mirrors --bg-2. */

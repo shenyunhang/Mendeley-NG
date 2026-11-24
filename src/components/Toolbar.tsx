@@ -8,6 +8,7 @@ import {
 } from '../../shared/types'
 import ColumnPicker from './ColumnPicker'
 import FilterMenu from './FilterMenu'
+import TitleBar, { TitleBarControls } from './TitleBar'
 import MenuButton, { type MenuItem } from './MenuButton'
 import SortMenu from './SortMenu'
 import { CITE_STYLES, isCiteStyle, type CiteStyle } from '../lib/cite'
@@ -166,6 +167,44 @@ export default function Toolbar(p: Props) {
       disabled: !p.canSaveSearch,
       title: '把当前的文件夹 + 搜索词 + 筛选存成一个虚拟文件夹',
       run: p.onSaveSearch
+    },
+    { sep: true },
+    {
+      label: p.undoLabel ? `撤销：${p.undoLabel}` : '撤销',
+      disabled: !p.undoLabel,
+      title: '撤销上一次批量操作  (Ctrl+Z)',
+      run: () => p.onUndo()
+    },
+    {
+      // The identity and the OS window controls took the width this button and
+      // the font/theme cluster used to have.  They are still one press away,
+      // just behind 更多 rather than on the bar.
+      label: '全量同步',
+      disabled: p.busy,
+      title: '忽略上次同步时间，重新拉全库；每次同步都会对账云端回收站',
+      run: () => p.onSync(true)
+    },
+    { sep: true },
+    {
+      label: '缩小界面字号',
+      title: `当前 ${p.fontSize}px；与 A− / Ctrl+− 相同`,
+      run: () => p.onFont(-1)
+    },
+    {
+      label: '放大界面字号',
+      title: `当前 ${p.fontSize}px；与 A+ / Ctrl+= 相同`,
+      run: () => p.onFont(1)
+    },
+    {
+      label: p.theme === 'light' ? '切到深色主题' : '切到浅色主题',
+      title: '与工具栏 ☾ / ☀ 相同，原生滚动条和窗口控制按钮也跟着变',
+      run: () => p.onTheme()
+    },
+    {
+      label: `${p.filtered.length} / ${p.docs.length} 篇`,
+      disabled: true,
+      title: '当前筛选结果 / 库内总数',
+      run: () => {}
     }
   ]
 
@@ -238,6 +277,7 @@ export default function Toolbar(p: Props) {
 
   return (
     <div className="toolbar">
+      <TitleBar />
       {/* Reading comes first because it is what the library was gathered for.
           Syncing used to own this spot and the highlight that went with it,
           which put the only action in the program that needs the network at
@@ -258,13 +298,6 @@ export default function Toolbar(p: Props) {
       </button>
       <button onClick={() => p.onSync(false)} disabled={p.busy}>
         {p.busy ? '同步中…' : '同步云端'}
-      </button>
-      <button
-        onClick={() => p.onSync(true)}
-        disabled={p.busy}
-        title="忽略上次同步时间，重新拉全库；每次同步都会对账云端回收站"
-      >
-        全量
       </button>
       <MenuButton
         label="导出"
@@ -347,16 +380,7 @@ export default function Toolbar(p: Props) {
         title="主题、字号、PDF 目录、命名模板、全文索引；导入 token、检查更新与项目主页也在这里"
         items={setup}
       />
-      <MenuButton label="更多" title="查重、全部标注、回收站、保存搜索" items={more} />
-      <button
-        onClick={p.onUndo}
-        disabled={!p.undoLabel}
-        title={
-          p.undoLabel ? `撤销：${p.undoLabel}  (Ctrl+Z)` : '没有可撤销的操作'
-        }
-      >
-        撤销
-      </button>
+      <MenuButton label="更多" title="查重、全部标注、回收站、保存搜索、撤销、全量同步与字号主题" items={more} />
       <div style={{ position: 'relative', display: 'inline-flex' }}>
         <button
           ref={filterBtn}
@@ -473,26 +497,15 @@ export default function Toolbar(p: Props) {
       >
         全文
       </button>
+      {/* The empty middle is a drag handle; the last span reserves the width
+          Chromium needs for the native min/max/close controls.  Font size,
+          theme, 全量 and 撤销 moved into 更多 to pay for this row; the count
+          stays here because it is read at a glance, not behind a menu. */}
       <span className="grow" />
-      <button style={{ padding: '3px 9px' }} title="缩小界面字号" onClick={() => p.onFont(-1)}>
-        A−
-      </button>
-      <span className="badge" title="界面字号（CSS px，系统缩放仍会再乘一次）">
-        {p.fontSize}
-      </span>
-      <button style={{ padding: '3px 9px' }} title="放大界面字号" onClick={() => p.onFont(1)}>
-        A+
-      </button>
-      <button
-        style={{ padding: '3px 9px' }}
-        title={p.theme === 'light' ? '切到深色' : '切到浅色'}
-        onClick={() => p.onTheme()}
-      >
-        {p.theme === 'light' ? '☀' : '☾'}
-      </button>
       <span className="badge">
         {p.filtered.length} / {p.docs.length}
       </span>
+      <TitleBarControls />
     </div>
   )
 }
