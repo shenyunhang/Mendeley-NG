@@ -100,6 +100,16 @@ export async function runPerf() {
   const rows = () => js('document.querySelectorAll(".row,.res-row").length')
   log('rows at rest', await rows())
 
+  // -- an idle window as long as two typing experiments. A long task that
+  //    also shows up here cannot be charged to a keystroke: startup work
+  //    (an index check, an update check, a full collection) lands several
+  //    seconds after the window opens, right in the middle of typing.
+  //    Measuring it separately is what keeps that block out of the typing
+  //    numbers without hiding it.
+  await reset()
+  await wait(6000)
+  const idle = await report('idle for six seconds')
+
   /**
    * How long one keystroke costs, measured as the time the event itself takes
    * to return.
@@ -132,7 +142,13 @@ export async function runPerf() {
   //    (the same 5,600 documents whatever the word is) from building the
   //    cards (one per paper the word left).  A word that matches nothing
   //    still pays for the first and pays nothing for the second.
-  const type = async (word: string) => {
+  const type = async (word: string, label = `typing "${word}"`) => {
+    // Each word is its own experiment. Without this reset the third word was
+    // typed over the second, so "e" was really "network -> e": a seven-character
+    // query collapsing to one in a single event, which no reader ever does.
+    // Its long block was a measurement artefact, not a keystroke.
+    await setInput('.toolbar input', '')
+    await wait(250)
     await reset()
     const per: number[] = []
     for (let n = 1; n <= word.length; n++) {
@@ -145,7 +161,7 @@ export async function runPerf() {
       left,
       msPerKey: per,
       worstKey: Math.max(...per),
-      ...(await report(`typing "${word}"`))
+      ...(await report(label))
     }
   }
   const typingNone = await type('zzzzqqq')
@@ -175,6 +191,15 @@ export async function runPerf() {
   const opening = await report(
     'opening a paper' + (Number(picked) === 1 ? '' : ' (nothing to click)')
   )
+
+  // -- typing with a PDF already open. This is the ordinary working posture,
+  //    not an edge case: the query is also handed to the reader, which may
+  //    start a page-by-page text scan on the same keystroke. Measuring the
+  //    list alone would miss that entirely. The pane stays on the PDF tab so
+  //    the paging measurement below still has its document.
+  const typingWithPdf = await type('network', 'typing with the PDF open')
+  await setInput('.toolbar input', '')
+  await wait(1200)
 
   // -- scrolling the list: the virtualiser has to keep up with the wheel.
   //    Three rounds rather than one, because the first carries the cost of
@@ -272,10 +297,29 @@ export async function runPerf() {
   )
   await wait(600)
 
+  // -- typing with the details pane open. It lists every cached field as a
+  //    controlled input, so whatever it rebuilds is paid for on every key.
+  //    Last on purpose: switching the tab unloads the reader, and the paging
+  //    and selection measurements above have already had their document.
+  const detailsTab = await js(
+    '(()=>{const b=[...document.querySelectorAll(".pane-right button")]'
+    + '.find(x=>x.textContent.trim()==="详情");if(!b)return 0;b.click();return 1})()'
+  )
+  await wait(800)
+  let typingWithDetails: Record<string, unknown> = { skipped: 'no details tab' }
+  if (Number(detailsTab) === 1) {
+    typingWithDetails = await type('network', 'typing with the details pane open')
+    await setInput('.toolbar input', '')
+    await wait(1200)
+  }
+
   log('summary', {
+    idle,
     typingNone,
     typingSome,
     typingMany,
+    typingWithPdf,
+    typingWithDetails,
     clearing,
     opening,
     paging,

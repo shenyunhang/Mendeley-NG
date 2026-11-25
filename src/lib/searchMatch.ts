@@ -35,8 +35,10 @@ export function foldSeparators(s: string): string {
   return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 }
 
-/** The same text with word separators removed, for space-free scripts. */
-function compact(s: string): string {
+/** The same text with word separators removed, for space-free scripts.
+ *  Exported so a caller holding thousands of haystacks can build this form
+ *  once per library change instead of once per document per keystroke. */
+export function compactForComparison(s: string): string {
   return s.replace(/ /g, '')
 }
 
@@ -241,20 +243,40 @@ export function spanBounds(spans: WordSpan[]): { at: number; len: number } {
  * folded haystack once per library change); when absent it is computed here.
  * Only the comparison uses the folded copy -- `terms` are always real words
  * taken from the haystack, so marking can find them in the original text.
+ *
+ * `corpusWords` is the union of the words in every haystack being searched.
+ * The word-level fallback insists on `exactWords > 0`, so it cannot succeed
+ * for any document when not one query word occurs anywhere in the corpus.
+ * Without that check a nonsense word makes every keystroke split all 5700
+ * folded haystacks into word arrays and walk every word, for a result that
+ * was determined before the first document was opened. Callers searching a
+ * single string simply omit it and keep the original behaviour.
+ *
+ * `compactFoldedHay` is the space-free form of `foldedHay`, which a caller
+ * with a prebuilt haystack can cache too. Both optional arguments are pure
+ * accelerators: leaving them out computes the same values in place.
  */
-export function matchQuery(hay: string, q: string, foldedHay?: string): QueryMatch | null {
+export function matchQuery(
+  hay: string,
+  q: string,
+  foldedHay?: string,
+  corpusWords?: ReadonlySet<string>,
+  compactFoldedHay?: string
+): QueryMatch | null {
   if (!q) return null
   if (hay.includes(q)) return { kind: 'exact', terms: [q] }
 
   const folded = foldedHay ?? foldSeparators(hay)
   const want = foldSeparators(q)
   if (!want) return null
-  if (folded.includes(want)) return { kind: 'near', terms: queryTokens(q) }
-  if (compact(folded).includes(compact(want))) {
-    return { kind: 'near', terms: queryTokens(q) }
+  const wanted = queryTokens(q)
+  if (folded.includes(want)) return { kind: 'near', terms: wanted }
+  const compactFolded = compactFoldedHay ?? compactForComparison(folded)
+  if (compactFolded.includes(compactForComparison(want))) {
+    return { kind: 'near', terms: wanted }
   }
 
-  const wanted = queryTokens(q)
+  if (corpusWords && !wanted.some((word) => corpusWords.has(word))) return null
   const words = folded.split(' ').filter(Boolean)
   const positions = matchWords(words, wanted)
   if (!positions) return null
@@ -273,10 +295,20 @@ export function allowNearFor(hays: Iterable<string>, q: string): boolean {
   return true
 }
 
-/** The one predicate behind the list, its counts and saved searches. */
-export function queryMatches(hay: string, q: string, allowNear: boolean, foldedHay?: string): boolean {
+/** The one predicate behind the list, its counts and saved searches.
+ *  `corpusWords` is the optional corpus-wide shortcut described above; a
+ *  caller without one (a saved search, a single string) keeps the same
+ *  answer, just without the shortcut. */
+export function queryMatches(
+  hay: string,
+  q: string,
+  allowNear: boolean,
+  foldedHay?: string,
+  corpusWords?: ReadonlySet<string>,
+  compactFoldedHay?: string
+): boolean {
   if (!q) return true
   if (hay.includes(q)) return true
-  return allowNear && matchQuery(hay, q, foldedHay)?.kind === 'near'
+  return allowNear && matchQuery(hay, q, foldedHay, corpusWords, compactFoldedHay)?.kind === 'near'
 }
 

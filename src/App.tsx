@@ -26,6 +26,7 @@ import {
 } from './lib/searchScope'
 import {
   allowNearFor,
+  compactForComparison,
   foldSeparators,
   matchQuery,
   queryMatches
@@ -667,6 +668,30 @@ export default function App() {
   }, [haystack])
 
   /**
+   * Every word that occurs in any of those folded haystacks. The word-level
+   * near fallback can only succeed when at least one query word really occurs
+   * in the corpus; asking this set once per query keeps a nonsense word from
+   * splitting all several thousand haystacks into word arrays on every key.
+   * It changes no answer, only how quickly "no paper can match" is reached.
+   */
+  const corpusWords = useMemo(() => {
+    const words = new Set<string>()
+    for (const folded of foldedHay.values()) {
+      for (const word of folded.split(' ')) if (word) words.add(word)
+    }
+    return words
+  }, [foldedHay])
+
+  /** The space-free comparison form, also built once per library change.
+   *  Rebuilding it for each of several thousand papers on each keystroke was
+   *  allocating that many long strings for a question about one short word. */
+  const compactFoldedHay = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const [id, folded] of foldedHay) m.set(id, compactForComparison(folded))
+    return m
+  }, [foldedHay])
+
+  /**
    * What has to happen before there is anything to look at, or null when
    * there is.  Only one thing is ever named, because being told about three
    * missing pieces at once is not an instruction.
@@ -726,7 +751,14 @@ export default function App() {
       // ordinary search must keep returning the same papers in the same order.
       const allowNear = allowNearFor(out.map((d) => haystack.get(d.id) ?? ''), q)
       out = out.filter((d) =>
-        queryMatches(haystack.get(d.id) ?? '', q, allowNear, foldedHay.get(d.id))
+        queryMatches(
+          haystack.get(d.id) ?? '',
+          q,
+          allowNear,
+          foldedHay.get(d.id),
+          corpusWords,
+          compactFoldedHay.get(d.id)
+        )
       )
     }
     const { key, dir } = sort
@@ -741,7 +773,7 @@ export default function App() {
       compareSortKeys(a.k, b.k, dir, a.d.title ?? '', b.d.title ?? '')
     )
     return rows.map((r) => r.d)
-  }, [docs, folderId, query, sort, filters, haystack, foldedHay])
+  }, [docs, folderId, query, sort, filters, haystack, foldedHay, corpusWords, compactFoldedHay])
 
   /** For a near match, the words that really occur in the paper. The card
    *  marks these instead of the query, which may differ by one character. */
@@ -750,11 +782,17 @@ export default function App() {
     const m = new Map<string, string[]>()
     if (!q || !isMetadataScope(scope)) return m
     for (const d of filtered) {
-      const r = matchQuery(haystack.get(d.id) ?? '', q, foldedHay.get(d.id))
+      const r = matchQuery(
+        haystack.get(d.id) ?? '',
+        q,
+        foldedHay.get(d.id),
+        corpusWords,
+        compactFoldedHay.get(d.id)
+      )
       if (r && r.kind === 'near') m.set(d.id, r.terms)
     }
     return m
-  }, [filtered, haystack, foldedHay, query, scope])
+  }, [filtered, haystack, foldedHay, corpusWords, compactFoldedHay, query, scope])
 
   /**
    * How many papers each switch would leave, counted on the list as it stands
@@ -772,7 +810,14 @@ export default function App() {
     if (q) {
       const allowNear = allowNearFor(base.map((d) => haystack.get(d.id) ?? ''), q)
       base = base.filter((d) =>
-        queryMatches(haystack.get(d.id) ?? '', q, allowNear, foldedHay.get(d.id))
+        queryMatches(
+          haystack.get(d.id) ?? '',
+          q,
+          allowNear,
+          foldedHay.get(d.id),
+          corpusWords,
+          compactFoldedHay.get(d.id)
+        )
       )
     }
     // One walk, counting as it goes.  `base.filter(FILTER_TEST[k]).length`
@@ -786,7 +831,7 @@ export default function App() {
       for (const k of LIST_FILTERS) if (FILTER_TEST[k](d)) out[k]++
     }
     return out
-  }, [docs, folderId, query, haystack, foldedHay, tree])
+  }, [docs, folderId, query, haystack, foldedHay, corpusWords, compactFoldedHay, tree])
 
   /**
    * The keydown listener is installed once, so it reaches the list and the
@@ -819,6 +864,73 @@ export default function App() {
       (pinned?.id === selId ? pinned : null),
     [filtered, docs, selId, pinned]
   )
+
+  /**
+   * The details pane is memoised, so the four callbacks it receives must keep
+   * their identity across a keystroke. `selected` resolves to the same cached
+   * document object whatever the search box says, so only actually changing
+   * paper rebuilds them -- and that is the one thing that should rebuild the
+   * pane. All the setters are React state setters and are stable by contract.
+   */
+  const detailsSaved = useCallback(
+    (d: Doc) =>
+      setLib((l) =>
+        l ? { ...l, docs: l.docs.map((x) => (x.id === d.id ? d : x)) } : l
+      ),
+    [setLib]
+  )
+  const detailsNoteSaved = useCallback((id: string, text: string) => {
+    setNoteMap((m) => {
+      const next = { ...m }
+      if (text) next[id] = text
+      else delete next[id]
+      return next
+    })
+  }, [])
+  const detailsTrash = useCallback(async () => {
+    if (!selected) return
+    const id = selected.id
+    const go = await askConfirm({
+      title: '把这条文献移入回收站？',
+      body: `「${selected.title || '无标题'}」会移入回收站，可以在回收站里恢复。`,
+      ok: '移入回收站'
+    })
+    if (!go) return
+    const r = await window.api.trashDoc(id)
+    if (!r.ok) {
+      setErr('移入回收站失败：云端没有确认，这条还在库里。')
+      return
+    }
+    setLib((l) => (l ? { ...l, docs: l.docs.filter((x) => x.id !== id) } : l))
+    setSelId(null)
+  }, [askConfirm, selected, setErr, setLib, setSelId])
+  const detailsToggleFolder = useCallback(
+    async (fid: string, has: boolean) => {
+      if (!selected) return
+      const id = selected.id
+      if (has) await window.api.removeFromFolder(fid, id)
+      else await window.api.addToFolder(fid, id)
+      setLib((l) =>
+        l
+          ? {
+              ...l,
+              docs: l.docs.map((x) =>
+                x.id === id
+                  ? {
+                      ...x,
+                      folder_uuids: has
+                        ? (x.folder_uuids ?? []).filter((f) => f !== fid)
+                        : [...(x.folder_uuids ?? []), fid]
+                    }
+                  : x
+              )
+            }
+          : l
+      )
+    },
+    [selected, setLib]
+  )
+
   /** A paper in the bin is not an editable library document: the panel has
    *  to say so, and the two buttons it offers are the two that mean anything
    *  there.  Keyed off the pinned record rather than off view.kind, so a
@@ -2724,57 +2836,10 @@ export default function App() {
             <DetailsPanel
               doc={selected}
               folders={folders}
-              onSaved={(d) =>
-                setLib((l) =>
-                  l ? { ...l, docs: l.docs.map((x) => (x.id === d.id ? d : x)) } : l
-                )
-              }
-              onTrash={async () => {
-                // the details pane is a quieter place to do this from than a
-                // menu, which is exactly why it has to ask
-                const go = await askConfirm({
-                  title: '把这条文献移入回收站？',
-                  body: `「${selected.title || '无标题'}」会移入回收站，可以在回收站里恢复。`,
-                  ok: '移入回收站'
-                })
-                if (!go) return
-                const r = await window.api.trashDoc(selected.id)
-                if (!r.ok) {
-                  setErr('移入回收站失败：云端没有确认，这条还在库里。')
-                  return
-                }
-                setLib((l) => (l ? { ...l, docs: l.docs.filter((x) => x.id !== selected.id) } : l))
-                setSelId(null)
-              }}
-              onNoteSaved={(id, text) =>
-                setNoteMap((m) => {
-                  const next = { ...m }
-                  if (text) next[id] = text
-                  else delete next[id]
-                  return next
-                })
-              }
-              onToggleFolder={async (fid, has) => {
-                if (has) await window.api.removeFromFolder(fid, selected.id)
-                else await window.api.addToFolder(fid, selected.id)
-                setLib((l) =>
-                  l
-                    ? {
-                        ...l,
-                        docs: l.docs.map((x) =>
-                          x.id === selected.id
-                            ? {
-                                ...x,
-                                folder_uuids: has
-                                  ? (x.folder_uuids ?? []).filter((f) => f !== fid)
-                                  : [...(x.folder_uuids ?? []), fid]
-                              }
-                            : x
-                        )
-                      }
-                    : l
-                )
-              }}
+              onSaved={detailsSaved}
+              onTrash={detailsTrash}
+              onNoteSaved={detailsNoteSaved}
+              onToggleFolder={detailsToggleFolder}
             />
           ) : (
             reader
