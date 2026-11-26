@@ -244,14 +244,20 @@ describe('the sort rule has one owner', () => {
   const read = (p: string): string =>
     fs.readFileSync(path.join(rootUp(), p), 'utf-8').replace(/\r\n/g, '\n')
 
-  it('App.tsx delegates to compareSortKeys and no longer inlines the comparison', () => {
+  it('App.tsx sorts the library once and filters that order per keystroke', () => {
     const app = read('src/App.tsx')
-    expect(app).toContain('sortKeyFor(d, key)')
-    expect(app).toContain('compareSortKeys(a.k, b.k, dir')
+    // The old wiring built wrapper rows out of `search.matched` and sorted
+    // them on every key. `sortKeyFor` and `compareSortKeys` now live behind
+    // the one pure module, so those two strings correctly disappear from
+    // App.tsx; the comparison rule itself is asserted below.
+    expect(app).toContain('sortedLibrary(docs, sort)')
+    expect(app).toContain('filterSortedLibrary(sortedAll, search.matched)')
+    expect(app).not.toContain('search.matched.map((d) => ({ d, k: sortKeyFor(d, key) }))')
     expect(app).not.toContain('(a.v < b.v ? -1 : 1) * dir')
-    // A cached-key comparator was tried and measured slower; the wrapper
-    // shape is deliberate, not an oversight. See library-search.test.ts.
     expect(app).not.toContain('sortKeys.get(a.id)')
+    const order = read('src/lib/libraryOrder.ts')
+    expect(order).toContain('sortKeyFor(d, sort.key)')
+    expect(order).toContain('compareSortKeys(a.k, b.k, sort.dir')
   })
 
   it('columns.ts keeps the missing-value rule next to the comparator', () => {

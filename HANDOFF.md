@@ -219,6 +219,7 @@ src/
   lib/hooks/            React 状态簇，按「谁跟谁一起变」切
   lib/hooks/useOverlayStack.ts  设置面板与三张工具条卡片的状态 + 一次 Esc 关一层
   lib/searchScope.ts    唯一的检索归一化、范围枚举与篇内查找词长
+  lib/libraryOrder.ts   全库排一次序、按序过滤匹配行的纯规则
   lib/mergeFields.ts    查重合并只补空缺字段的纯规则
   lib/budgets.ts        下载并发、路径 flush 与批量进度的具名预算
   lib/                  与 React 无关的纯规则，可直接在 Node 里 import
@@ -297,6 +298,12 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   曾经缓存一份在 handler 闭包里，外部（第二个窗口、恢复、手改）一写就过期，
   下一次 set 会把旧页码写回去，而 `reading:load` 读的是文件、两边答案不一致。
   文件只有每篇一个页码，多读一次的成本可以忽略。
+- `library.json` 是例外：十二兆字节、主进程有几十处调用点，所以
+  `loadLibrary()` 留了一份按 `mtimeNs` / `ctimeNs` / 字节数校验的解析缓存，
+  每次写入都会显式丢掉它，返回的每一行及其数组字段都是副本。这与上面
+  `reading:set` 的闭包快照不是一回事：那份没有校验、外部一写就过期；这份
+  每次读都对文件身份，外部写入、手改和本进程写入都必然失效。其余四个
+  小 JSON 仍然每次读盘，不为省几毫秒引入同一类风险。
 
 ### 仓库
 
@@ -772,7 +779,27 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   现在 `--perf` 在 `ipc/index.ts` 注册通道之前装 `ipc/timing.ts` 的包装：
   `syncMs` 是交回值或 promise 之前不让出事件循环的那一段，`totalMs` 另含
   promise 的等待，同步处理器仍返回同步值、rejection 仍原样抛出。普通启动不装，
-  环形缓冲上限 4000 条。`perf.ts` 末段另跑三个全文词，逐个给主进程报告。
+  环形缓冲上限 4000 条。`perf.ts` 末段另跑三个全文词，逐个给主进程报告，
+  并在扫描进行中并发问一次 `config:get`，用它的等待时间证明主进程有没有让出事件循环。
+- **全文与参考文献检索只有一个算法、两个驱动**。`fulltext.ts` 的
+  `ftSearchSteps` 与 `refsindex.ts` 的 `searchRefsSteps` 是 generator，按篇/按偏移
+  分片 `yield`；`ftSearch` / `searchRefs` 一口气跑完，冒烟与差分测试仍拿同步数组，
+  IPC handler 走 `ftSearchAsync` / `searchRefsAsync`，每片之间 `setImmediate`。
+  首份语料用 `fs.promises.readFile` 读，新查询在下一片放弃旧扫描，渲染层的
+  `LatestSearch` 本来就会丢掉过期答案。`tests/async-search-parity.test.ts`
+  逐个查询对两个驱动的命中逐值比，并证明 generator 确实 yield、事件循环确实空闲。
+- **排序不跟着按键走**。`src/lib/libraryOrder.ts` 按 `[docs, sort]` 把全库排一次，
+  按键只按这个顺序过滤 `search.matched`；比较规则与子集无关、`sort` 稳定，
+  所以答案与旧写法逐值相同（`tests/library-order.test.ts` 覆盖七个键、两个方向、
+  二十四组子集，并先证明探测器抓得到错误顺序）。`App.tsx` 不再 import
+  `sortKeyFor` / `compareSortKeys`，两处源码串护栏已随接线一起改。
+- **切行要销毁 pdf.js 的 loading task**。`PdfViewer` 的 effect 只在 `doc.localPdf`
+  变化时清理，旧写法只把 `dead` 置真，十个 `getDocument()` 会各自解析到底。
+  现在 cleanup 调 `src/lib/pdfTaskCleanup.ts` 的 `destroyLoadingTask(task)`，
+  完成与未完成的任务都归它释放；`destroy()` 对已拆掉的 worker 会 reject，
+  走 `ignoreFailure(FAILURE.workerCleanup, e)` 这道具名门而不写空 catch，
+  所以冒烟里「十二道门」的计数不动。`tests/pdf-task-cleanup.test.ts` 锁接线
+  并实测两种结局，`tests/` 其余接线断言与冒烟的预取判据一个字没放宽。
 - 冒烟跑在真实配置上会残留 sort、第一行论文每次可能不同，
   别把「哪篇排第一」写进断言。
 - `--perf` 的三个词各自从空框起测，是三次独立实验；不清空会让第三个词变成
@@ -980,7 +1007,11 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - `shared/atomicJson.ts` 的临时名固定为 `<file>.tmp`。本进程内所有 JSON 写都在主线程
   串行，且自检会拒绝第二份程序共写同一份 config；这不是并发安全的实现，不要把它
   拿去给多进程场景用。
-- `src/App.tsx` 仍是组装层里的一个大文件，`Toolbar` 的 props 很多。已抽出
+- 每次打星 / 标已读 / 改标签都会经 `doc:patch` → `saveLibrary` 原子重写整份
+  `library.json`。解析已被缓存挡掉，但十二兆字节的写盘仍在，批处理里是一次
+  一篇地写。要去掉它得换存储形状，不是改一次接线的事。
+- `src/App.tsx` 仍是组装层里的一个大文件，`Toolbar` 的 props 很多。按键时不再
+  重排整库（见 §8.9），但状态簇没有拆。已抽出
   `runBatch`（`lib/batch.ts`）、浮层栈（`lib/overlayStack.ts` +
   `hooks/useOverlayStack.ts`）、合并补字段（`lib/mergeFields.ts`）与批量预算
   （`lib/budgets.ts`），每一处都是先配纯规则单测再改接线。剩下的 `setLib`

@@ -33,6 +33,7 @@ import {
   type ZoomMode
 } from '../lib/pdfgeom'
 import { PrefetchCache } from '../lib/pdfcache'
+import { destroyLoadingTask } from '../lib/pdfTaskCleanup'
 import { noteForSelection } from '../lib/annotationNote'
 import { bitmapPixelSize, devicePixelRatioOrOne } from '../lib/bitmapPixelSize'
 import { READING_POSITION_PERSIST_DEBOUNCE_MS } from '../lib/timing'
@@ -256,16 +257,15 @@ export default function PdfViewer({
     setOutline(null)
     if (!doc.localPdf) return
     let dead = false
-    pdfjs
-      .getDocument({
-        url: window.api.pdfUrl(doc.localPdf),
-        ...pdfFontOptionsFromUrl(document.baseURI)
-      })
-      .promise.then(async (p) => {
-        if (dead) {
-          p.destroy()
-          return
-        }
+    const task = pdfjs.getDocument({
+      url: window.api.pdfUrl(doc.localPdf),
+      ...pdfFontOptionsFromUrl(document.baseURI)
+    })
+    task.promise
+      .then(async (p) => {
+        // Cleanup owns destruction now, including the document that arrived
+        // after the reader had already moved on.
+        if (dead) return
         setPdf(p)
         setNumPages(p.numPages)
         // the outline is cheap and lets a long paper be navigated by section,
@@ -281,6 +281,11 @@ export default function PdfViewer({
     return () => {
       dead = true
       pending.current?.cancel()
+      // Switching rows used to leave every earlier getDocument() parsing to
+      // completion: ten clicks meant ten pdf.js tasks on the main thread.
+      // Destroying the loading task stops the in-flight parse and releases
+      // the document the previous row had opened.
+      void destroyLoadingTask(task)
     }
   }, [doc.localPdf])
 

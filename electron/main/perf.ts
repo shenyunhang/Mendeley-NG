@@ -326,6 +326,15 @@ export async function runPerf() {
   const mainIpc = summariseIpcTimings(getIpcTimings())
   log('main-process IPC for the run', mainIpc)
 
+  // -- reading the same cache repeatedly. Batch edits, PDF downloads and
+  //    folder changes all ask for it; only the first read should pay for a
+  //    twelve-megabyte parse now that the cache is stamp-checked.
+  resetIpcTimings()
+  for (let n = 0; n < 6; n++) {
+    await js('window.api.loadLibrary().then(x => x && Array.isArray(x.docs) ? x.docs.length : -1)')
+  }
+  log('library:load six times', summariseIpcTimings(getIpcTimings()))
+
   // -- full-text search is answered in this process by scanning the entire
   //    corpus. The library search box above never leaves the renderer, so
   //    none of the earlier experiments exercised the one remaining block.
@@ -333,12 +342,22 @@ export async function runPerf() {
   const ftMain: Record<string, unknown> = {}
   for (const q of ['qwen3 te', 'network', 'zzzzqqq']) {
     resetIpcTimings()
+    // A second channel is asked while the scan is in flight. If the scan owns
+    // the main process from start to finish, this tiny config read waits for
+    // the whole scan; if the scan yields, it is answered in a few ms. This is
+    // the number the renderer's longtask observer could never give us.
     const r = await js(
-      `window.api.ftSearch(${JSON.stringify(q)})`
-      + '.then(x => Array.isArray(x) ? x.length : -1)'
-      + '.catch(e => "rejected:" + String(e))'
+      '(async()=>{'
+      + `const pending = window.api.ftSearch(${JSON.stringify(q)});`
+      + 'const t0 = performance.now();'
+      + 'await window.api.getConfig();'
+      + 'const concurrentMs = Math.round((performance.now()-t0)*10)/10;'
+      + 'const answer = await pending;'
+      + 'return JSON.stringify({'
+      + 'hits: Array.isArray(answer) ? answer.length : -1, concurrentMs})})()'
     )
-    ftMain[q] = { hits: r, ...summariseIpcTimings(getIpcTimings()) }
+    const probe = JSON.parse(String(r)) as { hits: number; concurrentMs: number }
+    ftMain[q] = { ...probe, ...summariseIpcTimings(getIpcTimings()) }
   }
   log('full-text search in the main process', ftMain)
 

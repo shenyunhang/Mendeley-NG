@@ -370,7 +370,13 @@ describe('one pass answers exactly what three passes answered', () => {
     expect(app).toContain('computeLibrarySearch({')
     expect(app).toContain('const nearTerms = search.nearTerms')
     expect(app).toContain('const filterCounts = search.counts')
-    expect(app).toContain('sortKeyFor(d, key)')
-    expect(app).toContain('compareSortKeys(a.k, b.k, dir')
+    // The per-keystroke sort moved into src/lib/libraryOrder.ts. The old
+    // strings no longer hold: `search.matched` is now filtered against an
+    // order built once per sort change, so App no longer calls sortKeyFor or
+    // compareSortKeys at all. The comparison itself is unchanged and still
+    // asserted in refactor-regression.test.ts.
+    expect(app).toContain('sortedLibrary(docs, sort)')
+    expect(app).toContain('filterSortedLibrary(sortedAll, search.matched)')
+    expect(app).not.toContain('search.matched.map((d) => ({ d, k: sortKeyFor(d, key) }))')
   })
 })

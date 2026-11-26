@@ -50,12 +50,11 @@ import FullTextView from './components/FullTextView'
 import RefsView from './components/RefsView'
 import {
   SORT_DEFAULT_DIR,
-  compareSortKeys,
   normaliseCols,
-  sortKeyFor,
   type ColKey,
   type SortKey
 } from './lib/columns'
+import { filterSortedLibrary, sortedLibrary } from './lib/libraryOrder'
 import { DEFAULT_LEFT_W, DEFAULT_RIGHT_PCT } from './lib/panes'
 import {
   nextActivePaper,
@@ -793,21 +792,17 @@ export default function App() {
     ]
   )
 
-  const filtered = useMemo(() => {
-    const { key, dir } = sort
-    // The key is taken once per document and carried through the sort.
-    // Calling sortKeyFor from inside the comparator is the expensive way
-    // round: it runs about n·log n times rather than n. Looking a cached key
-    // up by id inside the comparator was measured slower still -- two
-    // Map.get calls per comparison cost more than reading a property off the
-    // row -- so the wrapper stays. See the rejected-shape benchmark in
-    // tests/library-search.test.ts before "optimising" it away again.
-    const rows = search.matched.map((d) => ({ d, k: sortKeyFor(d, key) }))
-    rows.sort((a, b) =>
-      compareSortKeys(a.k, b.k, dir, a.d.title ?? '', b.d.title ?? '')
-    )
-    return rows.map((r) => r.d)
-  }, [search.matched, sort])
+  /** The whole library is sorted once per sort change, not once per key.
+   *  The comparator never looks at which other rows are present, so walking
+   *  this order and keeping the matches gives exactly the list sorting
+   *  `search.matched` used to give. See src/lib/libraryOrder.ts and the
+   *  per-key differential in tests/library-order.test.ts. */
+  const sortedAll = useMemo(() => sortedLibrary(docs, sort), [docs, sort])
+
+  const filtered = useMemo(
+    () => filterSortedLibrary(sortedAll, search.matched),
+    [sortedAll, search.matched]
+  )
 
   /** For a near match, the words that really occur in the paper. The card
    *  marks these instead of the query, which may differ by one character. */
