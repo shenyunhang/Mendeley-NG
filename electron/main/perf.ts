@@ -6,6 +6,7 @@ import {
   loadLibrary
 } from './store'
 
+import { getIpcTimings, resetIpcTimings, summariseIpcTimings } from './ipc/timing'
 import { setWin } from './window'
 /**
  * `--perf` measures the same interactions the reader complains about, on the
@@ -42,11 +43,18 @@ export async function runPerf() {
     }
   })
   setWin(w)
+  // Clear before the page loads, so the start-up waterfall is part of the
+  // run rather than something the first experiment silently discards.
+  resetIpcTimings()
   await w.loadFile(path.join(__dirname, '../renderer/index.html'))
   w.showInactive()
   await wait(3000)
 
   const js = (s: string) => w.webContents.executeJavaScript(s)
+
+  // Every channel is timed on the main side. The observer installed below
+  // lives in the renderer and cannot see a handler that occupies this process.
+  log('start-up IPC', summariseIpcTimings(getIpcTimings()))
 
   await js(
     '(()=>{'
@@ -313,6 +321,27 @@ export async function runPerf() {
     await wait(1200)
   }
 
+  // -- the whole run, from the main side. A channel that spent 300 ms here
+  //    without yielding shows up as zero long tasks in every number above.
+  const mainIpc = summariseIpcTimings(getIpcTimings())
+  log('main-process IPC for the run', mainIpc)
+
+  // -- full-text search is answered in this process by scanning the entire
+  //    corpus. The library search box above never leaves the renderer, so
+  //    none of the earlier experiments exercised the one remaining block.
+  //    Each word resets the clock, so the number belongs to that word alone.
+  const ftMain: Record<string, unknown> = {}
+  for (const q of ['qwen3 te', 'network', 'zzzzqqq']) {
+    resetIpcTimings()
+    const r = await js(
+      `window.api.ftSearch(${JSON.stringify(q)})`
+      + '.then(x => Array.isArray(x) ? x.length : -1)'
+      + '.catch(e => "rejected:" + String(e))'
+    )
+    ftMain[q] = { hits: r, ...summariseIpcTimings(getIpcTimings()) }
+  }
+  log('full-text search in the main process', ftMain)
+
   log('summary', {
     idle,
     typingNone,
@@ -326,7 +355,9 @@ export async function runPerf() {
     scrolling,
     sorting,
     selecting,
-    selectAll
+    selectAll,
+    mainIpc,
+    ftMain
   })
   app.exit(0)
 }

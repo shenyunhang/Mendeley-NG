@@ -83,6 +83,7 @@ npm start             # 启动
 npm run dev           # 热重载开发
 npm test              # 纯 Node 单元测试
 npm run typecheck     # main/preload 与 renderer 双侧类型检查
+npm run perf          # 真实库上的按键、滚动与主进程 IPC 耗时，只测不判
 npm run dist          # 打包 Windows NSIS 安装包
 ```
 
@@ -440,6 +441,7 @@ npm run build              # 先构建：smoke 不替你构建，跑的是 out/ 
 npm run verify:build       # 校验 out/：chunk 可解析、worker 在、index.js 引用的 chunk 在
 npm run smoke              # 真实库 + 真实 PDF 的端到端自检
 npm run smoke -- --no-sync # 用本地缓存，跳过同步
+npm run perf               # 真实库上的按键、滚动与主进程 IPC 耗时，只测不判
 ```
 
 `npm test` 跑的是 `tests/` 下的 Vitest 用例：不开窗口、不碰真实库、不需要 Electron，
@@ -452,6 +454,10 @@ tag 可以指向任意提交，不能假定它走过 CI。产物校验是
 `scripts/verify-build.mjs` 一份脚本，两个 workflow 都只调它；本地 `npm run verify:build`
 跑的是同一段逻辑。**冒烟仍不放进 CI**——它要开真实窗口读真实库和 PDF，还量按键那一帧
 的主线程耗时，托管 runner 给不出诚实的答案。
+
+`npm run perf` 同时量两侧：渲染进程的 longtask 与帧间隔，以及主进程每个 IPC 通道
+在交回结果前占用事件循环的时间。全文检索是在主进程扫本地语料的，渲染进程的
+观测器看不到那段阻塞，所以主进程那一份只在 `--perf` 时装，普通启动不受影响。
 
 `--smoke` 跑的是**真实库和真实 PDF**：拉库、开隐藏窗口、逐条断言，日志用
 `[smoke] PASS` / `[smoke] FAIL` 打点，最后一行出现 `all checks passed` 才算过。

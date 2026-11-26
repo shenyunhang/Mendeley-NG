@@ -208,6 +208,7 @@ electron/main/
   smoke.ts              冒烟入口：窗口、快照、共享 expect、收尾与配置恢复都留在这里
   smoke-*.ts            六个纯 Node 断言块 + smoke-ctx.ts 的共享类型，静态 import
   ipc/                  library / system / docs / marks / refs / files，按域注册
+  ipc/timing.ts         仅 --perf 装的 ipcMain.handle 计时，量主进程侧耗时
 electron/preload/index.ts  contextBridge，按 Api 契约暴露白名单方法
 src/
   App.tsx               组装层：把 hooks 解构出来排进 JSX
@@ -765,6 +766,13 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   `useMemo` 各自扫全库会让按键白付两遍。
 - 虚拟化的收益会被全量预处理吃掉，`matchAt(i)` 按需建并缓存在 `useMemo`；
   别把力气花在没量到问题的动作上。
+- **渲染进程的 longtask 看不见主进程的阻塞**。`perf.ts` 的
+  `PerformanceObserver` 与 rAF 探针都装在渲染进程，主进程里 `ft:search`
+  同步扫几十 MB 语料的那几百毫秒会被记成 0 长任务，而同一时间其它通道全在排队。
+  现在 `--perf` 在 `ipc/index.ts` 注册通道之前装 `ipc/timing.ts` 的包装：
+  `syncMs` 是交回值或 promise 之前不让出事件循环的那一段，`totalMs` 另含
+  promise 的等待，同步处理器仍返回同步值、rejection 仍原样抛出。普通启动不装，
+  环形缓冲上限 4000 条。`perf.ts` 末段另跑三个全文词，逐个给主进程报告。
 - 冒烟跑在真实配置上会残留 sort、第一行论文每次可能不同，
   别把「哪篇排第一」写进断言。
 - `--perf` 的三个词各自从空框起测，是三次独立实验；不清空会让第三个词变成

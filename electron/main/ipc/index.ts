@@ -4,6 +4,7 @@ import { registerLibraryIpc } from './library'
 import { registerMarksIpc } from './marks'
 import { registerRefsIpc } from './refs'
 import { registerSystemIpc } from './system'
+import { installIpcTiming } from './timing'
 
 /**
  * Every channel the renderer can call, registered in one place.
@@ -20,6 +21,11 @@ import { registerSystemIpc } from './system'
  * not before.
  */
 export function registerIpc() {
+  // The renderer's longtask observer cannot see a block in this process.
+  // Wrapping the channels before any domain registers gives the measurement
+  // run a per-channel answer from the main side. An ordinary launch installs
+  // nothing.
+  if (process.argv.includes('--perf')) installIpcTiming()
   registerLibraryIpc()
   registerSystemIpc()
   registerDocsIpc()
