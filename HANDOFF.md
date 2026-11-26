@@ -797,6 +797,14 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   被列进 `tsconfig.node.json` 白名单，node 工程就报一串 DOM 类型错误。
 - 需要输入一律用 `AskDialog`；`window.confirm` 可用。
 - 冒烟里取消路径要真点「取消」，别用 `window.confirm = () => false` 打桩。
+- 界面文案双语走 `src/lib/i18n.ts`：**中文原文就是 key**，中文模式逐字返回，英文模式
+  查 `EN` 表，还没翻的回退中文而不是画出空按钮。`useI18n()` 从 `i18nContext.tsx`
+  拿同一个 translator，语言切换靠 context 传到被 `memo` 的子组件，别给每个组件
+  再加一个语言 prop。默认中文：老配置没有 `language` 时界面必须和以前一模一样。
+  新增配置键要同时进 `CONFIG_KEYS` / `TEXT` 白名单与值校验。
+  `tests/i18n.test.ts` 扫全部 `t('…')` 字面量，漏进字典会红。冒烟固定中文运行
+  （几十处按中文按钮文字定位 DOM），只在自己的语言断言里切到英文再切回。
+  文献标题、笔记、文件夹名是读者的数据，不过 `t()`。
 
 ### 8.11 搜索范围与参考文献
 

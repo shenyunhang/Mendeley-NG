@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   title: string
@@ -23,6 +24,7 @@ export default function AskDialog({
 }: Props) {
   const [v, setV] = useState(initial)
   const ref = useRef<HTMLInputElement>(null)
+  const t = useI18n()
 
   useEffect(() => {
     ref.current?.focus()
@@ -58,9 +60,9 @@ export default function AskDialog({
         />
         <div className="modal-acts">
           <button className="primary" onClick={() => onOk(v.trim())}>
-            确定
+            {t('确定')}
           </button>
-          <button onClick={onCancel}>取消</button>
+          <button onClick={onCancel}>{t('取消')}</button>
         </div>
       </div>
     </div>

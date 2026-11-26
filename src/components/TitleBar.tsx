@@ -1,4 +1,5 @@
 import logoUrl from '../../assets/logo.svg?url'
+import { useI18n } from '../lib/i18nContext'
 
 /**
  * The window's identity, now the first item of the one chrome row rather than
@@ -8,12 +9,13 @@ import logoUrl from '../../assets/logo.svg?url'
  * are not, which is why the drag region lives on these spans only.
  */
 export default function TitleBar() {
+  const t = useI18n()
   return (
     <div className="title-bar-identity">
       <img className="title-bar-mark" src={logoUrl} alt="" draggable={false} />
       <span className="title-bar-name">Mendeley NG</span>
       <span className="title-bar-sep" />
-      <span className="title-bar-tag">本地优先</span>
+      <span className="title-bar-tag">{t('本地优先')}</span>
     </div>
   )
 }

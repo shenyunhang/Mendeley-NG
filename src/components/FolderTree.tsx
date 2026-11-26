@@ -4,6 +4,7 @@ import { FILTER_LABEL, type ListFilter } from '../lib/filters'
 import { buildTree, isSelfOrDescendant } from '../lib/tree'
 import { normaliseQuery } from '../lib/searchScope'
 import { queryMatches } from '../lib/searchMatch'
+import { useI18n } from '../lib/i18nContext'
 
 /** The tooltip names the same conditions as the name, the count and the
  *  restored filters: the saved filters, not the old starred flag. */
@@ -78,6 +79,7 @@ export default function FolderTree({
   onMove,
   renameRequest
 }: Props) {
+  const t = useI18n()
   const [filter, setFilter] = useState('')
   const [dragOver, setDragOver] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -145,7 +147,7 @@ export default function FolderTree({
           className={'folder-row' + (selected === null ? ' sel' : '')}
           onClick={() => onSelect(null)}
         >
-          <span className="name">全部文献</span>
+          <span className="name">{t('全部文献')}</span>
           <span className="n">{total}</span>
         </div>
 
@@ -253,7 +255,7 @@ export default function FolderTree({
 
         {saved?.length ? (
           <>
-            <div className="group-head">保存的搜索</div>
+            <div className="group-head">{t('保存的搜索')}</div>
             {saved.map((s) => (
               <div
                 key={s.id}
@@ -280,7 +282,7 @@ export default function FolderTree({
           </>
         ) : null}
 
-        {!rows.length && <div className="empty">没有匹配的文件夹</div>}
+        {!rows.length && <div className="empty">{t('没有匹配的文件夹')}</div>}
 
         {/* dropping a folder on empty space moves it back to the top level */}
         <div

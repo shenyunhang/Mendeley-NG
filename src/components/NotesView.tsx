@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { Annotation, Doc } from '../../shared/types'
 import { normaliseQuery } from '../lib/searchScope'
 import { queryMatches } from '../lib/searchMatch'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   /** Every annotation in the store, not just the open document's. */
@@ -43,6 +44,7 @@ export default function NotesView({
   onDelete,
   onCopy
 }: Props) {
+  const tr = useI18n()
   const [q, setQ] = useState('')
   const [onlyNotes, setOnlyNotes] = useState(false)
 
@@ -88,13 +90,13 @@ export default function NotesView({
   return (
     <div className="pane pane-mid">
       <div className="pane-head">
-        <span>全部标注</span>
+        <span>{tr('全部标注')}</span>
         <span className="grow" />
         <span style={{ color: 'var(--fg-dim)' }}>
           {rows.length} 条 · {groups.length} 篇
         </span>
         <button style={{ padding: '2px 6px', fontSize: '0.733rem' }} onClick={onClose}>
-          返回库
+          {tr('返回库')}
         </button>
       </div>
       <div className="notes-bar">
@@ -121,13 +123,13 @@ export default function NotesView({
             )
           }
         >
-          复制列表
+          {tr('复制列表')}
         </button>
       </div>
       <div className="notes-list">
         {!rows.length ? (
           <div className="empty">
-            {anns.length ? '没有匹配的标注' : '还没有任何标注。在阅读器里选中文字即可高亮。'}
+            {anns.length ? tr('没有匹配的标注') : tr('还没有任何标注。在阅读器里选中文字即可高亮。')}
           </div>
         ) : (
           groups.map((g, i) => (
@@ -158,7 +160,7 @@ export default function NotesView({
                       onCopy(a, doc)
                     }}
                   >
-                    复制
+                    {tr('复制')}
                   </button>
                   <button
                     className="notes-act danger"
@@ -168,7 +170,7 @@ export default function NotesView({
                       onDelete(a.id)
                     }}
                   >
-                    删除
+                    {tr('删除')}
                   </button>
                 </div>
               ))}

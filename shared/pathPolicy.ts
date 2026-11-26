@@ -102,6 +102,7 @@ const CONFIG_KEYS = {
   pdfDir: true,
   lastSync: true,
   fontSize: true,
+  language: true,
   savedSearches: true,
   theme: true,
   pdfContinuous: true,
@@ -126,6 +127,7 @@ const TEXT = new Set<string>([
   'pdfDir',
   'lastSync',
   'theme',
+  'language',
   'pdfNameTemplate',
   'citeStyle',
   'exportDir'
@@ -151,6 +153,7 @@ export function safeConfigPatch(raw: unknown): Partial<AppConfig> {
     } else if (TEXT.has(key)) {
       if (typeof value !== 'string') continue
       if (key === 'theme' && value !== 'dark' && value !== 'light') continue
+      if (key === 'language' && value !== 'zh' && value !== 'en') continue
     } else if (FLAGS.has(key)) {
       if (typeof value !== 'boolean') continue
     } else if (ARRAYS.has(key)) {

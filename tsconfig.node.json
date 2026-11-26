@@ -41,6 +41,7 @@
     "src/lib/flash.ts",
     "src/lib/folderForDoc.ts",
     "src/lib/importText.ts",
+    "src/lib/i18n.ts",
     "src/lib/lazyPages.ts",
     "src/lib/latestSearch.ts",
     "src/lib/librarySearch.ts",

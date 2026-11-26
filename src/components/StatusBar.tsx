@@ -1,5 +1,6 @@
 import type { SyncStatus, UpdateState } from '../../shared/types'
 import { updateLine } from '../lib/updateText'
+import { useI18n } from '../lib/i18nContext'
 
 /**
  * Prose from the updater and from a sync, on a row of their own.
@@ -17,6 +18,7 @@ export default function StatusBar({
   upd: UpdateState | null
   status: SyncStatus | null
 }) {
+  const t = useI18n()
   const update = updateLine(upd, upd?.current ?? '')
   const sync = status?.message ?? ''
   if (!update && !sync) return null
@@ -32,7 +34,7 @@ export default function StatusBar({
           className={'status-line' + (upd?.phase === 'error' ? ' err' : ' update')}
           title={detail ?? undefined}
         >
-          {update}
+          {t(update)}
         </div>
       )}
       {sync && <div className="status-line">{sync}</div>}

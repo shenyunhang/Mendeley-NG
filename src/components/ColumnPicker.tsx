@@ -1,6 +1,7 @@
 import { useRef, type RefObject } from 'react'
 import { COLUMNS, DEFAULT_COLS, type ColKey } from '../lib/columns'
 import { usePopSpot } from '../lib/popspot'
+import { useI18n } from '../lib/i18nContext'
 import type { SavedView } from '../../shared/types'
 
 interface Props {
@@ -31,6 +32,7 @@ export default function ColumnPicker({
   onDeleteView,
   onClose
 }: Props) {
+  const t = useI18n()
   const card = useRef<HTMLDivElement>(null)
   const spot = usePopSpot(anchor, card)
   const toggle = (k: ColKey) => {
@@ -55,7 +57,7 @@ export default function ColumnPicker({
   return (
     <div className="col-picker" ref={card} style={spot ?? undefined} onMouseLeave={onClose}>
       <div className="col-picker-head">
-        <b>列</b>
+        <b>{t('列')}</b>
         <span style={{ flex: 1 }} />
         <button className="mini" title="关闭" onClick={onClose}>
           ✕
@@ -70,7 +72,7 @@ export default function ColumnPicker({
             <div key={c.key} className="col-row">
               <label>
                 <input type="checkbox" checked={on} onChange={() => toggle(c.key)} />
-                <span>{c.label || 'PDF'}</span>
+                <span>{t(c.label || 'PDF')}</span>
               </label>
               <span className="col-move">
                 <button
@@ -96,16 +98,16 @@ export default function ColumnPicker({
       </div>
 
       <div className="col-picker-foot">
-        <button onClick={onSaveView}>保存为视图…</button>
+        <button onClick={onSaveView}>{t('保存为视图…')}</button>
         <span style={{ flex: 1 }} />
         <button onClick={() => onChange([...DEFAULT_COLS])} title="回到默认那几列">
-          恢复默认
+          {t('恢复默认')}
         </button>
       </div>
 
       {!!views.length && (
         <div className="col-views">
-          <div className="group-head">视图</div>
+          <div className="group-head">{t('视图')}</div>
           {views.map((v) => (
             <div
               key={v.id}

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   /** What is about to happen, named: "删除文件夹「综述」" */
@@ -39,6 +40,7 @@ export default function ConfirmDialog({
   onOk,
   onCancel
 }: Props) {
+  const t = useI18n()
   const cancelRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -60,10 +62,10 @@ export default function ConfirmDialog({
         {body ? <div className="confirm-body">{body}</div> : null}
         <div className="modal-acts">
           <button className="danger" onClick={onOk}>
-            {ok}
+            {t(ok)}
           </button>
           <button ref={cancelRef} onClick={onCancel}>
-            {cancel}
+            {t(cancel)}
           </button>
         </div>
       </div>

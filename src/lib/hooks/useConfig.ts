@@ -2,7 +2,12 @@ import { clampToRange } from '../../../shared/clamp'
 import { writeConfig } from '../configWrite'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SavedSearch, SavedView } from '../../../shared/types'
-import { DEFAULT_FT_PAGES, DEFAULT_PDF_TEMPLATE } from '../../../shared/types'
+import {
+  DEFAULT_FT_PAGES,
+  DEFAULT_LANGUAGE,
+  DEFAULT_PDF_TEMPLATE,
+  type Language
+} from '../../../shared/types'
 import { restoredPageBudget } from '../../../shared/fullTextPages'
 import {
   DEFAULT_SORT,
@@ -66,6 +71,7 @@ export function useConfig() {
   const [leftW, setLeftW] = useState(DEFAULT_LEFT_W)
   const [rightPct, setRightPct] = useState(DEFAULT_RIGHT_PCT)
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+  const [language, setLanguage] = useState<Language>(DEFAULT_LANGUAGE)
   const [fontSize, setFontSize] = useState(15)
   /**
    * The type size as a ref as well as state.  The keyboard handler is
@@ -109,6 +115,9 @@ export function useConfig() {
       if (typeof c.paneLeft === 'number') setLeftW(clampLeft(c.paneLeft))
       if (typeof c.paneRight === 'number') setRightPct(clampRight(c.paneRight))
       setTheme(c.theme === 'light' ? 'light' : 'dark')
+      // An old config has no language at all; it must keep showing Chinese
+      // rather than silently switching the whole interface.
+      setLanguage(c.language === 'en' ? 'en' : 'zh')
       if (c.fontSize) {
         fontRef.current = c.fontSize
         setFontSize(c.fontSize)
@@ -170,6 +179,8 @@ export function useConfig() {
     setRightPct,
     theme,
     setTheme,
+    language,
+    setLanguage,
     fontSize,
     setFontSize,
     bumpFont,

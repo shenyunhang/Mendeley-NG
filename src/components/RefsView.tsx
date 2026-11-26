@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { normaliseQuery } from '../lib/searchScope'
 import { markAllTerms } from '../lib/match'
 import type { Doc, RefHit } from '../../shared/types'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   query: string
@@ -64,6 +65,7 @@ export default function RefsView({
   onClose,
   onOpen
 }: Props) {
+  const t = useI18n()
   const byId = useMemo(() => {
     const m = new Map<string, Doc>()
     for (const d of docs) m.set(d.id, d)
@@ -90,7 +92,7 @@ export default function RefsView({
   return (
     <div className="pane pane-mid">
       <div className="pane-head">
-        <span>参考文献</span>
+        <span>{t('参考文献')}</span>
         <span className="grow" />
         <span style={{ fontSize: '0.733rem', color: 'var(--fg-dim)' }}>
           {status ? `已索引 ${status.indexed} / ${status.total} 篇` : '…'}
@@ -101,10 +103,10 @@ export default function RefsView({
           title="读取每篇本地 PDF 末尾的参考文献段；已索引且文件未变的会跳过"
           onClick={onBuild}
         >
-          {building ? `索引中 ${pct}%` : '建索引'}
+          {building ? `索引中 ${pct}%` : t('建索引')}
         </button>
         <button style={{ padding: '2px 6px', fontSize: '0.733rem' }} onClick={onClose}>
-          返回列表
+          {t('返回列表')}
         </button>
       </div>
 
@@ -124,7 +126,7 @@ export default function RefsView({
         </div>
       ) : !building && status && !status.total ? (
         <div className="empty">
-          <p>没有可索引的 PDF。</p>
+          <p>{t('没有可索引的 PDF。')}</p>
           <p className="sub">
             库里还没有带本地 PDF 的文献。参考文献是从 PDF 末尾现读的，先同步或下载 PDF。
           </p>
@@ -145,7 +147,7 @@ export default function RefsView({
       ) : (
         <div className="ft-list">
           {!query.trim() ? (
-            <div className="empty">输入要找的词</div>
+            <div className="empty">{t('输入要找的词')}</div>
           ) : building ? (
             <div className="empty">正在建立索引，稍后就能搜「{query}」…</div>
           ) : !groups.length ? (
@@ -163,14 +165,14 @@ export default function RefsView({
                   onClick={() => d && onOpen(d, hs[0]!.page)}
                   title={d?.title}
                 >
-                  {d?.title || '(无标题)'}
+                  {d?.title || t('(无标题)')}
                   <span className="ft-meta">
                     {d?.year ? ` ${d.year}` : ''}
                     {d?.source ? ` · ${d.source}` : ''}
                   </span>
                   {hs.some((h) => h.near) ? (
                     <span className="ft-near" title="没有完全匹配的结果，这是按词形相近找到的">
-                      相近
+                      {t('相近')}
                     </span>
                   ) : null}
                 </div>

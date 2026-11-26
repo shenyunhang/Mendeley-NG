@@ -7702,9 +7702,13 @@ export async function runSmoke() {
   // assertions below are unchanged -- a step forward and a step back must
   // both be served from a warmed bitmap.
   await until(
-    '(()=>{const keys=document.documentElement.dataset.pfKeys||"";'
+    '(()=>{const warm=document.documentElement.dataset.pfWarm||"";'
+    + 'const keys=document.documentElement.dataset.pfKeys||"";'
     + 'const page=(document.querySelector(".pdf-bar input")||{}).value||"";'
-    + 'return keys.split(",").some((k)=>k.startsWith(page+":"))?"yes":"no"})()',
+    // A warmed neighbour is still being painted while `pfWarm` is non-empty.
+    // A key for the current page can already be there from an earlier zoom,
+    // which is not the bitmap the step back is about to ask for.
+    + 'return warm==="" && keys.split(",").some((k)=>k.startsWith(page+":"))?"yes":"no"})()',
     (v) => v === 'yes',
     8000
   )
@@ -10383,6 +10387,51 @@ export async function runSmoke() {
     `window.api.setConfig({ftPages:${JSON.parse(cfgBefore).ftPages ?? 3}})`
   )
   await new Promise((r) => setTimeout(r, 400))
+  // The language switch lives in this same sheet. Every translated string
+  // is keyed by its Chinese text, so the run must end back in Chinese: the
+  // rest of the checks find buttons by their Chinese labels.
+  const languageRead = () =>
+    w.webContents.executeJavaScript(
+      '(async()=>{const m=document.querySelector(".settings");'
+      + 'const c=await window.api.getConfig();'
+      + 'return JSON.stringify({'
+      + 'head:(m?.querySelector(".modal-head")||{}).textContent||null,'
+      + 'key:(m?.querySelector("[data-lang-row] .set-key")||{}).textContent||null,'
+      + 'language:c.language??null})})()'
+    )
+  const pickLanguage = (value: string) =>
+    w.webContents.executeJavaScript(
+      `(()=>{const b=document.querySelector('[data-lang="${value}"]');`
+      + `if(!b)return 0;b.click();return 1})()`
+    )
+  const langBefore = JSON.parse(await languageRead())
+  log('language before', langBefore)
+  expect(
+    'the settings sheet starts in Chinese',
+    langBefore.head === '设置' && langBefore.key === '语言',
+    langBefore
+  )
+  expect('the language row offers both choices', (await pickLanguage('en')) === 1, 'en')
+  await new Promise((r) => setTimeout(r, 500))
+  const langEn = JSON.parse(await languageRead())
+  log('language after English', langEn)
+  expect(
+    'switching to English redraws the sheet',
+    langEn.head === 'Settings' && langEn.key === 'Language',
+    langEn
+  )
+  expect('the choice is persisted', langEn.language === 'en', langEn)
+  expect('switching back restores Chinese', (await pickLanguage('zh')) === 1, 'zh')
+  await new Promise((r) => setTimeout(r, 500))
+  const langZh = JSON.parse(await languageRead())
+  log('language after Chinese', langZh)
+  expect(
+    'Chinese labels come back',
+    langZh.head === '设置' && langZh.key === '语言',
+    langZh
+  )
+  expect('the restored choice is persisted', langZh.language === 'zh', langZh)
+
   // Esc is the way out of anything floating over the library, and the
   // settings sheet covers the whole window, which is exactly when having to
   // go and find the button is most annoying.

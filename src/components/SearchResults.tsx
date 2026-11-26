@@ -4,6 +4,7 @@ import type { Doc } from '../../shared/types'
 import { isListBlank } from '../lib/listBlank'
 import { matchDoc, partsToPlainText, type DocMatch, type Part } from '../lib/match'
 import { normaliseQuery } from '../lib/searchScope'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   docs: Doc[]
@@ -67,6 +68,7 @@ export default function SearchResults({
   fontSize,
   empty
 }: Props) {
+  const t = useI18n()
   const parentRef = useRef<HTMLDivElement>(null)
   // One membership test per result card; a full-library Ctrl+A makes a linear
   // scan of the id array quadratic in the number of hits.
@@ -131,7 +133,7 @@ export default function SearchResults({
       }}
     >
       {!docs.length ? (
-        (empty ?? <div className="empty">没有匹配的文献</div>)
+        (empty ?? <div className="empty">{t('没有匹配的文献')}</div>)
       ) : (
         <div style={{ height: v.getTotalSize(), position: 'relative' }}>
           {v.getVirtualItems().map((vi) => {
@@ -181,7 +183,7 @@ export default function SearchResults({
                   </span>
                   {nearTerms?.has(d.id) ? (
                     <span className="res-near" title="没有完全匹配的结果，这是按词形相近找到的">
-                      相近
+                      {t('相近')}
                     </span>
                   ) : null}
                   {m.year ? <span className="res-year">{m.year}</span> : null}

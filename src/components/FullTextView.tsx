@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { Doc, FtHit, FtStatus } from '../../shared/types'
 import { compareDocs, type SortKey } from '../lib/columns'
 import { markAllTerms } from '../lib/match'
+import { useI18n } from '../lib/i18nContext'
 
 /** A near hit marks the words that really occur, not the mistyped query. */
 function Marked({ text, terms }: { text: string; terms: string[] }) {
@@ -59,6 +60,7 @@ export default function FullTextView({
   onClear,
   onOpenSettings
 }: Props) {
+  const t = useI18n()
   const byId = useMemo(() => {
     const m = new Map<string, Doc>()
     for (const d of docs) m.set(d.id, d)
@@ -119,7 +121,7 @@ export default function FullTextView({
   return (
     <div className="pane pane-mid">
       <div className="pane-head">
-        <span>全文检索</span>
+        <span>{t('全文检索')}</span>
         <span className="grow" />
         <span style={{ fontSize: '0.733rem', color: 'var(--fg-dim)' }}>
           {status
@@ -132,7 +134,7 @@ export default function FullTextView({
           title="把还没索引的本地 PDF 补进索引"
           onClick={() => onBuild(false)}
         >
-          {building ? `索引中 ${pct}%` : '建索引'}
+          {building ? `索引中 ${pct}%` : t('建索引')}
         </button>
         <button
           style={{ padding: '2px 6px', fontSize: '0.733rem' }}
@@ -140,7 +142,7 @@ export default function FullTextView({
           title="清空并从头重建（已删文献留下的空洞只有重建能回收）"
           onClick={() => onBuild(true)}
         >
-          重建
+          {t('重建')}
         </button>
         <button
           style={{ padding: '2px 6px', fontSize: '0.733rem' }}
@@ -148,10 +150,10 @@ export default function FullTextView({
           title="删除索引"
           onClick={() => onClear()}
         >
-          清空
+          {t('清空')}
         </button>
         <button style={{ padding: '2px 6px', fontSize: '0.733rem' }} onClick={onClose}>
-          返回列表
+          {t('返回列表')}
         </button>
       </div>
 
@@ -172,7 +174,7 @@ export default function FullTextView({
             title="停下。已经读进去的会留着，下次接着读"
             onClick={onCancel}
           >
-            停止
+            {t('停止')}
           </button>
         </div>
       )}
@@ -195,7 +197,7 @@ export default function FullTextView({
       */}
       {!building && status && !status.total ? (
         <div className="empty">
-          <p>没有可索引的 PDF。</p>
+          <p>{t('没有可索引的 PDF。')}</p>
           <p className="sub">
             库里还没有带本地 PDF 的文献。设好 PDF 目录、把文件同步或下载下来之后，
             正文才有东西可读。
@@ -276,7 +278,7 @@ export default function FullTextView({
       {status?.indexed ? (
         <div className="ft-list">
           {!query.trim() ? (
-            <div className="empty">输入要找的词</div>
+            <div className="empty">{t('输入要找的词')}</div>
           ) : searching ? (
             <div className="empty">正在查找「{query}」…</div>
           ) : !groups.length ? (
@@ -307,14 +309,14 @@ export default function FullTextView({
                     onClick={() => d && onOpen(d, list[0].page)}
                     title={d?.title}
                   >
-                    {d?.title || '(无标题)'}
+                    {d?.title || t('(无标题)')}
                     <span className="ft-meta">
                       {d?.year ? ` ${d.year}` : ''}
                       {d?.source ? ` · ${d.source}` : ''}
                     </span>
                     {list.some((h) => h.near) ? (
                       <span className="ft-near" title="没有完全匹配的结果，这是按词形相近找到的">
-                        相近
+                        {t('相近')}
                       </span>
                     ) : null}
                   </div>

@@ -174,11 +174,20 @@ export interface SavedSearch {
 }
 
 /** Local preferences.  Shared so the renderer never has to guess the shape. */
+/** The language the interface is drawn in. Chinese is the default so an
+ *  existing config with no language stays exactly as it was. */
+export type Language = 'zh' | 'en'
+
+export const DEFAULT_LANGUAGE: Language = 'zh'
+
 export interface AppConfig {
   pdfDir: string
   lastSync?: string
   /** Base UI font size in CSS px; the OS scale factor is applied on top. */
   fontSize?: number
+  /** Interface language; absent means Chinese, which is what older configs
+   *  already showed. */
+  language?: Language
   savedSearches?: SavedSearch[]
   /** 'dark' unless the user has switched; drives a data attribute on <html>
    *  and the whole palette with it. */

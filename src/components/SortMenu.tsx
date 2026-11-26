@@ -6,6 +6,7 @@ import {
   type SortKey
 } from '../lib/columns'
 import { usePopSpot } from '../lib/popspot'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   /** The button it hangs from, rather than its own parent: a bar that can
@@ -30,6 +31,7 @@ interface Props {
  * the whole list from the wrong end before noticing.
  */
 export default function SortMenu({ anchor, sort, onPick, onClose }: Props) {
+  const t = useI18n()
   const card = useRef<HTMLDivElement>(null)
   const spot = usePopSpot(anchor, card)
   return (
@@ -40,7 +42,7 @@ export default function SortMenu({ anchor, sort, onPick, onClose }: Props) {
       onMouseLeave={onClose}
     >
       <div className="col-picker-head">
-        <b>排序</b>
+        <b>{t('排序')}</b>
         <span style={{ flex: 1 }} />
         <button className="mini" title="关闭" onClick={onClose}>
           ✕
@@ -61,7 +63,7 @@ export default function SortMenu({ anchor, sort, onPick, onClose }: Props) {
                 <span className="sort-arrow">
                   {mine ? (sort.dir === 1 ? '▲' : '▼') : ''}
                 </span>
-                {SORT_LABEL[k]}
+                {t(SORT_LABEL[k])}
                 <span style={{ flex: 1 }} />
                 {mine && <span className="sort-dir">{sort.dir === 1 ? up : down}</span>}
               </button>

@@ -1,6 +1,7 @@
 import { useRef, type RefObject } from 'react'
 import type { ListFilter } from '../lib/filters'
 import { usePopSpot } from '../lib/popspot'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   /** The button it hangs from.  It is placed against this rather than against
@@ -41,12 +42,13 @@ export default function FilterMenu({
   onClear,
   onClose
 }: Props) {
+  const t = useI18n()
   const card = useRef<HTMLDivElement>(null)
   const spot = usePopSpot(anchor, card)
   return (
     <div className="col-picker filter-menu" ref={card} style={spot ?? undefined} onMouseLeave={onClose}>
       <div className="col-picker-head">
-        <b>筛选</b>
+        <b>{t('筛选')}</b>
         <span style={{ flex: 1 }} />
         <button className="mini" title="关闭" onClick={onClose}>
           ✕
@@ -61,7 +63,7 @@ export default function FilterMenu({
                 checked={on.includes(it.key)}
                 onChange={() => onToggle(it.key)}
               />
-              {it.label}
+              {t(it.label)}
             </label>
             <span style={{ flex: 1 }} />
             <span style={{ color: 'var(--fg-dim)' }}>{counts[it.key]}</span>
@@ -70,7 +72,7 @@ export default function FilterMenu({
       </div>
       <div className="col-picker-foot">
         <button className="mini" disabled={!on.length} onClick={onClear}>
-          全部清除
+          {t('全部清除')}
         </button>
       </div>
     </div>

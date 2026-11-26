@@ -1,4 +1,5 @@
 import type { Doc } from '../../shared/types'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   doc: Doc
@@ -16,6 +17,7 @@ interface Props {
  *  read-only view of the same record, with the two things that really are
  *  available: look at the file, or put the paper back. */
 export default function TrashedDocPanel({ doc, onRestore, onPurge, onOpenPdf }: Props) {
+  const t = useI18n()
   const authors = (doc.authors ?? [])
     .map((a) => [a.last_name, a.first_name].filter(Boolean).join(', '))
     .filter(Boolean)
@@ -35,24 +37,24 @@ export default function TrashedDocPanel({ doc, onRestore, onPurge, onOpenPdf }: 
           这条在回收站里。恢复之后才能编辑、归入文件夹或同步。
         </div>
         <div className="field">
-          <label>标题</label>
-          <div className="trash-doc-title">{doc.title || '(无标题)'}</div>
+          <label>{t('标题')}</label>
+          <div className="trash-doc-title">{doc.title || t('(无标题)')}</div>
         </div>
         {authors && (
           <div className="field">
-            <label>作者</label>
+            <label>{t('作者')}</label>
             <div>{authors}</div>
           </div>
         )}
         {bits.length > 0 && (
           <div className="field">
-            <label>年份 / 发表处 / 类型</label>
+            <label>{t('年份 / 发表处 / 类型')}</label>
             <div>{bits.join(' · ')}</div>
           </div>
         )}
         {doc.abstract && (
           <div className="field">
-            <label>摘要</label>
+            <label>{t('摘要')}</label>
             <div className="trash-doc-abs">{doc.abstract}</div>
           </div>
         )}
@@ -70,20 +72,20 @@ export default function TrashedDocPanel({ doc, onRestore, onPurge, onOpenPdf }: 
         )}
         {doc.localPdf && (
           <div className="field">
-            <label>本地 PDF</label>
+            <label>{t('本地 PDF')}</label>
             <div className="trash-doc-pdf">{doc.localPdf}</div>
             <div style={{ marginTop: 4 }}>
               <button
                 style={{ padding: '1px 5px', fontSize: 11 }}
                 onClick={() => void window.api.revealPdf(doc.localPdf!)}
               >
-                在文件夹中显示
+                {t('在文件夹中显示')}
               </button>{' '}
               <button
                 style={{ padding: '1px 5px', fontSize: 11 }}
                 onClick={() => void window.api.openPdfExternally(doc.localPdf!)}
               >
-                用系统程序打开
+                {t('用系统程序打开')}
               </button>
             </div>
           </div>
@@ -95,11 +97,11 @@ export default function TrashedDocPanel({ doc, onRestore, onPurge, onOpenPdf }: 
       <div className="meta-actions">
         {doc.localPdf && (
           <button className="primary" onClick={onOpenPdf}>
-            打开 PDF
+            {t('打开 PDF')}
           </button>
         )}
         <button className="primary" onClick={onRestore}>
-          恢复
+          {t('恢复')}
         </button>
         <span style={{ flex: 1 }} />
         <button
@@ -107,7 +109,7 @@ export default function TrashedDocPanel({ doc, onRestore, onPurge, onOpenPdf }: 
           onClick={onPurge}
           title="不可恢复，云端记录也会一并删除"
         >
-          彻底删除
+          {t('彻底删除')}
         </button>
       </div>
     </>

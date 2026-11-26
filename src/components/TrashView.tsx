@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { Doc } from '../../shared/types'
 import { normaliseQuery } from '../lib/searchScope'
 import { queryMatches } from '../lib/searchMatch'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   docs: Doc[]
@@ -34,6 +35,7 @@ export default function TrashView({
   onOpen,
   openId
 }: Props) {
+  const t = useI18n()
   const [q, setQ] = useState('')
 
   const rows = useMemo(() => {
@@ -54,13 +56,13 @@ export default function TrashView({
   return (
     <div className="pane pane-mid">
       <div className="pane-head">
-        <span>回收站</span>
+        <span>{t('回收站')}</span>
         <span className="grow" />
         <span style={{ color: 'var(--fg-dim)' }}>
           {rows.length} / {docs.length} 条 · 点一行看 PDF 或详情 · 恢复后需重新归入文件夹
         </span>
         <button style={{ padding: '2px 6px', fontSize: '0.733rem' }} onClick={onClose}>
-          返回库
+          {t('返回库')}
         </button>
       </div>
       <div style={{ padding: '6px 8px', flex: '0 0 auto' }}>
@@ -86,7 +88,7 @@ export default function TrashView({
             }
             onClick={() => onOpen(d)}
           >
-            <span className="t">{d.title || '(无标题)'}</span>
+            <span className="t">{d.title || t('(无标题)')}</span>
             <span className="n">
               {d.authors?.[0]?.last_name ?? ''}
               {d.year ? ` ${d.year}` : ''}
@@ -103,7 +105,7 @@ export default function TrashView({
                 onRestore(d.id)
               }}
             >
-              恢复
+              {t('恢复')}
             </button>
             {onPurge && (
               <button
@@ -115,12 +117,12 @@ export default function TrashView({
                   onPurge(d.id)
                 }}
               >
-                彻底删除
+                {t('彻底删除')}
               </button>
             )}
           </div>
         ))}
-        {!rows.length && <div className="empty">回收站是空的</div>}
+        {!rows.length && <div className="empty">{t('回收站是空的')}</div>}
       </div>
     </div>
   )

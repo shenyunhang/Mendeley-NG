@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Doc } from '../../shared/types'
 import { entryToBody, isDuplicate, type Entry } from '../lib/import'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   entries: Entry[]
@@ -15,6 +16,7 @@ interface Props {
  * present, because silently importing a duplicate is worse than showing it.
  */
 export default function ImportView({ entries, docs, onClose, onImported }: Props) {
+  const t = useI18n()
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState<string | null>(null)
   const [skip, setSkip] = useState<number[]>(() =>
@@ -46,7 +48,7 @@ export default function ImportView({ entries, docs, onClose, onImported }: Props
   return (
     <div className="pane pane-mid">
       <div className="pane-head">
-        <span>导入</span>
+        <span>{t('导入')}</span>
         <span className="grow" />
         <span style={{ color: 'var(--fg-dim)' }}>
           {entries.length} 条 · 已选 {picked.length} 条 · 跳过 {skip.length} 条重复
@@ -57,10 +59,10 @@ export default function ImportView({ entries, docs, onClose, onImported }: Props
           disabled={busy || !picked.length}
           onClick={run}
         >
-          {busy ? '导入中…' : '导入选中项'}
+          {busy ? t('导入中…') : t('导入选中项')}
         </button>
         <button style={{ padding: '2px 6px', fontSize: '0.733rem' }} onClick={onClose}>
-          关闭
+          {t('关闭')}
         </button>
       </div>
       {done && <div className="pdf-msg">{done}</div>}
@@ -78,17 +80,17 @@ export default function ImportView({ entries, docs, onClose, onImported }: Props
               disabled={busy}
               onChange={() => toggle(i)}
             />
-            <span className="t">{e.title || '(无标题)'}</span>
+            <span className="t">{e.title || t('(无标题)')}</span>
             <span className="n">
               {e.authors[0]?.last_name ?? ''}
               {e.year ? ` ${e.year}` : ''}
               {e.source ? ` · ${e.source}` : ''}
             </span>
             <span className="badge">{e.type}</span>
-            {skip.includes(i) && <span className="badge">重复</span>}
+            {skip.includes(i) && <span className="badge">{t('重复')}</span>}
           </div>
         ))}
-        {!entries.length && <div className="empty">没有解析出条目</div>}
+        {!entries.length && <div className="empty">{t('没有解析出条目')}</div>}
       </div>
     </div>
   )

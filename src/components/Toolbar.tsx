@@ -22,6 +22,7 @@ import type { ColKey, SortKey } from '../lib/columns'
 import type { ListFilter } from '../lib/filters'
 import { SCOPE_LABEL, SEARCH_SCOPES, type SearchScope } from '../lib/searchScope'
 import { LIBRARY, type View } from '../lib/view'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   /** Focused by Ctrl+F from wherever the reader is typing. */
@@ -135,6 +136,7 @@ interface Props {
  * it is not passing state down only to have it passed back up.
  */
 export default function Toolbar(p: Props) {
+  const t = useI18n()
   const filterBtn = useRef<HTMLButtonElement>(null)
   const sortBtn = useRef<HTMLButtonElement>(null)
   const colsBtn = useRef<HTMLButtonElement>(null)
@@ -154,30 +156,30 @@ export default function Toolbar(p: Props) {
    *  so the four that did have somewhere went there. */
   const more: MenuItem[] = [
     {
-      label: '查重',
+      label: t('查重'),
       disabled: !p.docs.length,
       title: '按 DOI / arXiv id / 标题找重复条目',
       run: () => p.onView({ kind: 'dupes', groups: findDuplicates(p.docs) })
     },
     {
-      label: '全部标注',
+      label: t('全部标注'),
       title: '列出全部标注，跨所有文献，点一条直接翻到那一页',
       run: () => void p.onNotes()
     },
     {
-      label: '回收站',
+      label: t('回收站'),
       title: '浏览回收站并恢复',
       run: () => void p.onTrash()
     },
     {
-      label: '保存搜索',
+      label: t('保存搜索'),
       disabled: !p.canSaveSearch,
       title: '把当前的文件夹 + 搜索词 + 筛选存成一个虚拟文件夹',
       run: p.onSaveSearch
     },
     { sep: true },
     {
-      label: p.undoLabel ? `撤销：${p.undoLabel}` : '撤销',
+      label: p.undoLabel ? `撤销：${p.undoLabel}` : t('撤销'),
       disabled: !p.undoLabel,
       title: '撤销上一次批量操作  (Ctrl+Z)',
       run: () => p.onUndo()
@@ -186,24 +188,24 @@ export default function Toolbar(p: Props) {
       // The identity and the OS window controls took the width this button and
       // the font/theme cluster used to have.  They are still one press away,
       // just behind 更多 rather than on the bar.
-      label: '全量同步',
+      label: t('全量同步'),
       disabled: p.busy,
       title: '忽略上次同步时间，重新拉全库；每次同步都会对账云端回收站',
       run: () => p.onSync(true)
     },
     { sep: true },
     {
-      label: '缩小界面字号',
+      label: t('缩小界面字号'),
       title: `当前 ${p.fontSize}px；与 A− / Ctrl+− 相同`,
       run: () => p.onFont(-1)
     },
     {
-      label: '放大界面字号',
+      label: t('放大界面字号'),
       title: `当前 ${p.fontSize}px；与 A+ / Ctrl+= 相同`,
       run: () => p.onFont(1)
     },
     {
-      label: p.theme === 'light' ? '切到深色主题' : '切到浅色主题',
+      label: p.theme === 'light' ? t('切到深色主题') : t('切到浅色主题'),
       title: '与工具栏 ☾ / ☀ 相同，原生滚动条和窗口控制按钮也跟着变',
       run: () => p.onTheme()
     },
@@ -222,7 +224,7 @@ export default function Toolbar(p: Props) {
    *  as a dropped one; only the bibliography formats need the preview. */
   const imports: MenuItem[] = [
     {
-      label: '导入文件…',
+      label: t('导入文件…'),
       title: '导入 BibTeX / RIS / EndNote XML / PDF',
       run: async () => {
         const files = await window.api.openRefFiles()
@@ -238,7 +240,7 @@ export default function Toolbar(p: Props) {
       }
     },
     {
-      label: '按标识符添加…',
+      label: t('按标识符添加…'),
       title: '按 DOI / arXiv id / 标题添加条目，不需要 PDF',
       run: () => p.onView({ kind: 'add' })
     }
@@ -251,12 +253,12 @@ export default function Toolbar(p: Props) {
    *  who has just found out that they have no token goes looking. */
   const setup: MenuItem[] = [
     {
-      label: '设置…',
+      label: t('设置…'),
       title: '主题、字号、PDF 目录、命名模板、全文索引',
       run: () => p.onSettings()
     },
     {
-      label: '导入 token…',
+      label: t('导入 token…'),
       title: '选择 get-token 生成的 token.json',
       run: () => {
         void window.api.importToken().then((r) => {
@@ -267,7 +269,7 @@ export default function Toolbar(p: Props) {
     },
     { sep: true },
     {
-      label: p.upd?.phase === 'available' ? `更新到 ${p.upd.version}` : '检查更新',
+      label: p.upd?.phase === 'available' ? `更新到 ${p.upd.version}` : t('检查更新'),
       disabled: !!p.upd && ['checking', 'downloading', 'downloaded'].includes(p.upd.phase),
       title: p.upd?.current
         ? `当前 ${p.upd.current}。从 GitHub Releases 拉取最新版本并自动安装重启`
@@ -283,7 +285,7 @@ export default function Toolbar(p: Props) {
       // the ↗ is the whole warning: this one leaves the app, which none of
       // the others do, and a menu item that opens a browser without saying so
       // is a surprise rather than a convenience
-      label: '项目主页 ↗',
+      label: t('项目主页 ↗'),
       title: '在默认浏览器里打开 GitHub 仓库：说明、源码、更新日志',
       run: () => void window.api.openExternal(PROJECT_URL)
     }
@@ -308,13 +310,13 @@ export default function Toolbar(p: Props) {
             : '把这篇 PDF 放到整个窗口里读（Esc 回到列表）'
         }
       >
-        阅读
+        {t('阅读')}
       </button>
       <button onClick={() => p.onSync(false)} disabled={p.busy}>
-        {p.busy ? '同步中…' : '同步云端'}
+        {p.busy ? t('同步中…') : t('同步云端')}
       </button>
       <MenuButton
-        label="导出"
+        label={t('导出')}
         title="把当前筛选结果写成 BibTeX / RIS / EndNote XML，或把写在这里的笔记与标注导出成 Markdown"
         disabled={!p.filtered.length}
         items={[
@@ -322,7 +324,7 @@ export default function Toolbar(p: Props) {
           { label: 'RIS', run: p.onExportRis },
           { label: 'EndNote XML', run: p.onExportEndnote },
           {
-            label: '笔记（Markdown）',
+            label: t('笔记（Markdown）'),
             disabled: !p.canExportNotes,
             // said out loud because the disabled state alone does not say why:
             // a note is the one thing here with no other copy, so the way out
@@ -334,7 +336,7 @@ export default function Toolbar(p: Props) {
             run: p.onExportNotes
           },
           {
-            label: '标注（Markdown）',
+            label: t('标注（Markdown）'),
             disabled: !p.canExportAnnotations,
             title: p.canExportAnnotations
               ? '高亮与批注按篇分组导出，带页码和被划的那句话'
@@ -350,7 +352,7 @@ export default function Toolbar(p: Props) {
             // worse than one that never offers it
             label:
               p.target.length === p.docs.length
-                ? '带走整个库…'
+                ? t('带走整个库…')
                 : `带走这 ${p.target.length} 篇…`,
             title:
               '书目（BibTeX + RIS + EndNote XML）、笔记、标注、PDF，一次写进一个文件夹，' +
@@ -365,7 +367,7 @@ export default function Toolbar(p: Props) {
           disabled={!p.target.length}
           title="把选中条目的格式化引文复制到剪贴板  (Ctrl+Shift+C)"
         >
-          复制引文
+          {t('复制引文')}
         </button>
         <select
           value={p.citeStyle}
@@ -378,23 +380,23 @@ export default function Toolbar(p: Props) {
         >
           {CITE_STYLES.map((c) => (
             <option key={c.key} value={c.key} title={c.sample}>
-              {c.label}
+              {t(c.label)}
             </option>
           ))}
         </select>
       </span>
 
       <MenuButton
-        label="导入"
+        label={t('导入')}
         title="把条目弄进库里：读一个书目文件，或按 DOI / arXiv id / 标题添加（不需要 PDF）"
         items={imports}
       />
       <MenuButton
-        label="设置"
+        label={t('设置')}
         title="主题、字号、PDF 目录、命名模板、全文索引；导入 token、检查更新与项目主页也在这里"
         items={setup}
       />
-      <MenuButton label="更多" title="查重、全部标注、回收站、保存搜索、撤销、全量同步与字号主题" items={more} />
+      <MenuButton label={t('更多')} title="查重、全部标注、回收站、保存搜索、撤销、全量同步与字号主题" items={more} />
       <div style={{ position: 'relative', display: 'inline-flex' }}>
         <button
           ref={filterBtn}
@@ -402,7 +404,7 @@ export default function Toolbar(p: Props) {
           onClick={() => p.onShowFilters(!p.showFilters)}
           title="按星标 / 未读 / 有没有 PDF / 归没归文件夹来收窄列表"
         >
-          筛选{p.filters.length ? `（${p.filters.length}）` : ''}
+          {t('筛选')}{p.filters.length ? `（${p.filters.length}）` : ''}
         </button>
         {p.showFilters && (
           <FilterMenu
@@ -422,7 +424,7 @@ export default function Toolbar(p: Props) {
           onClick={() => p.onShowSort(!p.showSort)}
           title="按哪个字段排，以及从哪一头开始读"
         >
-          排序
+          {t('排序')}
         </button>
         {p.showSort && (
           <SortMenu
@@ -440,7 +442,7 @@ export default function Toolbar(p: Props) {
           onClick={() => p.onShowCols(!p.showCols)}
           title="选择要显示哪些列、按什么顺序，并可以存成视图"
         >
-          列
+          {t('列')}
         </button>
         {p.showCols && (
           <ColumnPicker
@@ -467,7 +469,7 @@ export default function Toolbar(p: Props) {
         >
           {SEARCH_SCOPES.map((s) => (
             <option key={s} value={s}>
-              {SCOPE_LABEL[s]}
+              {t(SCOPE_LABEL[s])}
             </option>
           ))}
         </select>
@@ -509,7 +511,7 @@ export default function Toolbar(p: Props) {
         }}
         title="按 PDF 正文搜索，而不是只搜书目字段"
       >
-        全文
+        {t('全文')}
       </button>
       {/* The empty middle is a drag handle; the last span reserves the width
           Chromium needs for the native min/max/close controls.  Font size,

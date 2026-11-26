@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { DOC_TYPES, DOC_TYPE_LABELS } from '../lib/doctypes'
+import { useI18n } from '../lib/i18nContext'
 
 export type BatchOp = 'tag-add' | 'tag-del' | 'type' | 'starred' | 'read'
 
@@ -70,6 +71,7 @@ interface Props {
  * form's.
  */
 export default function BatchEdit({ count, onClose, onApply }: Props) {
+  const t = useI18n()
   const [op, setOp] = useState<BatchOp>('tag-add')
   const [val, setVal] = useState('')
   const [busy, setBusy] = useState(false)
@@ -114,7 +116,7 @@ export default function BatchEdit({ count, onClose, onApply }: Props) {
       <div className="modal batch-edit" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head">批量修改 {count} 条的字段</div>
         <div className="be-row">
-          <span className="be-key">字段</span>
+          <span className="be-key">{t('字段')}</span>
           <select value={op} onChange={(e) => { setOp(e.target.value as BatchOp); setVal('') }}>
             {OPS.map((o) => (
               <option key={o.key} value={o.key}>
@@ -124,10 +126,10 @@ export default function BatchEdit({ count, onClose, onApply }: Props) {
           </select>
         </div>
         <div className="be-row">
-          <span className="be-key">值</span>
+          <span className="be-key">{t('值')}</span>
           {def.options ? (
             <select value={val} onChange={(e) => setVal(e.target.value)}>
-              <option value="">请选择…</option>
+              <option value="">{t('请选择…')}</option>
               {def.options.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
@@ -149,9 +151,9 @@ export default function BatchEdit({ count, onClose, onApply }: Props) {
         <div className="be-hint">{def.hint}</div>
         <div className="modal-acts">
           <button className="primary" disabled={!ready} onClick={() => void run()}>
-            {busy ? '应用中…' : `应用到 ${count} 条`}
+            {busy ? t('应用中…') : `应用到 ${count} 条`}
           </button>
-          <button onClick={onClose}>取消</button>
+          <button onClick={onClose}>{t('取消')}</button>
         </div>
       </div>
     </div>

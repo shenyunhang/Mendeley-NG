@@ -20,6 +20,9 @@ import { fieldOf, mergeMissingFields } from './lib/mergeFields'
 import { useOverlayStack } from './lib/hooks/useOverlayStack'
 import { savedSearchMatches } from './lib/savedSearch'
 import { computeLibrarySearch } from './lib/librarySearch'
+import { makeTranslator } from './lib/i18n'
+import { I18nProvider } from './lib/i18nContext'
+import type { Language } from '../shared/types'
 import {
   isMetadataScope,
   normaliseQuery,
@@ -195,6 +198,8 @@ export default function App() {
     setRightPct,
     theme,
     setTheme,
+    language,
+    setLanguage,
     fontSize,
     setFontSize,
     bumpFont,
@@ -491,6 +496,15 @@ export default function App() {
     const next = theme === 'light' ? 'dark' : 'light'
     setTheme(next)
     void writeConfig({ theme: next })
+  }
+
+  /** One translator for the whole window. App owns it so the root component
+   *  can translate its own labels without sitting below its own provider;
+   *  children receive the same one through context. */
+  const translator = useMemo(() => makeTranslator(language), [language])
+  const changeLanguage = (next: Language) => {
+    setLanguage(next)
+    void writeConfig({ language: next })
   }
 
   // Look for an update without being asked.  Nothing did this before, so the
@@ -2134,6 +2148,7 @@ export default function App() {
   ) : null
 
   return (
+    <I18nProvider translator={translator}>
     <div
       className={'app' + (dropping ? ' dropping' : '')}
       onDragOver={(e) => {
@@ -2246,7 +2261,7 @@ export default function App() {
         </div>
       )}
       {importMsg && <div className="pdf-msg">{importMsg}</div>}
-      {dropping && <div className="drop-veil">松手即导入 PDF</div>}
+      {dropping && <div className="drop-veil">{translator('松手即导入 PDF')}</div>}
       {ask && (
         <AskDialog
           title={ask.title}
@@ -2289,7 +2304,7 @@ export default function App() {
       <div className="body" ref={bodyRef}>
         <div className="pane pane-left" style={{ flexBasis: leftW }}>
           <div className="pane-head">
-            <span>文件夹</span>
+            <span>{translator('文件夹')}</span>
             <span className="grow" />
             <button
               style={{ padding: '2px 6px', fontSize: '0.733rem' }}
@@ -2558,23 +2573,23 @@ export default function App() {
         ) : (
         <div className="pane pane-mid">
           <div className="pane-head">
-            <span>文献</span>
+            <span>{translator('文献')}</span>
             <span className="grow" />
             <span style={{ fontSize: '0.733rem' }}>
-              {pdfDir ? 'PDF: ' + pdfDir.slice(-42) : '未设置 PDF 目录'}
+              {pdfDir ? 'PDF: ' + pdfDir.slice(-42) : translator('未设置 PDF 目录')}
             </span>
             <button
               style={{ padding: '2px 6px', fontSize: '0.733rem' }}
               onClick={() => void pickDir()}
             >
-              改目录
+              {translator('改目录')}
             </button>
             <button
               style={{ padding: '2px 6px', fontSize: '0.733rem' }}
               title="设置下载与重命名 PDF 用的文件名模板"
               onClick={askNameTemplate}
             >
-              命名
+              {translator('命名')}
             </button>
           </div>
           {/*
@@ -2590,12 +2605,12 @@ export default function App() {
                 还没设 PDF 目录。下载的 PDF 没有地方放，全文检索也只能读磁盘上的文件——
                 这两件事都还不能用。
               </span>
-              <button onClick={() => void pickDir()}>选择目录</button>
+              <button onClick={() => void pickDir()}>{translator('选择目录')}</button>
             </div>
           )}
           {multi.length > 1 && (
             <div className="batch-bar">
-              <span>已选 {multi.length} 条</span>
+              <span>{translator('已选 {n} 条', { n: multi.length })}</span>
               <select
                 value=""
                 onChange={(e) => {
@@ -2605,7 +2620,7 @@ export default function App() {
                 }}
                 title="把选中的文献加入文件夹"
               >
-                <option value="">＋ 加入文件夹…</option>
+                <option value="">{translator('＋ 加入文件夹…')}</option>
                 {[...folders].sort(byName).map((f) => (
                   <option key={f.id} value={f.id}>
                     {f.name}
@@ -2621,10 +2636,10 @@ export default function App() {
                 </button>
               )}
               <button className="danger" onClick={batchTrash}>
-                移入回收站
+                {translator('移入回收站')}
               </button>
               <MenuButton
-                label="导出"
+                label={translator('导出')}
                 title="把选中的这些写成 BibTeX / RIS / EndNote XML"
                 items={[
                   { label: 'BibTeX', run: exportBib },
@@ -2633,7 +2648,7 @@ export default function App() {
                 ]}
               />
               <button onClick={() => copyCitation(selectedDocs)}>
-                复制引文
+                {translator('复制引文')}
               </button>
               {(() => {
                 const need = needsPdf(selectedDocs).length
@@ -2647,7 +2662,7 @@ export default function App() {
                         : '选中的这些本地都已经有 PDF 了'
                     }
                   >
-                    下载 PDF{need ? `（${need}）` : ''}
+                    {translator('下载 PDF')}{need ? `（${need}）` : ''}
                   </button>
                 )
               })()}
@@ -2655,10 +2670,10 @@ export default function App() {
                 onClick={() => setBatchEdit(true)}
                 title="给选中的每一条统一加标签、改类型、设星标或已读"
               >
-                改字段…
+                {translator('改字段…')}
               </button>
               <span style={{ flex: 1 }} />
-              <button onClick={() => setMulti([])}>取消选择</button>
+              <button onClick={() => setMulti([])}>{translator('取消选择')}</button>
             </div>
           )}
           {dlRun && (
@@ -2806,7 +2821,7 @@ export default function App() {
               style={{ padding: '3px 10px', fontSize: '0.8rem' }}
               onClick={() => setRightTab('details')}
             >
-              详情
+              {translator('详情')}
             </button>
             <button
               className={rightTab === 'pdf' ? 'primary' : ''}
@@ -2821,7 +2836,7 @@ export default function App() {
             )}
           </div>
           {!selected ? (
-            <div className="empty">选中左侧一条文献查看详情或 PDF</div>
+            <div className="empty">{translator('选中左侧一条文献查看详情或 PDF')}</div>
           ) : pinnedSelected && rightTab === 'details' ? (
             <TrashedDocPanel
               doc={selected}
@@ -2847,6 +2862,7 @@ export default function App() {
       {settings && (
         <Settings
           theme={theme}
+          language={language}
           fontSize={fontSize}
           pdfDir={pdfDir}
           nameTemplate={nameTemplate}
@@ -2869,6 +2885,7 @@ export default function App() {
             setTheme(t)
             void writeConfig({ theme: t })
           }}
+          onLanguage={changeLanguage}
           onFont={(n) => bumpFont(n - fontSize)}
           onPickPdfDir={() => void pickDir()}
           onNameTemplate={() => {
@@ -2904,7 +2921,7 @@ export default function App() {
           y={menu.y}
           head={
             menuTargets(menu.docId).length > 1
-              ? `${menuTargets(menu.docId).length} 条选中`
+              ? translator('{n} 条选中', { n: menuTargets(menu.docId).length })
               : (docs.find((d) => d.id === menu.docId)?.title ?? '').slice(0, 40)
           }
           items={rowMenuItems(menu.docId)}
@@ -2912,6 +2929,7 @@ export default function App() {
         />
       )}
     </div>
+    </I18nProvider>
   )
 }
 

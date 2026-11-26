@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Doc, MetaCandidate } from '../../shared/types'
 import { normaliseQuery } from '../lib/searchScope'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   docs: Doc[]
@@ -56,6 +57,7 @@ function alreadyHave(c: MetaCandidate, docs: Doc[]): boolean {
  * whatever the publisher last pushed and that is occasionally wrong.
  */
 export default function AddByIdView({ docs, onClose, onAdded }: Props) {
+  const t = useI18n()
   const [text, setText] = useState('')
   const [found, setFound] = useState<Found[]>([])
   const [picked, setPicked] = useState<string[]>([])
@@ -117,7 +119,7 @@ export default function AddByIdView({ docs, onClose, onAdded }: Props) {
   return (
     <div className="pane pane-mid">
       <div className="pane-head">
-        <span>按标识符添加</span>
+        <span>{t('按标识符添加')}</span>
         <span className="grow" />
         {found.length > 0 && (
           <span style={{ color: 'var(--fg-dim)' }}>已选 {picked.length} 条</span>
@@ -128,13 +130,13 @@ export default function AddByIdView({ docs, onClose, onAdded }: Props) {
           disabled={busy || !picked.length}
           onClick={add}
         >
-          {busy ? '添加中…' : '添加选中项'}
+          {busy ? t('添加中…') : t('添加选中项')}
         </button>
         <button
           style={{ padding: '2px 6px', fontSize: '0.733rem' }}
           onClick={onClose}
         >
-          关闭
+          {t('关闭')}
         </button>
       </div>
 
@@ -147,7 +149,7 @@ export default function AddByIdView({ docs, onClose, onAdded }: Props) {
         />
         <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
           <button className="primary" disabled={busy || !text.trim()} onClick={resolve}>
-            {busy ? '查询中…' : '查询'}
+            {busy ? t('查询中…') : t('查询')}
           </button>
           <span style={{ color: 'var(--fg-dim)', fontSize: '0.733rem' }}>
             DOI 先查 Mendeley 自己的目录，再退到 Crossref
@@ -168,7 +170,7 @@ export default function AddByIdView({ docs, onClose, onAdded }: Props) {
             {f.error && <div className="err">{f.error}</div>}
             {!f.cands.length && !f.error && (
               <div className="empty" style={{ padding: '0.3rem 0.6rem' }}>
-                没查到，试试直接粘贴标题
+                {t('没查到，试试直接粘贴标题')}
               </div>
             )}
             {f.cands.map((c, ci) => {
@@ -194,7 +196,7 @@ export default function AddByIdView({ docs, onClose, onAdded }: Props) {
                   </span>
                   <span className="badge">{c.from}</span>
                   {c.patch.type && <span className="badge">{c.patch.type}</span>}
-                  {dup && <span className="badge">已在库中</span>}
+                  {dup && <span className="badge">{t('已在库中')}</span>}
                 </label>
               )
             })}

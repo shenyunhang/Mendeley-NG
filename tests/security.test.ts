@@ -211,6 +211,13 @@ describe('safeConfigPatch', () => {
     expect(safeConfigPatch({ theme: 'dark' })).toEqual({ theme: 'dark' })
   })
 
+  it('accepts only the two interface languages', () => {
+    expect(safeConfigPatch({ language: 'en' })).toEqual({ language: 'en' })
+    expect(safeConfigPatch({ language: 'zh' })).toEqual({ language: 'zh' })
+    expect(safeConfigPatch({ language: 'fr' })).toEqual({})
+    expect(safeConfigPatch({ language: 1 })).toEqual({})
+  })
+
   it('drops a flag that is not a boolean', () => {
     expect(safeConfigPatch({ syncOnStart: 'false' })).toEqual({})
   })

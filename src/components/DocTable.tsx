@@ -11,6 +11,7 @@ import {
 } from '../lib/columns'
 import { isListBlank } from '../lib/listBlank'
 import { useDragX } from '../lib/useDragX'
+import { useI18n } from '../lib/i18nContext'
 
 interface Props {
   docs: Doc[]
@@ -74,6 +75,7 @@ export default function DocTable({
   onColMove,
   empty
 }: Props) {
+  const t = useI18n()
   const parentRef = useRef<HTMLDivElement>(null)
   const headRef = useRef<HTMLDivElement>(null)
   // Membership is checked once per visible row. With Ctrl+A the array can hold
@@ -270,7 +272,7 @@ export default function DocTable({
                 whiteSpace: 'nowrap'
               }}
             >
-              {c.label}
+              {t(c.label)}
               {c.sort && sort.key === c.sort ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
             </span>
             <span
@@ -310,7 +312,7 @@ export default function DocTable({
         }}
       >
         {!docs.length ? (
-          (empty ?? <div className="empty">没有匹配的文献</div>)
+          (empty ?? <div className="empty">{t('没有匹配的文献')}</div>)
         ) : (
           <div style={{ height: v.getTotalSize(), position: 'relative' }}>
             {v.getVirtualItems().map((vi) => {

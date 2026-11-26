@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import type { FtStatus, UpdateState } from '../../shared/types'
+import type { FtStatus, Language, UpdateState } from '../../shared/types'
 import { DEFAULT_PDF_TEMPLATE } from '../../shared/types'
 import { commitPageBudget } from '../lib/pageBudgetCommit'
 import { updateLine } from '../lib/updateText'
+import { useI18n } from '../lib/i18nContext'
 import logoUrl from '../../assets/logo.svg'
 
 interface Props {
   theme: 'dark' | 'light'
+  language: Language
   fontSize: number
   pdfDir: string
   nameTemplate: string
@@ -36,6 +38,7 @@ interface Props {
   onInstallUpdate?: () => void
   onClose: () => void
   onTheme: (t: 'dark' | 'light') => void
+  onLanguage: (language: Language) => void
   onFont: (n: number) => void
   onPickPdfDir: () => void
   onNameTemplate: () => void
@@ -55,6 +58,7 @@ interface Props {
  */
 export default function Settings({
   theme,
+  language,
   fontSize,
   pdfDir,
   nameTemplate,
@@ -71,6 +75,7 @@ export default function Settings({
   onInstallUpdate,
   onClose,
   onTheme,
+  onLanguage,
   onFont,
   onPickPdfDir,
   onNameTemplate,
@@ -83,6 +88,7 @@ export default function Settings({
   // change drops the index, and an index dropped per digit is not a setting
   const [pages, setPages] = useState(String(ftPages))
   const sheet = useRef<HTMLDivElement>(null)
+  const t = useI18n()
 
   // Scrolls to the section that was asked for.  It cannot be done by id: the
   // sections are headings in a scrolling box and there is nowhere to put an
@@ -91,11 +97,14 @@ export default function Settings({
   // at the top of a sheet that claims to have taken them somewhere.
   useEffect(() => {
     if (!focus) return
+    // The caller names the section in Chinese, which is also the translation
+    // key. Translate that name too, or switching language would leave a
+    // "go to settings" jump looking for a heading that is no longer there.
     const sec = [...(sheet.current?.querySelectorAll('.set-sec') ?? [])].find(
-      (s) => (s.textContent ?? '').trim() === focus
+      (s) => (s.textContent ?? '').trim() === t(focus)
     )
     sec?.scrollIntoView({ block: 'start' })
-  }, [focus])
+  }, [focus, t])
 
   const commit = () => {
     const { shown, applied } = commitPageBudget(pages)
@@ -111,100 +120,116 @@ export default function Settings({
         data-focus={focus ?? undefined}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="modal-head">设置</div>
+        <div className="modal-head">{t('设置')}</div>
 
-        <div className="set-sec">外观</div>
+        <div className="set-sec">{t('外观')}</div>
         <div className="set-row">
-          <span className="set-key">主题</span>
+          <span className="set-key">{t('主题')}</span>
           <button
             className={theme === 'dark' ? 'primary' : ''}
             onClick={() => onTheme('dark')}
           >
-            深色
+            {t('深色')}
           </button>
           <button
             className={theme === 'light' ? 'primary' : ''}
             onClick={() => onTheme('light')}
           >
-            浅色
+            {t('浅色')}
+          </button>
+        </div>
+        <div className="set-row" data-lang-row>
+          <span className="set-key">{t('语言')}</span>
+          <button
+            data-lang="zh"
+            className={language === 'zh' ? 'primary' : ''}
+            onClick={() => onLanguage('zh')}
+          >
+            中文
+          </button>
+          <button
+            data-lang="en"
+            className={language === 'en' ? 'primary' : ''}
+            onClick={() => onLanguage('en')}
+          >
+            English
           </button>
         </div>
         <div className="set-row">
-          <span className="set-key">字号</span>
-          <button onClick={() => onFont(fontSize - 1)} title="缩小界面字号">
+          <span className="set-key">{t('字号')}</span>
+          <button onClick={() => onFont(fontSize - 1)} title={t('缩小界面字号')}>
             A−
           </button>
           <span className="set-val">{fontSize}px</span>
-          <button onClick={() => onFont(fontSize + 1)} title="放大界面字号">
+          <button onClick={() => onFont(fontSize + 1)} title={t('放大界面字号')}>
             A＋
           </button>
-          <span className="set-note">只影响界面，不影响 PDF 的清晰度</span>
+          <span className="set-note">{t('只影响界面，不影响 PDF 的清晰度')}</span>
         </div>
 
-        <div className="set-sec">文件</div>
+        <div className="set-sec">{t('文件')}</div>
         <div className="set-row">
-          <span className="set-key">PDF 目录</span>
-          <span className="set-path" title={pdfDir || '未设置'}>
-            {pdfDir || '未设置'}
+          <span className="set-key">{t('PDF 目录')}</span>
+          <span className="set-path" title={pdfDir || t('未设置')}>
+            {pdfDir || t('未设置')}
           </span>
-          <button onClick={onPickPdfDir}>选择…</button>
+          <button onClick={onPickPdfDir}>{t('选择…')}</button>
         </div>
         <div className="set-row">
-          <span className="set-key">命名模板</span>
+          <span className="set-key">{t('命名模板')}</span>
           <span className="set-path" title={nameTemplate || DEFAULT_PDF_TEMPLATE}>
             {nameTemplate || DEFAULT_PDF_TEMPLATE}
           </span>
-          <button onClick={onNameTemplate}>修改…</button>
+          <button onClick={onNameTemplate}>{t('修改…')}</button>
         </div>
         <div className="set-note">
-          可用 {'{title} {year} {authors} {journal} {key} {type} {doi}'}
+          {t('可用')} {'{title} {year} {authors} {journal} {key} {type} {doi}'}
         </div>
         <div className="set-row">
-          <span className="set-key">引文样式</span>
+          <span className="set-key">{t('引文样式')}</span>
           <select value={citeStyle} onChange={(e) => onCiteStyle(e.target.value)}>
-            <option value="author-year">作者（年份）</option>
-            <option value="authors">全部作者</option>
-            <option value="numeric">编号</option>
-            <option value="full">完整条目</option>
-            <option value="key">BibTeX key</option>
-            <option value="bibtex">BibTeX 条目</option>
+            <option value="author-year">{t('作者（年份）')}</option>
+            <option value="authors">{t('全部作者')}</option>
+            <option value="numeric">{t('编号')}</option>
+            <option value="full">{t('完整条目')}</option>
+            <option value="key">{t('BibTeX key')}</option>
+            <option value="bibtex">{t('BibTeX 条目')}</option>
           </select>
         </div>
 
-        <div className="set-sec">同步</div>
+        <div className="set-sec">{t('同步')}</div>
         <div className="set-row">
-          <span className="set-key">启动时</span>
+          <span className="set-key">{t('启动时')}</span>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input
               type="checkbox"
               checked={syncOnStart}
               onChange={(e) => onSyncOnStart(e.target.checked)}
             />
-            打开软件时自动同步一次
+            {t('打开软件时自动同步一次')}
           </label>
         </div>
         <div className="set-note">
-          只拉增量，失败不出声；关掉就只有点「同步云端」时才同步。
+          {t('只拉增量，失败不出声；关掉就只有点「同步云端」时才同步。')}
         </div>
         <div className="set-row">
-          <span className="set-key">同步时</span>
+          <span className="set-key">{t('同步时')}</span>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input
               type="checkbox"
               checked={syncPdfsOnSync}
               onChange={(e) => onSyncPdfsOnSync(e.target.checked)}
             />
-            把云端有、本地没有的 PDF 一起下载下来
+            {t('把云端有、本地没有的 PDF 一起下载下来')}
           </label>
         </div>
         <div className="set-note">
-          点「同步云端」或「全量」之后在后台三路并发下载，可随时停止；
-          启动时的静默同步不下载，免得每次开机都占带宽。
+          {t('点「同步云端」或「全量」之后在后台三路并发下载，可随时停止；启动时的静默同步不下载，免得每次开机都占带宽。')}
         </div>
 
-        <div className="set-sec">全文检索</div>
+        <div className="set-sec">{t('全文检索')}</div>
         <div className="set-row">
-          <span className="set-key">每篇索引页数</span>
+          <span className="set-key">{t('每篇索引页数')}</span>
           <input
             style={{ width: 64 }}
             value={pages}
@@ -216,21 +241,24 @@ export default function Settings({
           />
           <span className="set-note">
             {ft?.indexed
-              ? `已索引 ${ft.indexed} 篇，每篇前 ${ft.pages ?? pages} 页；改动后需要重建`
-              : '还没建索引；改动后下次建索引生效'}
+              ? t('已索引 {indexed} 篇，每篇前 {pages} 页；改动后需要重建', {
+                  indexed: ft.indexed,
+                  pages: ft.pages ?? pages
+                })
+              : t('还没建索引；改动后下次建索引生效')}
           </span>
         </div>
         <div className="set-note">
-          页数越多越全，索引也越大。每篇前 3 页约 60 MB，全文约 293 MB。
+          {t('页数越多越全，索引也越大。每篇前 3 页约 60 MB，全文约 293 MB。')}
         </div>
 
-        <div className="set-sec">关于</div>
+        <div className="set-sec">{t('关于')}</div>
         <div className="about">
           <img className="about-logo" src={logoUrl} alt="" width={56} height={56} />
           <div>
             <div>Mendeley NG {version}</div>
             <div className="set-note">
-              Mendeley Desktop 1.19.8 的替代品，本地优先，高 DPI 原生正常。
+              {t('Mendeley Desktop 1.19.8 的替代品，本地优先，高 DPI 原生正常。')}
             </div>
             {/* Both numbers, side by side.  A reader who was told a build is
                 fixed needs to know whether the version in front of them is
@@ -239,14 +267,14 @@ export default function Settings({
             <div className="about-upd">
               {updateLine(upd, version) ? (
                 <span className={upd?.phase === 'error' ? 'upd-line err' : 'upd-line'}>
-                  {updateLine(upd, version)}
+                  {t(updateLine(upd, version) ?? '')}
                 </span>
               ) : (
-                <span className="upd-line">当前 {version}</span>
+                <span className="upd-line">{t('当前 {version}', { version })}</span>
               )}
               <button
                 disabled={upd?.phase === 'checking' || upd?.phase === 'downloading'}
-                title={`当前 ${version}。从 GitHub Releases 拉取最新版本`}
+                title={t('当前 {version}。从 GitHub Releases 拉取最新版本', { version })}
                 onClick={() => {
                   if (upd?.phase === 'available') onDownloadUpdate?.()
                   else if (upd?.phase === 'downloaded') onInstallUpdate?.()
@@ -254,14 +282,14 @@ export default function Settings({
                 }}
               >
                 {upd?.phase === 'available'
-                  ? `下载 ${upd.version ?? ''}`
+                  ? t('下载 {version}', { version: upd.version ?? '' })
                   : upd?.phase === 'downloaded'
-                    ? '重启并安装'
+                    ? t('重启并安装')
                     : upd?.phase === 'checking'
-                      ? '检查中…'
+                      ? t('检查中…')
                       : upd?.phase === 'downloading'
-                        ? `下载中 ${upd.percent ?? 0}%`
-                        : '检查更新'}
+                        ? t('下载中 {percent}%', { percent: upd.percent ?? 0 })
+                        : t('检查更新')}
               </button>
             </div>
           </div>
@@ -269,7 +297,7 @@ export default function Settings({
 
         <div className="modal-acts">
           <button className="primary" onClick={onClose}>
-            完成
+            {t('完成')}
           </button>
         </div>
       </div>
