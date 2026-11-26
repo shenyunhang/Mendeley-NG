@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app } from 'electron'
@@ -47,6 +48,8 @@ const CHECKPOINT_EVERY = 20
 const PROGRESS_MIN_MS = 200
 /** A one-character query is a normal Chinese search, not a typo. */
 const MIN_QUERY = 1
+/** One uninterrupted slice of a reference-index scan. */
+const CHUNK_DOCS = 32
 
 interface RefEntry {
   mtime: number
@@ -89,24 +92,47 @@ function isEntry(x: unknown): x is RefEntry {
 
 /** A broken, half-written or wrong-version cache is treated as empty, never
  *  partly trusted: one bad entry must not poison the whole search. */
-function loadCache(): RefsCache {
-  if (cache) return cache
+function parseCache(raw: string): RefsCache {
   try {
-    const raw = JSON.parse(fs.readFileSync(cacheFile(), 'utf-8')) as unknown
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('shape')
-    const x = raw as RefsCache
-    if (x.version !== 1 || !x.entries || typeof x.entries !== 'object' || Array.isArray(x.entries)) {
+    const x = JSON.parse(raw) as unknown
+    if (!x || typeof x !== 'object' || Array.isArray(x)) throw new Error('shape')
+    const c = x as RefsCache
+    if (c.version !== 1 || !c.entries || typeof c.entries !== 'object' || Array.isArray(c.entries)) {
       throw new Error('shape')
     }
     const entries: Record<string, RefEntry> = {}
-    for (const [id, e] of Object.entries(x.entries)) {
+    for (const [id, e] of Object.entries(c.entries)) {
       if (isEntry(e)) entries[id] = e
     }
-    cache = { version: 1, entries }
+    return { version: 1, entries }
+  } catch {
+    return emptyCache()
+  }
+}
+
+function loadCache(): RefsCache {
+  if (cache) return cache
+  try {
+    cache = parseCache(fs.readFileSync(cacheFile(), 'utf-8'))
   } catch {
     cache = emptyCache()
   }
   return cache
+}
+
+/** The same table, read off the event loop for the async IPC path. */
+let readingCache: Promise<RefsCache> | null = null
+async function loadCacheAsync(): Promise<RefsCache> {
+  if (cache) return cache
+  if (!readingCache) {
+    readingCache = fsp.readFile(cacheFile(), 'utf-8')
+      .then((raw) => (cache ??= parseCache(raw)))
+      .catch(() => (cache ??= emptyCache()))
+      .finally(() => {
+        readingCache = null
+      })
+  }
+  return readingCache
 }
 
 type PdfDoc = Awaited<ReturnType<typeof pdfjs.getDocument>['promise']>
@@ -374,12 +400,16 @@ export async function buildRefsIndex(
   return { total, indexed: countIndexed(c), skipped }
 }
 
-export function searchRefs(query: string): RefHit[] {
+export function* searchRefsSteps(query: string): Generator<void, RefHit[], void> {
   const needle = normaliseQuery(query)
   if (needle.length < MIN_QUERY) return []
+  // Hand control back before the first read of the table.
+  yield
   const c = loadCache()
   const hits: RefHit[] = []
+  let scanned = 0
   for (const docId of Object.keys(c.entries).sort()) {
+    if (++scanned % CHUNK_DOCS === 0) yield
     const e = c.entries[docId]!
     if (!e.text) continue
     // Matching and slicing both happen on a normalised copy. Taking the
@@ -413,7 +443,9 @@ export function searchRefs(query: string): RefHit[] {
   // can return.
   if (wanted.length < 2 || wanted.length > MAX_NEAR_WORDS) return hits
   const anchors = wanted.filter((w) => w.length >= 2)
+  let nearScanned = 0
   for (const docId of Object.keys(c.entries).sort()) {
+    if (++nearScanned % CHUNK_DOCS === 0) yield
     const e = c.entries[docId]!
     if (!e.text) continue
     const hay = e.hay ?? normaliseQuery(e.text)
@@ -434,6 +466,36 @@ export function searchRefs(query: string): RefHit[] {
     if (hits.length >= MAX_HITS) break
   }
   return hits
+}
+
+/** Drive the same scan to completion without yielding. The index tests and
+ *  the smoke suite call `searchRefs` synchronously, so that shape stays. */
+export function searchRefs(query: string): RefHit[] {
+  const it = searchRefsSteps(query)
+  let r = it.next()
+  while (!r.done) r = it.next()
+  return r.done ? r.value : []
+}
+
+let searchGeneration = 0
+const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+/** Drive the reference scan across event-loop turns. A newer query abandons
+ *  the old one at the next slice; the renderer already drops stale answers. */
+export async function searchRefsAsync(query: string): Promise<RefHit[]> {
+  const needle = normaliseQuery(query)
+  if (needle.length < MIN_QUERY) return []
+  const mine = ++searchGeneration
+  await loadCacheAsync()
+  if (mine !== searchGeneration) return []
+  const it = searchRefsSteps(query)
+  let r = it.next()
+  while (!r.done) {
+    if (mine !== searchGeneration) return []
+    await nextTurn()
+    r = it.next()
+  }
+  return r.done ? r.value : []
 }
 
 export function refsStatus(): { indexed: number; total: number } {

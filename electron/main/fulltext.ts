@@ -336,6 +336,29 @@ function text(): string {
   return blob
 }
 
+/** The same corpus, read off the event loop on the first async query.
+ *  Concurrent callers share one in-flight read. A build or a page-budget
+ *  change clears `blob`, so the next caller reads the file it just wrote. */
+let reading: Promise<string> | null = null
+async function textAsync(): Promise<string> {
+  if (blob != null) return blob
+  if (!reading) {
+    reading = fsp.readFile(dataFile(), 'utf8')
+      .then((s) => {
+        if (blob == null) blob = s
+        return blob ?? s
+      })
+      .catch(() => {
+        if (blob == null) blob = ''
+        return blob ?? ''
+      })
+      .finally(() => {
+        reading = null
+      })
+  }
+  return reading
+}
+
 
 export function ftStatus(docs: Doc[]): FtStatus {
   const m = loadMeta()
@@ -886,10 +909,24 @@ export function ftClear() {
   saveMeta()
 }
 
-/** Documents matching `q`, most-recently-added shape preserved by the caller. */
-export function ftSearch(q: string): FtHit[] {
+/** How much scanning one uninterrupted slice of the event loop may do.
+ *  A slice is a handful of papers or a few hundred offsets, not a whole
+ *  66 MB corpus: the async driver yields between slices so every other IPC
+ *  channel can be answered while a slow phrase is being looked for. */
+const CHUNK_DOCS = 24
+const CHUNK_OFFSETS = 512
+
+/** Documents matching `q`, as a resumable scan.
+ *
+ *  The synchronous wrapper below drives this to completion in one go, which
+ *  is what the smoke suite and the differential tests call. The IPC handler
+ *  drives the same generator across event-loop turns. There is only one
+ *  algorithm here, so the two answers cannot drift apart. */
+export function* ftSearchSteps(q: string): Generator<void, FtHit[], void> {
   const needle = q.trim().toLowerCase().replace(/\s+/g, ' ')
   if (needle.length < 2) return []
+  // Hand control back before the first file read and the first sort.
+  yield
   const m = loadMeta()
   const body = text()
   if (!body) return []
@@ -920,7 +957,7 @@ export function ftSearch(q: string): FtHit[] {
    * the corpus; that is both the anchor the shared rule requires and a cheap
    * way to skip a word-salad query without scanning every paper.
    */
-  const nearHits = (limit = MAX_HITS, skip?: Set<string>): FtHit[] => {
+  function* nearHits(limit = MAX_HITS, skip?: Set<string>): Generator<void, FtHit[], void> {
     if (limit <= 0) return []
     const wanted = nearWords
     if (!wanted.length || wanted.length > MAX_NEAR_WORDS) return []
@@ -967,7 +1004,9 @@ export function ftSearch(q: string): FtHit[] {
       }
       return null
     }
+    let scanned = 0
     for (const [id, e] of sorted) {
+      if (++scanned % CHUNK_DOCS === 0) yield
       if (skip?.has(id)) continue
       const piece = body.slice(e.start, e.start + e.len)
       if (!anchors.some((a) => piece.includes(a))) continue
@@ -994,7 +1033,9 @@ export function ftSearch(q: string): FtHit[] {
   // document.  This never slices, so it is one pass over the text. A single
   // word keeps its punctuation: "qwen3.5" is one name, not "qwen3" plus "5".
   if (coverageWords.length === 1) {
+    let probes = 0
     for (let at = body.indexOf(needle); at !== -1; at = body.indexOf(needle, at + 1)) {
+      if (++probes % CHUNK_OFFSETS === 0) yield
       const found = docAt(sorted, at)
       if (!found) continue
       hits.push({
@@ -1006,7 +1047,8 @@ export function ftSearch(q: string): FtHit[] {
       // skip the rest of this document's text
       at = found[1].start + found[1].len
     }
-    return hits.length ? hits : nearHits()
+    if (hits.length) return hits
+    return yield* nearHits()
   }
 
   // Several words. The literal phrase is the best answer, but it no longer
@@ -1021,7 +1063,9 @@ export function ftSearch(q: string): FtHit[] {
   // stall the main process for seconds on every letter typed. Walking the
   // whole string once per word instead, and asking `docAt` which document
   // each offset belongs to, does the same job with no copying at all.
+  let phraseProbes = 0
   for (let at = body.indexOf(needle); at !== -1; at = body.indexOf(needle, at + 1)) {
+    if (++phraseProbes % CHUNK_OFFSETS === 0) yield
     const found = docAt(sorted, at)
     if (!found) continue
     hits.push({
@@ -1053,9 +1097,11 @@ export function ftSearch(q: string): FtHit[] {
   for (const t of coverageWords) {
     (t.length >= SHORT_WORD_LENGTH ? longWords : shortWords).push(t)
   }
+  let wordProbes = 0
   for (let w = 0; w < longWords.length; w++) {
     const t = longWords[w]!
     for (let at = body.indexOf(t); at !== -1; ) {
+      if (++wordProbes % CHUNK_OFFSETS === 0) yield
       if (!wordBoundaryMatch(body, at, t)) {
         at = body.indexOf(t, at + 1)
         continue
@@ -1075,7 +1121,9 @@ export function ftSearch(q: string): FtHit[] {
   for (let s = 0; s < shortWords.length; s++) {
     const t = shortWords[s]!
     const word = longWords.length + s
+    let candidatesSeen = 0
     for (const [id] of candidates) {
+      if (++candidatesSeen % CHUNK_DOCS === 0) yield
       const e = m.entries[id]!
       const end = e.start + e.len
       for (let at = body.indexOf(t, e.start); at !== -1 && at < end; at = body.indexOf(t, at + 1)) {
@@ -1103,6 +1151,41 @@ export function ftSearch(q: string): FtHit[] {
   // never shown twice under two labels. A list that already hit the cap has
   // no room left, so the window scan is not worth starting at all.
   if (hits.length >= MAX_HITS) return hits
-  hits.push(...nearHits(MAX_HITS - hits.length, already))
+  const extra = yield* nearHits(MAX_HITS - hits.length, already)
+  hits.push(...extra)
   return hits
+}
+
+/** Drive the same scan to completion without yielding. The smoke suite and
+ *  the differential tests call `ftSearch` synchronously, so this signature
+ *  stays a plain array rather than becoming a promise. */
+export function ftSearch(q: string): FtHit[] {
+  const it = ftSearchSteps(q)
+  let r = it.next()
+  while (!r.done) r = it.next()
+  return r.done ? r.value : []
+}
+
+const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve))
+let searchGeneration = 0
+
+/** Drive the same scan across event-loop turns. `textAsync` moves the first
+ *  66 MB read off the event loop as well; by the time the generator starts,
+ *  `text()` answers from the cache and no slice owns the process for long.
+ *  A newer query abandons the old one at the next slice: the renderer already
+ *  drops stale answers, so stopping the work early changes no answer. */
+export async function ftSearchAsync(q: string): Promise<FtHit[]> {
+  const needle = q.trim().toLowerCase().replace(/\s+/g, ' ')
+  if (needle.length < 2) return []
+  const mine = ++searchGeneration
+  await textAsync()
+  if (mine !== searchGeneration) return []
+  const it = ftSearchSteps(q)
+  let r = it.next()
+  while (!r.done) {
+    if (mine !== searchGeneration) return []
+    await nextTurn()
+    r = it.next()
+  }
+  return r.done ? r.value : []
 }

@@ -1,11 +1,12 @@
 import { ipcMain } from 'electron'
-import { buildRefsIndex, refsStatus, searchRefs } from '../refsindex'
+import { buildRefsIndex, refsStatus, searchRefsAsync } from '../refsindex'
 import { getWin } from '../window'
 
 /**
  * The references-search channels.  A build reads every local PDF, so it is
- * started on request and pushes its progress instead of blocking an invoke;
- * search and status are small enough to answer synchronously inside a handler.
+ * started on request and pushes its progress instead of blocking an invoke.
+ * Search is driven across event-loop turns like the full-text scan, so a
+ * large reference table cannot keep every other channel waiting.
  */
 export function registerRefsIpc() {
   ipcMain.handle('refs:build', async () => {
@@ -16,9 +17,9 @@ export function registerRefsIpc() {
     }
   })
 
-  ipcMain.handle('refs:search', (_e, q: string) => {
+  ipcMain.handle('refs:search', async (_e, q: string) => {
     try {
-      return searchRefs(q)
+      return await searchRefsAsync(q)
     } catch (e) {
       return { error: String(e) }
     }

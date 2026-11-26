@@ -4,7 +4,7 @@ import path from 'node:path'
 import { ensureClient } from '../library'
 import { pdfNameFor } from '../pdfname'
 import { attachPdfs } from '../pdfindex'
-import { ftCancel, ftClear, ftSearch, ftStatus } from '../fulltext'
+import { ftCancel, ftClear, ftSearchAsync, ftStatus } from '../fulltext'
 import { ftDocs, indexAdded, startBuild } from '../ftops'
 import { DEFAULT_PDF_DIR, loadConfig, loadLibrary, saveLibrary } from '../store'
 import type { Doc } from '../../../shared/types'
@@ -133,5 +133,7 @@ export function registerFilesIpc() {
     ftClear()
     return ftStatus(ftDocs())
   })
-  ipcMain.handle('ft:search', (_e, q: string) => ftSearch(q))
+  // The scan is driven across event-loop turns, so a slow phrase does not
+  // keep config writes, reading positions and progress events waiting.
+  ipcMain.handle('ft:search', (_e, q: string) => ftSearchAsync(q))
 }
