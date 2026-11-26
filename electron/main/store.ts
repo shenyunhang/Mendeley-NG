@@ -56,7 +56,63 @@ export function saveConfig(c: Config) {
   fs.renameSync(tmp, cfgFile())
 }
 
+/**
+ * The parsed library, reused only while disk still holds the exact file that
+ * was parsed. `library.json` is over twelve megabytes and 35 call sites read
+ * it, so a metadata edit used to parse the whole file twice in one handler.
+ *
+ * This is not the snapshot that made `reading:set` go stale (HANDOFF §4).
+ * Every read checks the file's identity, every write drops the entry, and the
+ * returned rows are copies: an edit a caller never saves cannot linger here
+ * and be handed to the next channel. A second window or a hand edit changes
+ * the stamp, so the next read reparses.
+ */
+let libCache: { stamp: string; lib: Library } | null = null
+
+function libStamp(): string | null {
+  try {
+    const s = fs.statSync(libFile(), { bigint: true })
+    // Nanosecond mtime, not the millisecond one: two atomic writes in the
+    // same millisecond must not look like the same file.
+    return `${s.mtimeNs}:${s.ctimeNs}:${s.size}`
+  } catch {
+    return null
+  }
+}
+
+function cloneDoc(d: Doc): Doc {
+  const out: Doc = { ...d }
+  // The nested containers are copied too. Callers replace `folder_uuids`
+  // wholesale today, but a shallow row copy would let an unsaved in-place
+  // edit reach the cached object and be handed to the next channel.
+  if (d.authors) out.authors = d.authors.map((a) => ({ ...a }))
+  if (d.editors) out.editors = d.editors.map((a) => ({ ...a }))
+  if (d.identifiers) out.identifiers = { ...d.identifiers }
+  if (d.folder_uuids) out.folder_uuids = [...d.folder_uuids]
+  if (d.websites) out.websites = [...d.websites]
+  if (d.keywords) out.keywords = [...d.keywords]
+  if (d.tags) out.tags = [...d.tags]
+  return out
+}
+
+function libraryCopy(lib: Library): Library {
+  return {
+    docs: lib.docs.map(cloneDoc),
+    folders: lib.folders.map((f) => ({ ...f })),
+    syncedAt: lib.syncedAt
+  }
+}
+
 export function loadLibrary(): Library | null {
+  // The stamp is taken before the read. If the file changes in between, the
+  // stamp stored with the answer describes the older file, so the next read
+  // misses and reparses instead of serving stale rows as current ones.
+  const stamp = libStamp()
+  if (stamp === null) {
+    libCache = null
+    return null
+  }
+  if (libCache?.stamp === stamp) return libraryCopy(libCache.lib)
   try {
     const raw = fs.readFileSync(libFile(), 'utf-8')
     const lib = JSON.parse(raw) as Library
@@ -65,8 +121,10 @@ export function loadLibrary(): Library | null {
     // written straight back, so it kept itself alive.
     if (!Array.isArray(lib.docs) || !Array.isArray(lib.folders)) return null
     if (lib.syncedAt !== undefined && typeof lib.syncedAt !== 'string') return null
-    return lib
+    libCache = { stamp, lib }
+    return libraryCopy(lib)
   } catch {
+    libCache = null
     return null
   }
 }
@@ -74,6 +132,9 @@ export function loadLibrary(): Library | null {
 function writeLibrary(docs: Doc[], folders: Folder[], syncedAt: string) {
   const lib: Library = { docs, folders, syncedAt }
   atomicWriteJson(libFile(), lib)
+  // The rename gives the file a new stamp, but drop the entry explicitly:
+  // a coarse filesystem clock must never be able to make a write invisible.
+  libCache = null
 }
 
 /**
