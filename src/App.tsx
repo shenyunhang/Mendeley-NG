@@ -1,4 +1,5 @@
 import { clampToRange } from '../shared/clamp'
+import { isPdfImportFileName, type PickedImportPdf } from '../shared/importFileRules'
 import { ignoreFailure, reportFailure, FAILURE } from '../shared/failures'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -2026,22 +2027,22 @@ export default function App() {
   const [dropping, setDropping] = useState(false)
   const { message: importMsg, flash: flashImport, show: showImport } = useFlashMessage()
 
-  const onDrop = async (e: React.DragEvent) => {
-    e.preventDefault()
-    setDropping(false)
-    const files = Array.from(e.dataTransfer.files).filter((f) =>
-      f.name.toLowerCase().endsWith('.pdf')
-    )
-    if (!files.length) return
+  /**
+   * One PDF at a time, and only one read of each. The bytes feed both the
+   * identifier scan and the upload: pdf.js detaches the buffer it is given,
+   * so pdfmeta hands it a copy and the original survives to `importPdf`.
+   * `readBytes` is a thunk because a dropped file must not be read until its
+   * turn comes, while a file chosen in the dialog already holds its bytes.
+   * Both the drag-and-drop veil and the 导入文件… menu end up here.
+   */
+  const importPdfFiles = async (
+    files: { name: string; readBytes: () => Promise<ArrayBuffer> }[]
+  ) => {
     for (let i = 0; i < files.length; i++) {
       const f = files[i]
       showImport(`导入 ${i + 1}/${files.length}：${f.name}`)
       try {
-        // One read feeds both steps.  Reading the file twice was the whole
-        // cost of the import for a large PDF, and it only looked necessary
-        // because pdf.js detaches the buffer it is given — pdfmeta now hands
-        // pdf.js a copy, so the bytes survive to be uploaded.
-        const buf = await f.arrayBuffer()
+        const buf = await f.readBytes()
         const ids = await extractIds(buf)
         const doc = await window.api.importPdf(f.name, buf, ids)
         setLib((l) => (l ? { ...l, docs: [...l.docs, doc] } : l))
@@ -2049,8 +2050,30 @@ export default function App() {
         setErr(`导入「${f.name}」失败：${String(err)}`)
       }
     }
-    flashImport(files.length > 1 ? `已导入 ${files.length} 篇` : '导入完成', IMPORT_FINISHED_MESSAGE_VISIBLE_MS)
+    flashImport(
+      files.length > 1 ? `已导入 ${files.length} 篇` : '导入完成',
+      IMPORT_FINISHED_MESSAGE_VISIBLE_MS
+    )
   }
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setDropping(false)
+    const files = Array.from(e.dataTransfer.files).filter((f) =>
+      isPdfImportFileName(f.name)
+    )
+    if (!files.length) return
+    await importPdfFiles(
+      files.map((f) => ({ name: f.name, readBytes: () => f.arrayBuffer() }))
+    )
+  }
+
+  /** PDFs picked in the import dialog take exactly the dropped-file path.
+   *  Their bytes are already in memory, so the thunk only hands them over. */
+  const importPickedPdfs = (pdfs: PickedImportPdf[]) =>
+    importPdfFiles(
+      pdfs.map((f) => ({ name: f.name, readBytes: () => Promise.resolve(f.bytes) }))
+    )
 
   /**
    * The reader, whether it is being given the whole window or the pane beside
@@ -2141,6 +2164,7 @@ export default function App() {
         canRead={!!selected?.localPdf}
         onRead={() => setView((v) => viewAfterReadingToggle(v))}
         onImportRefs={(entries) => setView({ kind: 'import', entries })}
+        onImportPdfs={importPickedPdfs}
         onExportBib={exportBib}
         onExportRis={exportRis}
         onExportEndnote={exportEndnote}

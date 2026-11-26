@@ -22,6 +22,7 @@ import type {
   SyncStatus,
   UpdateState
 } from '../shared/types'
+import type { PickedImportFile } from '../shared/importFileRules'
 
 export interface Api {
   loadLibrary: () => Promise<Library | { error: string } | null>
@@ -117,7 +118,9 @@ export interface Api {
   loadReading: () => Promise<Record<string, number>>
   setReading: (docId: string, page: number) => Promise<{ ok: boolean }>
   createDoc: (body: Record<string, unknown>) => Promise<Doc>
-  openRefFiles: () => Promise<{ name: string; text: string }[]>
+  /** A bibliography file comes back as text for the preview; a PDF comes
+   *  back as bytes because the server reads its metadata, not the renderer. */
+  openRefFiles: () => Promise<PickedImportFile[]>
   lookupMeta: (docId: string) => Promise<MetaCandidate[]>
   resolveIdentifier: (value: string) => Promise<MetaCandidate[]>
   importPdf: (

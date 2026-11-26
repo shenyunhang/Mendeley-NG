@@ -14,6 +14,7 @@ import type {
   SyncStatus,
   UpdateState
 } from '../../shared/types'
+import type { PickedImportFile } from '../../shared/importFileRules'
 import type { Api } from '../../src/global'
 
 /** Every channel the renderer can call, checked against the one shared
@@ -164,7 +165,7 @@ const api: Api = {
   createDoc: (body: Record<string, unknown>) =>
     ipcRenderer.invoke('doc:create', body) as Promise<Doc>,
   openRefFiles: () =>
-    ipcRenderer.invoke('dialog:openFiles') as Promise<{ name: string; text: string }[]>,
+    ipcRenderer.invoke('dialog:openFiles') as Promise<PickedImportFile[]>,
   lookupMeta: (docId: string) =>
     ipcRenderer.invoke('meta:lookup', docId) as Promise<MetaCandidate[]>,
   resolveIdentifier: (value: string) =>

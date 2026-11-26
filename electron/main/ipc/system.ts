@@ -7,6 +7,7 @@ import { resetClient } from '../library'
 import { DEFAULT_PDF_DIR, loadConfig, saveConfig } from '../store'
 import { getWin } from '../window'
 import { isSafeExternalUrl, resolveInside } from '../../../shared/pathPolicy'
+import { isPdfImportFileName } from '../../../shared/importFileRules'
 import type { LeaveProgress } from '../../../shared/types'
 
 export function registerSystemIpc() {
@@ -247,20 +248,34 @@ export function registerSystemIpc() {
   )
 
   ipcMain.handle('dialog:openFiles', async () => {
+    const referenceFormats = ['bib', 'bibtex', 'ris', 'xml', 'enw', 'txt']
     const r = await dialog.showOpenDialog({
       properties: ['openFile', 'multiSelections'],
       filters: [
-        {
-          name: '参考文献',
-          extensions: ['bib', 'bibtex', 'ris', 'xml', 'enw', 'txt']
-        }
+        // One dialog for both kinds: a reader often has a .bib and the PDFs
+        // it refers to in the same folder. The narrower filters are there so
+        // a folder of hundreds of PDFs can still be narrowed to one kind.
+        { name: '参考文献与 PDF', extensions: [...referenceFormats, 'pdf'] },
+        { name: 'PDF', extensions: ['pdf'] },
+        { name: '参考文献', extensions: referenceFormats }
       ]
     })
     if (r.canceled || !r.filePaths.length) return []
-    return r.filePaths.map((p) => ({
-      name: path.basename(p),
-      text: fs.readFileSync(p, 'utf-8')
-    }))
+    return r.filePaths.map((p) => {
+      const name = path.basename(p)
+      if (isPdfImportFileName(name)) {
+        // A PDF's bytes are the upload. Reading it as UTF-8 would replace
+        // every binary stream with replacement characters and the server
+        // would receive a corrupt file.
+        const raw = fs.readFileSync(p)
+        const bytes = raw.buffer.slice(
+          raw.byteOffset,
+          raw.byteOffset + raw.byteLength
+        ) as ArrayBuffer
+        return { name, bytes }
+      }
+      return { name, text: fs.readFileSync(p, 'utf-8') }
+    })
   })
 
   ipcMain.handle('shell:openExternal', async (_e, url: string) => {

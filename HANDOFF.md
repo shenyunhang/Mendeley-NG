@@ -384,6 +384,11 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   目录内，任何一个越界就整批拒绝；`../`、绝对路径、盘符相对名、UNC 与 NUL 都拒收。
   复制源 `from` 不限制，导出的是用户自己的 PDF。
 - `dialog:saveText` 的 `name` 只取 basename，`ext` 只接受字母数字后缀。
+- `dialog:openFiles` 的路径来自主进程自己弹的 `showOpenDialog`，不是渲染层传进来的，
+  所以它可以在 handler 里直接读盘。它按文件名返回两种载荷：书目格式是 UTF-8 `text`
+  （进导入预览），PDF 是原始 `bytes`（按 UTF-8 读二进制会损坏文件）。规则在
+  `shared/importFileRules.ts`，一次可混选，渲染层分流后 PDF 走与拖放同一条
+  `doc:importPdf`。别把它改成「渲染层给路径、主进程读字节」的形状。
 - `shell:openExternal` 只放行 `http:` / `https:`（`isSafeExternalUrl`）。
 - `config:set` 只接受 `safeConfigPatch` 白名单内的键与类型；未知键、非有限数值、
   非法 `theme`、`__proto__` 类键一律丢弃。白名单用

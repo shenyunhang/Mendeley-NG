@@ -1,5 +1,9 @@
 import { useRef, type RefObject } from 'react'
 import {
+  splitPickedImportFiles,
+  type PickedImportPdf
+} from '../../shared/importFileRules'
+import {
   PROJECT_URL,
   type Doc,
   type FtStatus,
@@ -29,6 +33,9 @@ interface Props {
   upd: UpdateState | null
   onSettings: () => void
   onImportRefs: (entries: Entry[]) => void
+  /** PDFs chosen in the same dialog as a bibliography file. They are created
+   *  from the file itself, so they never appear in the import preview. */
+  onImportPdfs: (pdfs: PickedImportPdf[]) => Promise<void>
   onExportBib: () => void
   onExportRis: () => void
   onExportEndnote: () => void
@@ -211,15 +218,22 @@ export default function Toolbar(p: Props) {
   /** The two ways a paper arrives, under the word that already covers both.
    *  Adding by identifier used to sit two menus away from the button called
    *  导入文献 while being the same job without a file — and it is the one a
-   *  reader who has no PDF yet needs first. */
+   *  reader who has no PDF yet needs first. A picked PDF takes the same path
+   *  as a dropped one; only the bibliography formats need the preview. */
   const imports: MenuItem[] = [
     {
       label: '导入文件…',
-      title: '导入 BibTeX / RIS / EndNote XML',
+      title: '导入 BibTeX / RIS / EndNote XML / PDF',
       run: async () => {
         const files = await window.api.openRefFiles()
+        const { pdfs, bibliographies } = splitPickedImportFiles(files)
+        if (pdfs.length) await p.onImportPdfs(pdfs)
+        // Cancelling the dialog, or picking only PDFs, must not open an empty
+        // preview. A picked bibliography file still opens it even when no
+        // record can be parsed, because that is the place that says so.
+        if (!bibliographies.length) return
         const all: Entry[] = []
-        for (const f of files) all.push(...parseAny(f.name, f.text))
+        for (const f of bibliographies) all.push(...parseAny(f.name, f.text ?? ''))
         p.onImportRefs(all)
       }
     },

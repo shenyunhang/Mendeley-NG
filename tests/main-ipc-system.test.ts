@@ -1,7 +1,8 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { PickedImportFile } from '../shared/importFileRules'
 
 /**
  * Behaviour cover for the main-process IPC boundary.
@@ -25,7 +26,13 @@ const stub = vi.hoisted(() => {
   const openExternalImpl: { fn: (url: string) => Promise<void> } = {
     fn: () => Promise.resolve()
   }
-  return { handlers, clipboardText, calls, openExternalImpl }
+  // `dialog:openFiles` reads whatever paths the picker returned. Keeping the
+  // answer in the stub lets the channel be exercised against real temporary
+  // files instead of only against a cancelled dialog.
+  const openDialogResult: { value: { canceled: boolean; filePaths: string[] } } = {
+    value: { canceled: true, filePaths: [] }
+  }
+  return { handlers, clipboardText, calls, openExternalImpl, openDialogResult }
 })
 
 vi.mock('electron', () => ({
@@ -60,7 +67,7 @@ vi.mock('electron', () => ({
     }
   },
   dialog: {
-    showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
+    showOpenDialog: async () => stub.openDialogResult.value,
     showSaveDialog: async () => ({ canceled: true, filePath: undefined })
   },
   BrowserWindow: class {},
@@ -285,5 +292,63 @@ describe('the small system channels', () => {
     expect(await invoke('pdf:openExternal', '')).toEqual({ ok: false, error: 'no path' })
     expect(stub.calls.showItemInFolder).toEqual([])
     expect(stub.calls.openPath).toEqual([])
+  })
+})
+
+describe('dialog:openFiles', () => {
+  afterEach(() => {
+    // Other channels ask the picker too; leave it cancelled again.
+    stub.openDialogResult.value = { canceled: true, filePaths: [] }
+  })
+
+  it('stays silent when the picker is cancelled', async () => {
+    expect(await invoke('dialog:openFiles')).toEqual([])
+  })
+
+  it('returns text for bibliographies and untouched bytes for PDFs', async () => {
+    await withTmpDir(async (dir) => {
+      const bib = path.join(dir, 'refs.bib')
+      const pdf = path.join(dir, 'Paper.PDF')
+      const raw = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x00, 0xff])
+      fs.writeFileSync(bib, '@article{a, title={One}}', 'utf-8')
+      fs.writeFileSync(pdf, raw)
+      stub.openDialogResult.value = { canceled: false, filePaths: [bib, pdf] }
+
+      const answer = (await invoke('dialog:openFiles')) as PickedImportFile[]
+      expect(answer).toHaveLength(2)
+      expect(answer[0]).toEqual({
+        name: 'refs.bib',
+        text: '@article{a, title={One}}'
+      })
+      expect(answer[0]?.bytes).toBeUndefined()
+      expect(answer[1]?.name).toBe('Paper.PDF')
+      expect(answer[1]?.text).toBeUndefined()
+      expect(answer[1]?.bytes?.byteLength).toBe(raw.length)
+      // A PDF read as UTF-8 would have turned 0xff into a replacement
+      // character. The exact bytes are what create-from-file has to receive.
+      expect(Buffer.from(answer[1]!.bytes!)).toEqual(raw)
+    })
+  })
+
+  it('keeps a zero-byte PDF as a PDF', async () => {
+    await withTmpDir(async (dir) => {
+      const pdf = path.join(dir, 'empty.pdf')
+      fs.writeFileSync(pdf, Buffer.alloc(0))
+      stub.openDialogResult.value = { canceled: false, filePaths: [pdf] }
+      const answer = (await invoke('dialog:openFiles')) as PickedImportFile[]
+      expect(answer).toHaveLength(1)
+      expect(answer[0]?.bytes?.byteLength).toBe(0)
+      expect(answer[0]?.text).toBeUndefined()
+    })
+  })
+
+  it('reads a name that only mentions PDF as text', async () => {
+    await withTmpDir(async (dir) => {
+      const text = path.join(dir, 'paper.pdf.txt')
+      fs.writeFileSync(text, 'notes about a pdf', 'utf-8')
+      stub.openDialogResult.value = { canceled: false, filePaths: [text] }
+      const answer = (await invoke('dialog:openFiles')) as PickedImportFile[]
+      expect(answer).toEqual([{ name: 'paper.pdf.txt', text: 'notes about a pdf' }])
+    })
   })
 })

@@ -10886,6 +10886,59 @@ export async function runSmoke() {
     importedCalls[0]
   )
 
+  // The same PDF must also arrive through 导入 → 导入文件…, which is what a
+  // reader reaches for when dropping a file onto the window is not an option.
+  // Only the picker is stubbed: the handler that reads the chosen file stays
+  // real, so this checks the bytes from disk all the way to the upload. The
+  // upload is still the stub above, so nothing is written to a real library.
+  const pickedPdf = path.join(dataDir(), 'smoke-picked.pdf')
+  fs.writeFileSync(pickedPdf, Buffer.alloc(2048, 0x25))
+  const importPreviewShown = () =>
+    w.webContents.executeJavaScript(
+      '(()=>[...document.querySelectorAll("button")]'
+      + '.some(b=>b.textContent.trim()==="导入选中项"))()'
+    )
+  const previewBefore = await importPreviewShown()
+  const realOpenDialog = dialog.showOpenDialog
+  ;(dialog as unknown as { showOpenDialog: unknown }).showOpenDialog = async () => ({
+    canceled: false,
+    filePaths: [pickedPdf]
+  })
+  const pickedBefore = importedCalls.length
+  const openedImportMenu = await openMenu('导入')
+  const clickedImportFiles = await clickMenu('导入文件…')
+  // Two processes, a real file read and a pdf.js identifier scan stand
+  // between the click and the upload; poll rather than betting on a delay.
+  for (let i = 0; i < 80 && importedCalls.length === pickedBefore; i++) {
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  const previewAfter = await importPreviewShown()
+  ;(dialog as unknown as { showOpenDialog: unknown }).showOpenDialog = realOpenDialog
+  fs.rmSync(pickedPdf, { force: true })
+  const pickedCall = importedCalls[pickedBefore]
+  log('picked PDF import', {
+    openedImportMenu,
+    clickedImportFiles,
+    call: pickedCall,
+    previewBefore,
+    previewAfter
+  })
+  expect(
+    'the import menu offers a file action',
+    openedImportMenu === 1 && clickedImportFiles === 1,
+    { openedImportMenu, clickedImportFiles }
+  )
+  expect(
+    'a PDF chosen in the import dialog reaches the upload whole',
+    pickedCall?.name === 'smoke-picked.pdf' && pickedCall?.len === 2048,
+    pickedCall
+  )
+  expect(
+    'picking only PDFs does not open the bibliography preview',
+    previewBefore === false && previewAfter === false,
+    { previewBefore, previewAfter }
+  )
+
   // Clicking the icon twice used to start two copies: two windows on the same
   // library, each with its own annotations and reading position in memory and
   // writing them back over each other.  What is checked here is the decision
