@@ -752,8 +752,12 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - 慢帧阈值用当次测量的中位数 ×2、不写死 50ms；滚动一格一格地滚
   （每次 `await requestAnimationFrame`），按键代价读 `dispatchEvent` 的同步返回耗时。
 - 三档受控实验（0 篇 / 几十篇 / 上千篇）分嫌疑；排序键在比较函数外算
-  （`map → sort → map`，n 次而非 n·log n 次），模块级复用一个 `Intl.Collator`，
-  只为读长度别用 `filter()` 建五个数组。
+  （`map → sort → map`，n 次而非 n·log n 次）。把键按 id 缓存、在比较函数里
+  `Map.get` 看似省了 n 次计算，实测反而慢约 40%：每轮比较两次哈希查找比
+  从行对象读属性贵，`tests/library-search.test.ts` 留着两种写法的对照基准。
+  模块级复用一个 `Intl.Collator`，只为读长度别用 `filter()` 建五个数组。
+  列表、筛选计数与近义标记共用一次遍历（`src/lib/librarySearch.ts`），三个
+  `useMemo` 各自扫全库会让按键白付两遍。
 - 虚拟化的收益会被全量预处理吃掉，`matchAt(i)` 按需建并缓存在 `useMemo`；
   别把力气花在没量到问题的动作上。
 - 冒烟跑在真实配置上会残留 sort、第一行论文每次可能不同，

@@ -218,7 +218,18 @@ describe('the corpus-word shortcut in matchQuery', () => {
     const app = read('src/App.tsx')
     expect(app).toContain('const corpusWords = useMemo(')
     expect(app).toContain('const compactFoldedHay = useMemo(')
-    const wiring = app.match(/compactFoldedHay\.get\(d\.id\)/g) ?? []
-    expect(wiring.length).toBe(3)
+    expect(app).toContain('computeLibrarySearch({')
+    expect(app).toContain('compactFoldedHay,')
+    // The three inline call sites moved into the one place that walks the
+    // library. Both accelerators now reach the predicate from there, so the
+    // wiring to check is a single call rather than three copies of it.
+    const search = read('src/lib/librarySearch.ts')
+    const wiring = search.match(/compactFoldedHay\.get\(r\.doc\.id\)/g) ?? []
+    expect(wiring.length).toBe(1)
+    // The detector can still see the old inline predicate: it lives in the
+    // verbatim legacy expression used for the differential test.
+    expect((read('tests/library-search.test.ts').match(/queryMatches\(/g) ?? []).length)
+      .toBeGreaterThan(0)
+    expect((app.match(/queryMatches\(/g) ?? []).length).toBe(0)
   })
 })

@@ -249,6 +249,9 @@ describe('the sort rule has one owner', () => {
     expect(app).toContain('sortKeyFor(d, key)')
     expect(app).toContain('compareSortKeys(a.k, b.k, dir')
     expect(app).not.toContain('(a.v < b.v ? -1 : 1) * dir')
+    // A cached-key comparator was tried and measured slower; the wrapper
+    // shape is deliberate, not an oversight. See library-search.test.ts.
+    expect(app).not.toContain('sortKeys.get(a.id)')
   })
 
   it('columns.ts keeps the missing-value rule next to the comparator', () => {

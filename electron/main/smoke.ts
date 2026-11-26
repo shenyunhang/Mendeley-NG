@@ -7444,8 +7444,32 @@ export async function runSmoke() {
     '(()=>{document.body.dispatchEvent(new MouseEvent("mousedown",{bubbles:true}));return 1})()'
   )
   await new Promise((r) => setTimeout(r, 300))
+  // A folder whose papers nearly all have a local file can have its few
+  // exceptions several screens down, and the virtual list only renders what
+  // is near the viewport. Walk the scroller until one is on screen instead
+  // of assuming the head of the list happens to contain it. A timer rather
+  // than requestAnimationFrame: a hidden smoke window has its frames
+  // throttled, and waiting for one would turn this into an 80-second loop.
+  // The assertion below is unchanged: it still asks that the shell actions
+  // be disabled on a row without a file.
   await w.webContents.executeJavaScript(
-    '(()=>{const r=[...document.querySelectorAll("div.row")].filter(e=>e.querySelector(".pdf-dot.no-pdf"));'
+    '(async()=>{const el=document.querySelector(".table-wrap,.res-wrap");if(!el)return 0;'
+    + 'el.scrollTop=0;el.dispatchEvent(new Event("scroll",{bubbles:true}));'
+    + 'for(let i=0;i<80;i++){'
+    + 'const r=[...document.querySelectorAll("div.row")].find(e=>'
+    + 'e.querySelector(".pdf-dot.no-pdf")&&e.getBoundingClientRect().top>=0'
+    + '&&e.getBoundingClientRect().bottom<=innerHeight);'
+    + 'if(r)return 1;const before=el.scrollTop;'
+    + 'el.scrollTop+=Math.max(240,Math.floor(el.clientHeight*0.75));'
+    + 'el.dispatchEvent(new Event("scroll",{bubbles:true}));'
+    + 'if(el.scrollTop===before)return 0;'
+    + 'await new Promise(res=>setTimeout(res,40))}return 0})()'
+  )
+  await new Promise((r) => setTimeout(r, 200))
+  await w.webContents.executeJavaScript(
+    '(()=>{const r=[...document.querySelectorAll("div.row")]'
+    + '.filter(e=>e.querySelector(".pdf-dot.no-pdf"))'
+    + '.filter(e=>{const b=e.getBoundingClientRect();return b.top>=0&&b.bottom<=innerHeight});'
     + 'if(!r.length)return 0;const b=r[0].getBoundingClientRect();'
     + 'r[0].dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true,'
     + 'clientX:Math.round(b.left+40),clientY:Math.round(b.top+8)}));return 1})()'
@@ -7672,6 +7696,18 @@ export async function runSmoke() {
       + `set.call(i,"${n}");i.dispatchEvent(new Event("input",{bubbles:true}));return 1})()`
     )
   await gotoPage(1)
+  // A fixed sleep is not enough on a busy desktop: the jump has to finish
+  // rendering before that page's bitmap can be in the prefetch table. Wait
+  // for the key instead of guessing how long a decode takes. The two
+  // assertions below are unchanged -- a step forward and a step back must
+  // both be served from a warmed bitmap.
+  await until(
+    '(()=>{const keys=document.documentElement.dataset.pfKeys||"";'
+    + 'const page=(document.querySelector(".pdf-bar input")||{}).value||"";'
+    + 'return keys.split(",").some((k)=>k.startsWith(page+":"))?"yes":"no"})()',
+    (v) => v === 'yes',
+    8000
+  )
   await new Promise((r) => setTimeout(r, 1500))
   log('render src (current page)', await src())
   // forward onto a fresh page, then back onto the one that was just left:
@@ -8510,7 +8546,22 @@ export async function runSmoke() {
   // and which one applies depends on whether the cloud has a copy.
   //
   // This runs after everything that measures the reader, because it has to
-  // select a paper that has no PDF in order to look at the empty pane.
+  // select a paper that has no PDF in order to look at the empty pane. The
+  // list may have been scrolled since, and a virtual row that is not in the
+  // DOM cannot be clicked: walk the scroller until one is there.
+  await w.webContents.executeJavaScript(
+    '(async()=>{const el=document.querySelector(".table-wrap,.res-wrap");if(!el)return 0;'
+    + 'el.scrollTop=0;el.dispatchEvent(new Event("scroll",{bubbles:true}));'
+    + 'for(let i=0;i<80;i++){'
+    + 'if([...document.querySelectorAll("div.row")].some(e=>'
+    + 'e.querySelector(".pdf-dot.no-pdf")))return 1;'
+    + 'const before=el.scrollTop;'
+    + 'el.scrollTop+=Math.max(240,Math.floor(el.clientHeight*0.75));'
+    + 'el.dispatchEvent(new Event("scroll",{bubbles:true}));'
+    + 'if(el.scrollTop===before)return 0;'
+    + 'await new Promise(res=>setTimeout(res,40))}return 0})()'
+  )
+  await new Promise((r) => setTimeout(r, 200))
   await w.webContents.executeJavaScript(
     '(()=>{const r=[...document.querySelectorAll("div.row")]'
     + '.filter(e=>e.querySelector(".pdf-dot.no-pdf"));'

@@ -43,6 +43,7 @@
     "src/lib/importText.ts",
     "src/lib/lazyPages.ts",
     "src/lib/latestSearch.ts",
+    "src/lib/librarySearch.ts",
     "src/lib/listBlank.ts",
     "src/lib/match.ts",
     "src/lib/mergeFields.ts",

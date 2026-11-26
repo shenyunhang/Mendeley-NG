@@ -18,6 +18,7 @@ import { DOWNLOAD_FLUSH_EVERY, DOWNLOAD_LANES } from './lib/budgets'
 import { fieldOf, mergeMissingFields } from './lib/mergeFields'
 import { useOverlayStack } from './lib/hooks/useOverlayStack'
 import { savedSearchMatches } from './lib/savedSearch'
+import { computeLibrarySearch } from './lib/librarySearch'
 import {
   isMetadataScope,
   normaliseQuery,
@@ -27,9 +28,7 @@ import {
 import {
   allowNearFor,
   compactForComparison,
-  foldSeparators,
-  matchQuery,
-  queryMatches
+  foldSeparators
 } from './lib/searchMatch'
 import { createViewGeneration } from './lib/viewGeneration'
 import FolderTree from './components/FolderTree'
@@ -115,6 +114,12 @@ import { LIBRARY, viewAfterReadingToggle, type View } from './lib/view'
  * narrow it. `all` is byte-for-byte what this inline function used to build,
  * so saved searches and the filter counts keep answering the same question.
  */
+/** A stable empty array keeps every `useMemo` that depends on `docs` from
+ *  being invalidated on each render before the library has loaded. `?? []`
+ *  allocates a fresh array every time, which is enough to make the haystacks,
+ *  the sort keys and the whole search recompute for no reason. */
+const EMPTY_LIBRARY_DOCS: Doc[] = []
+
 export default function App() {
   const [folderId, setFolderId] = useState<string | null>(null)
   /**
@@ -644,7 +649,7 @@ export default function App() {
     // which is how Esc stopped leaving the reader.
   }, [bumpFont, closeTopOnEscape, folderId, view.kind])
 
-  const docs = lib?.docs ?? []
+  const docs = lib?.docs ?? EMPTY_LIBRARY_DOCS
 
   /**
    * One pre-built haystack per document.  Building them on every keystroke
@@ -738,61 +743,60 @@ export default function App() {
    * of times over a library this size, every keystroke.  Building it once
    * is the whole difference.
    */
+  /**
+   * The list, the switch counts and the near-match markings all answer the
+   * same question about the same haystacks. `computeLibrarySearch` walks the
+   * library once and keeps the two typo gates separate, so a keystroke no
+   * longer builds three sets of intermediate arrays over 5700 documents.
+   */
+  const search = useMemo(
+    () =>
+      computeLibrarySearch({
+        docs,
+        query,
+        filters,
+        folderIds: folderId
+          ? new Set(tree.subtree.get(folderId) ?? [folderId])
+          : null,
+        haystack,
+        foldedHay,
+        compactFoldedHay,
+        corpusWords,
+        metadataScope: isMetadataScope(scope)
+      }),
+    [
+      docs,
+      folderId,
+      query,
+      filters,
+      tree,
+      haystack,
+      foldedHay,
+      compactFoldedHay,
+      corpusWords,
+      scope
+    ]
+  )
+
   const filtered = useMemo(() => {
-    const q = normaliseQuery(query)
-    let out = docs
-    for (const k of filters) out = out.filter(FILTER_TEST[k])
-    if (folderId) {
-      const ids = new Set(tree.subtree.get(folderId) ?? [folderId])
-      out = out.filter((d) => (d.folder_uuids ?? []).some((f) => ids.has(f)))
-    }
-    if (q) {
-      // A typo gets a second chance only when nothing matched exactly. An
-      // ordinary search must keep returning the same papers in the same order.
-      const allowNear = allowNearFor(out.map((d) => haystack.get(d.id) ?? ''), q)
-      out = out.filter((d) =>
-        queryMatches(
-          haystack.get(d.id) ?? '',
-          q,
-          allowNear,
-          foldedHay.get(d.id),
-          corpusWords,
-          compactFoldedHay.get(d.id)
-        )
-      )
-    }
     const { key, dir } = sort
     // The key is taken once per document and carried through the sort.
     // Calling sortKeyFor from inside the comparator is the expensive way
-    // round: it runs about n·log n times rather than n, and each of those
-    // builds a lower-cased string that is then thrown away.  The comparison
-    // itself is shared with lib/columns.ts, so the list and the pure rule
-    // cannot disagree about where a missing year belongs.
-    const rows = out.map((d) => ({ d, k: sortKeyFor(d, key) }))
+    // round: it runs about n·log n times rather than n. Looking a cached key
+    // up by id inside the comparator was measured slower still -- two
+    // Map.get calls per comparison cost more than reading a property off the
+    // row -- so the wrapper stays. See the rejected-shape benchmark in
+    // tests/library-search.test.ts before "optimising" it away again.
+    const rows = search.matched.map((d) => ({ d, k: sortKeyFor(d, key) }))
     rows.sort((a, b) =>
       compareSortKeys(a.k, b.k, dir, a.d.title ?? '', b.d.title ?? '')
     )
     return rows.map((r) => r.d)
-  }, [docs, folderId, query, sort, filters, haystack, foldedHay, corpusWords, compactFoldedHay])
+  }, [search.matched, sort])
 
   /** For a near match, the words that really occur in the paper. The card
    *  marks these instead of the query, which may differ by one character. */
-  const nearTerms = useMemo(() => {
-    const q = normaliseQuery(query)
-    const m = new Map<string, string[]>()
-    if (!q || !isMetadataScope(scope)) return m
-    for (const d of filtered) {
-      const r = matchQuery(
-        haystack.get(d.id) ?? '',
-        q,
-        foldedHay.get(d.id),
-        corpusWords,
-        compactFoldedHay.get(d.id)
-      )
-      if (r && r.kind === 'near') m.set(d.id, r.terms)
-    }
-    return m
-  }, [filtered, haystack, foldedHay, corpusWords, compactFoldedHay, query, scope])
+  const nearTerms = search.nearTerms
 
   /**
    * How many papers each switch would leave, counted on the list as it stands
@@ -800,38 +804,7 @@ export default function App() {
    * themselves.  Shown next to each box, so "没有本地 PDF" can be judged
    * before it is pressed rather than by pressing it.
    */
-  const filterCounts = useMemo(() => {
-    const q = normaliseQuery(query)
-    let base = docs
-    if (folderId) {
-      const ids = new Set(tree.subtree.get(folderId) ?? [folderId])
-      base = base.filter((d) => (d.folder_uuids ?? []).some((f) => ids.has(f)))
-    }
-    if (q) {
-      const allowNear = allowNearFor(base.map((d) => haystack.get(d.id) ?? ''), q)
-      base = base.filter((d) =>
-        queryMatches(
-          haystack.get(d.id) ?? '',
-          q,
-          allowNear,
-          foldedHay.get(d.id),
-          corpusWords,
-          compactFoldedHay.get(d.id)
-        )
-      )
-    }
-    // One walk, counting as it goes.  `base.filter(FILTER_TEST[k]).length`
-    // builds a fresh array of every surviving paper for each switch and then
-    // throws it away after reading one number off it -- five arrays of a few
-    // thousand entries, allocated and discarded on every keystroke, which the
-    // collector then has to account for.
-    const out = {} as Record<ListFilter, number>
-    for (const k of LIST_FILTERS) out[k] = 0
-    for (const d of base) {
-      for (const k of LIST_FILTERS) if (FILTER_TEST[k](d)) out[k]++
-    }
-    return out
-  }, [docs, folderId, query, haystack, foldedHay, corpusWords, compactFoldedHay, tree])
+  const filterCounts = search.counts
 
   /**
    * The keydown listener is installed once, so it reaches the list and the
