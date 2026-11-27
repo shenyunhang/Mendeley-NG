@@ -23,7 +23,10 @@
   color: var(--fg);
 }
 
-.modal input {
+/* A text field in a dialog fills the row it is given. A checkbox is not a
+   field: width:100% made it crowd the sentence beside it into a narrow
+   column, which is why the two sync switches wrapped into four lines. */
+.modal input:not([type="checkbox"]):not([type="radio"]) {
   width: 100%;
 }
 

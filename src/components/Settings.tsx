@@ -211,7 +211,7 @@ export default function Settings({
         <div className="set-sec">{t('同步')}</div>
         <div className="set-row">
           <span className="set-key">{t('启动时')}</span>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label className="set-check">
             <input
               type="checkbox"
               checked={syncOnStart}
@@ -225,7 +225,7 @@ export default function Settings({
         </div>
         <div className="set-row">
           <span className="set-key">{t('同步时')}</span>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label className="set-check">
             <input
               type="checkbox"
               checked={syncPdfsOnSync}

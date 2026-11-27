@@ -132,4 +132,33 @@ describe('interaction details', () => {
       expect(read(file), file).toContain('box-shadow: var(--shadow-pop)')
     }
   })
+
+  it('the settings sheet has one alignment grid and does not stretch switches', () => {
+    const settings = read('src/styles/settings.css')
+    const overlays = read('src/styles/overlays.css')
+    const panel = read('src/components/Settings.tsx')
+
+    // Label column, standalone notes and the About block all start at the
+    // same x. Three hard-coded copies of 100px is how they drifted before.
+    expect(settings).toContain(
+      '--set-value-start: calc(var(--set-key-width) + var(--set-column-gap))'
+    )
+    expect(settings).toContain('flex: 0 0 var(--set-key-width)')
+    expect(settings).toContain('margin: 2px 0 2px var(--set-value-start)')
+    expect(settings).toContain(
+      'grid-template-columns: var(--set-key-width) minmax(0, 1fr)'
+    )
+    // A note inside a row belongs to the control in front of it.
+    expect(settings).toContain('.set-row > .set-note')
+    expect(settings).toContain('.set-check input[type="checkbox"]')
+
+    // The old blanket width:100% hit checkboxes too and squeezed the two
+    // sync sentences into a narrow column that wrapped four times.
+    expect(overlays).toContain(
+      '.modal input:not([type="checkbox"]):not([type="radio"])'
+    )
+    expect(overlays).not.toMatch(/\.modal input\s*\{/)
+    expect(panel.match(/className="set-check"/g)?.length).toBe(2)
+    expect(panel).not.toContain("style={{ display: 'flex', alignItems: 'center', gap: 6 }}")
+  })
 })

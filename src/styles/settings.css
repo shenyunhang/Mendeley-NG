@@ -1,4 +1,10 @@
 .settings {
+  /* One grid for the whole sheet: a label column, a gap, and everything
+     after it. Controls, standalone notes and the About block all start at
+     --set-value-start, so no row has to guess its own horizontal offset. */
+  --set-key-width: 92px;
+  --set-column-gap: 8px;
+  --set-value-start: calc(var(--set-key-width) + var(--set-column-gap));
   width: 520px;
   max-height: 84vh;
   overflow: auto;
@@ -13,12 +19,12 @@
 .set-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--set-column-gap);
   margin-bottom: 6px;
   font-size: 0.8rem;
 }
 .set-key {
-  flex: 0 0 92px;
+  flex: 0 0 var(--set-key-width);
   color: var(--fg-dim);
 }
 .set-val {
@@ -40,13 +46,37 @@
 .set-note {
   font-size: 0.733rem;
   color: var(--fg-dim);
-  margin: 2px 0 2px 100px;
+  margin: 2px 0 2px var(--set-value-start);
+}
+/* A note inside a row belongs to the control in front of it. The offset
+   above is only for notes standing on their own; applying it here pushed the
+   font-size note to the far right and the index note into the middle. */
+.set-row > .set-note {
+  margin-left: 0;
+  flex: 1;
+  min-width: 0;
+}
+/* A switch and its sentence share the control column. The box keeps its
+   intrinsic size and the sentence takes the rest of the row, so a long
+   Chinese label is not squeezed into a narrow wrapping column. */
+.set-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.set-check input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
 }
 
 .about {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--set-key-width) minmax(0, 1fr);
+  column-gap: var(--set-column-gap);
   align-items: center;
-  gap: 12px;
 }
 
 .about .set-note {
