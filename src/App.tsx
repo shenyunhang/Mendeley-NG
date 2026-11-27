@@ -64,6 +64,7 @@ import {
   upsertPaper,
   type OpenPaper
 } from './lib/openPapers'
+import { paperForDoubleClick } from './lib/doubleClickRead'
 import {
   ALL_HAVE_PDF_MESSAGE_VISIBLE_MS,
   BATCH_CLEAN_MESSAGE_VISIBLE_MS,
@@ -955,11 +956,14 @@ export default function App() {
   useEffect(() => {
     const onDoubleClick = (e: MouseEvent) => {
       const target = e.target instanceof Element ? e.target : null
-      // The tab bar pins its own tabs; the right pane's details panel is not
-      // a list of papers and must not pin anything.
-      if (!target || target.closest('.pane-right')) return
-      const id = target.closest('[data-id]')?.getAttribute('data-id')
-      if (id) pinOpenPaper(id)
+      const hit = paperForDoubleClick(target)
+      if (!hit) return
+      pinOpenPaper(hit.id)
+      // A double click on one of the two paper catalogues is also a request
+      // to read. The first click of the gesture has already selected and
+      // opened that paper, so the reading view resolves to the same one; the
+      // pinned tab still survives the trip back to the list.
+      if (hit.read) setView({ kind: 'reader' })
     }
     // Capture, so this runs even when a row stops propagation on click.
     document.addEventListener('dblclick', onDoubleClick, true)
@@ -2864,6 +2868,7 @@ export default function App() {
           citeStyle={citeStyle}
           syncOnStart={syncOnStart}
           syncPdfsOnSync={syncPdfsOnSync}
+          syncBusy={busy}
           ft={ftStat}
           ftPages={ftPages}
           version={version}
@@ -2899,6 +2904,13 @@ export default function App() {
           onSyncPdfsOnSync={(v) => {
             setSyncPdfsOnSync(v)
             void writeConfig({ syncPdfsOnSync: v })
+          }}
+          onFullResync={() => {
+            // The status line is where a pull reports itself, and the sheet
+            // would cover it: leave the sheet before the full pull starts.
+            setSettings(false)
+            setSetSec(null)
+            void syncAndFetchPdfs(true)
           }}
           onFtPages={(n) => void changeFtPages(n)}
         />

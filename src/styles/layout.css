@@ -109,19 +109,12 @@ html.custom-title-bar .toolbar > .grow {
   white-space: nowrap;
 }
 /* Reading is the first command because it is what the library was gathered
-   for. Give it a bigger target than the network actions beside it: a larger
-   label, a little more weight and more room around both axes. Sizes are in
-   rem so the font-size knob still moves it. The bar stays one row — only the
-   search box gives way — and the extra width is small enough that the
-   reserved window-control band stays reachable without scrolling (smoke
-   measures this).  The soft
-   accent wash is what makes the primary action findable at a glance; it uses
-   colour and an inset ring rather than extra padding, so the geometry the
-   smoke test measures does not change. */
+   for. It stays the primary action by colour alone: the oversized label and
+   padding are gone, so the button uses the same geometry as every other
+   button on the bar, follows the font-size knob with them, and takes no extra
+   width out of the one-row chrome strip. The accent wash and ring are what
+   make it findable at a glance; they change no measured geometry. */
 .toolbar > .reading-button {
-  font-size: 1.05rem;
-  font-weight: 600;
-  padding: 0.45rem 1.2rem;
   background: var(--accent-soft);
   border-color: var(--accent);
   box-shadow: 0 1px 8px var(--accent-soft);

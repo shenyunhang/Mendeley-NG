@@ -19,6 +19,10 @@ interface Props {
   syncOnStart: boolean
   /** Whether a manual pull also brings down the PDFs this disk is missing. */
   syncPdfsOnSync: boolean
+  /** A pull already in flight: the full resync must not start a second one. */
+  syncBusy: boolean
+  /** A full pull asked for from the section that explains what syncing does. */
+  onFullResync: () => void
   /** Full-text index state, shown rather than described: whether the index
    *  exists is the one thing that decides whether the page budget matters. */
   ft: FtStatus | null
@@ -65,6 +69,7 @@ export default function Settings({
   citeStyle,
   syncOnStart,
   syncPdfsOnSync,
+  syncBusy,
   ft,
   ftPages,
   version,
@@ -82,6 +87,7 @@ export default function Settings({
   onCiteStyle,
   onSyncOnStart,
   onSyncPdfsOnSync,
+  onFullResync,
   onFtPages
 }: Props) {
   // the page budget is applied on blur rather than on every keystroke: each
@@ -224,7 +230,19 @@ export default function Settings({
           </label>
         </div>
         <div className="set-note">
-          {t('点「同步云端」或「全量」之后在后台三路并发下载，可随时停止；启动时的静默同步不下载，免得每次开机都占带宽。')}
+          {t('点「同步云端」或「重新全量同步」之后在后台三路并发下载，可随时停止；启动时的静默同步不下载，免得每次开机都占带宽。')}
+        </div>
+        <div className="set-row">
+          <span className="set-key">{t('重新同步')}</span>
+          <button
+            data-full-resync
+            disabled={syncBusy}
+            title={t('忽略上次同步时间，重新拉全库；每次同步都会对账云端回收站')}
+            onClick={onFullResync}
+          >
+            {syncBusy ? t('同步中…') : t('重新全量同步')}
+          </button>
+          <span className="set-note">{t('忽略上次同步时间，重新拉全库')}</span>
         </div>
 
         <div className="set-sec">{t('全文检索')}</div>

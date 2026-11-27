@@ -74,12 +74,14 @@ describe('selection stays a soft wash with an edge, not a filled blue row', () =
     expect(css).toContain('inset 0 2px 0 var(--accent)')
   })
 
-  it('the primary command is emphasised without changing geometry', () => {
+  it('the primary command is emphasised with colour, not a size of its own', () => {
     const css = read('src/styles/layout.css')
     const block = css.slice(css.indexOf('.toolbar > .reading-button'))
-    expect(block.slice(0, block.indexOf('}'))).toContain('var(--accent-soft)')
-    // the smoke test measures this button; a polish pass must not resize it
-    expect(block.slice(0, block.indexOf('}'))).toContain('padding: 0.45rem 1.2rem;')
+    const rule = block.slice(0, block.indexOf('}'))
+    expect(rule).toContain('var(--accent-soft)')
+    // the smoke test measures this button; it must use the shared button
+    // geometry so the font-size knob moves it with the rest of the bar
+    expect(rule).not.toMatch(/font-size|font-weight|padding|min-width|height|width/)
   })
 })
 

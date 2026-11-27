@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { READ_ON_DOUBLE_CLICK_PROPS } from '../lib/doubleClickRead'
 import { normaliseQuery } from '../lib/searchScope'
 import { markAllTerms } from '../lib/match'
 import type { Doc, RefHit } from '../../shared/types'
@@ -159,7 +160,9 @@ export default function RefsView({
             </div>
           ) : (
             groups.map(({ id, hs, d }) => (
-              <div key={id} data-id={id} className="ft-row">
+              // Double clicking a hit reads the paper it belongs to, at the
+              // page the single click already opened.
+              <div key={id} data-id={id} className="ft-row" {...READ_ON_DOUBLE_CLICK_PROPS}>
                 <div
                   className="ft-title"
                   onClick={() => d && onOpen(d, hs[0]!.page)}

@@ -33,6 +33,7 @@
     "src/lib/documentScope.ts",
     "src/lib/documentSourceLinks.ts",
     "src/lib/doctypes.ts",
+    "src/lib/doubleClickRead.ts",
     "src/lib/dupes.ts",
     "src/lib/export.ts",
     "src/lib/exportTypes.ts",

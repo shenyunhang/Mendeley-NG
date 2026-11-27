@@ -129,10 +129,9 @@ describe('the custom chrome stays wired end to end', () => {
 
   it('the commands displaced by the merge are still reachable', () => {
     const toolbar = read('src/components/Toolbar.tsx')
-    for (const label of ['全量同步', '缩小界面字号', '放大界面字号', '切到深色主题']) {
+    for (const label of ['缩小界面字号', '放大界面字号', '切到深色主题']) {
       expect(toolbar, label).toContain(label)
     }
-    expect(toolbar).toContain('p.onSync(true)')
     expect(toolbar).toContain('p.onUndo()')
     expect(toolbar).toContain('p.onFont(-1)')
     expect(toolbar).toContain('p.onFont(1)')
@@ -143,5 +142,20 @@ describe('the custom chrome stays wired end to end', () => {
     expect(toolbar).not.toContain('title="缩小界面字号"')
     expect(toolbar).not.toContain('title="放大界面字号"')
     expect(toolbar).not.toContain("p.theme === 'light' ? '☀' : '☾'")
+  })
+
+  it('the full resync has one visible home in the sync section', () => {
+    const toolbar = read('src/components/Toolbar.tsx')
+    const settings = read('src/components/Settings.tsx')
+    const app = read('src/App.tsx')
+    // it moved out of 更多 rather than being duplicated behind it
+    expect(toolbar).not.toContain('p.onSync(true)')
+    expect(settings).toContain('data-full-resync')
+    expect(settings).toContain('onClick={onFullResync}')
+    expect(settings).toContain('disabled={syncBusy}')
+    expect(settings).toContain("t('重新全量同步')")
+    expect(app).toContain('syncBusy={busy}')
+    expect(app).toContain('void syncAndFetchPdfs(true)')
+    expect(read('src/lib/i18n.ts')).toContain("'重新全量同步'")
   })
 })

@@ -9,6 +9,7 @@ import {
   type ColumnDef,
   type SortKey
 } from '../lib/columns'
+import { READ_ON_DOUBLE_CLICK_PROPS } from '../lib/doubleClickRead'
 import { isListBlank } from '../lib/listBlank'
 import { useDragX } from '../lib/useDragX'
 import { useI18n } from '../lib/i18nContext'
@@ -324,6 +325,9 @@ export default function DocTable({
                   className={
                     'row' + (selectedId === d.id ? ' sel' : '') + (picked ? ' multi' : '')
                   }
+                  // A double click on a row asks to read this paper in the
+                  // whole window; the window-level handler owns the gesture.
+                  {...READ_ON_DOUBLE_CLICK_PROPS}
                   // which document this row is.  The row is only ever reachable
                   // by index in the DOM, and a virtualised list means the index
                   // means nothing: what is on screen is a window over five

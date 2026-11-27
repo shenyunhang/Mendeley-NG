@@ -184,15 +184,6 @@ export default function Toolbar(p: Props) {
       title: '撤销上一次批量操作  (Ctrl+Z)',
       run: () => p.onUndo()
     },
-    {
-      // The identity and the OS window controls took the width this button and
-      // the font/theme cluster used to have.  They are still one press away,
-      // just behind 更多 rather than on the bar.
-      label: t('全量同步'),
-      disabled: p.busy,
-      title: '忽略上次同步时间，重新拉全库；每次同步都会对账云端回收站',
-      run: () => p.onSync(true)
-    },
     { sep: true },
     {
       label: t('缩小界面字号'),
@@ -396,7 +387,7 @@ export default function Toolbar(p: Props) {
         title="主题、字号、PDF 目录、命名模板、全文索引；导入 token、检查更新与项目主页也在这里"
         items={setup}
       />
-      <MenuButton label={t('更多')} title="查重、全部标注、回收站、保存搜索、撤销、全量同步与字号主题" items={more} />
+      <MenuButton label={t('更多')} title="查重、全部标注、回收站、保存搜索、撤销与字号主题" items={more} />
       <div style={{ position: 'relative', display: 'inline-flex' }}>
         <button
           ref={filterBtn}
@@ -515,8 +506,9 @@ export default function Toolbar(p: Props) {
       </button>
       {/* The empty middle is a drag handle; the last span reserves the width
           Chromium needs for the native min/max/close controls.  Font size,
-          theme, 全量 and 撤销 moved into 更多 to pay for this row; the count
-          stays here because it is read at a glance, not behind a menu. */}
+          theme and 撤销 moved into 更多 to pay for this row, while the full
+          resync sits with the other sync controls in the settings sheet; the
+          count stays here because it is read at a glance, not behind a menu. */}
       <span className="grow" />
       <span className="badge">
         {p.filtered.length} / {p.docs.length}

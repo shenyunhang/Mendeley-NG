@@ -71,8 +71,13 @@ const EN: Record<string, string> = {
     'Pulls only changes and stays quiet on failure; with this off, only the Sync button syncs.',
   '同步时': 'When syncing',
   '把云端有、本地没有的 PDF 一起下载下来': 'Also download PDFs the cloud has and this disk does not',
-  '点「同步云端」或「全量」之后在后台三路并发下载，可随时停止；启动时的静默同步不下载，免得每次开机都占带宽。':
+  '点「同步云端」或「重新全量同步」之后在后台三路并发下载，可随时停止；启动时的静默同步不下载，免得每次开机都占带宽。':
     'A manual or full sync downloads three files at a time in the background and can be stopped; the quiet start-up sync does not download, so opening the app does not use bandwidth.',
+  '重新同步': 'Resync',
+  '重新全量同步': 'Full resync',
+  '忽略上次同步时间，重新拉全库；每次同步都会对账云端回收站':
+    'Ignore the last sync time and pull the whole library again; every sync reconciles the cloud trash',
+  '忽略上次同步时间，重新拉全库': 'Ignores the last sync time and pulls the whole library again',
   // Settings: full text
   '全文检索': 'Full-text search',
   '每篇索引页数': 'Pages indexed per paper',
@@ -101,7 +106,6 @@ const EN: Record<string, string> = {
   '保存搜索': 'Save search',
   '撤销': 'Undo',
   '撤销：{label}': 'Undo: {label}',
-  '全量同步': 'Full sync',
   '切到深色主题': 'Switch to dark theme',
   '切到浅色主题': 'Switch to light theme',
   '{filtered} / {total} 篇': '{filtered} / {total} papers',
