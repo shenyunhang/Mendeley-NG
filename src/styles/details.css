@@ -99,11 +99,25 @@
   padding: 0 0.35rem;
   font-size: 0.733rem;
 }
+/* A height rather than a max-height: CSS resize changes the used height, so
+   a max-height left at the starting value would cap the drag where it began.
+   The reader can pull the bottom-right corner down to read a long record;
+   min/max keep the box from disappearing or squeezing the form above it away. */
 .all-fields-list {
-  max-height: 9rem;
+  height: 9rem;
+  min-height: 3.5rem;
+  max-height: 60vh;
+  resize: vertical;
   overflow: auto;
   border-top: 1px solid var(--border);
   font-size: 0.733rem;
+}
+/* The native corner grip is nearly invisible against a dark scroll corner.
+   Give its square a surface and two edges without drawing a second control. */
+.all-fields-list::-webkit-resizer {
+  background: var(--panel-head);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
 }
 .all-fields-row {
   display: grid;

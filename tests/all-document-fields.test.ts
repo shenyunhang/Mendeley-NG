@@ -243,6 +243,20 @@ describe('the details pane edits the full record', () => {
     expect(read('src/styles/details.css')).toContain('flex: 0 0 auto')
   })
 
+  it('lets the reader drag the full-record box taller', () => {
+    const css = read('src/styles/details.css')
+    const list = css.slice(
+      css.indexOf('.all-fields-list {'),
+      css.indexOf('.all-fields-row {')
+    )
+    expect(list).toContain('resize: vertical')
+    expect(list).toContain('height: 9rem')
+    expect(list).toContain('min-height: 3.5rem')
+    expect(list).toContain('max-height: 60vh')
+    // A max-height at the starting height would cap the drag where it began.
+    expect(list).not.toContain('max-height: 9rem')
+  })
+
   it('keeps every row outside the editable form', () => {
     expect(panel()).toContain('It is not a `.field`')
     expect(read('src/styles/details.css')).toContain('.all-fields-row')
