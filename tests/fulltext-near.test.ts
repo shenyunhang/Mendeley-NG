@@ -46,7 +46,10 @@ function writeIndex(body: string, entries: Record<string, TestEntry>) {
     path.join(dir, 'fulltext.json'),
     JSON.stringify({
       version: 2,
-      pages: 3,
+      // An index whose budget differs from the one the module is using is
+      // voided as a different corpus. Ask the module rather than pinning the
+      // old default of 3, so changing that default cannot empty this fixture.
+      pages: mod.fullTextPages(),
       bytes: Buffer.byteLength(body, 'utf8'),
       entries: full
     }),

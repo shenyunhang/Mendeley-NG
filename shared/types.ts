@@ -213,9 +213,11 @@ export interface AppConfig {
   /** Width of the reader as a percentage of the window, dragged by the right
    *  one.  A share rather than a fixed width, so it follows the window. */
   paneRight?: number
-  /** How many leading pages of each PDF the full-text index reads.  Raising it
-   *  costs index size; lowering it costs recall.  Changing it drops the index,
-   *  because one built for a different budget describes a different corpus. */
+  /** How much of each PDF the full-text index reads: a positive number of
+   *  leading pages, or `FULL_TEXT_ALL_PAGES` for the whole document. A smaller
+   *  budget saves index size at the cost of recall. Changing it drops the
+   *  index, because one built for a different budget describes a different
+   *  corpus. An absent key means the default, all pages. */
   ftPages?: number
   /** Where the last export was written.  The save dialog starts here next
    *  time, so exporting is not a hunt through the tree every time. */
@@ -251,7 +253,20 @@ export interface AppConfig {
   }
 }
 
-export const DEFAULT_FT_PAGES = 3
+/**
+ * The page budget that means every page of the PDF, not a leading slice.
+ *
+ * Zero is not a number of pages, so it cannot collide with the 1..50 range a
+ * reader can type. It also survives JSON unchanged, and a config file with no
+ * `ftPages` key at all falls back to the same answer. An old on-disk index
+ * records its budget as a positive number, so switching to or from this value
+ * is detected by the usual budget mismatch and that index is voided.
+ */
+export const FULL_TEXT_ALL_PAGES = 0
+
+/** The index reads whole PDFs unless the reader asks it not to. Keeping only
+ *  the leading pages is an opt-in way to save space, not the starting point. */
+export const DEFAULT_FT_PAGES = FULL_TEXT_ALL_PAGES
 
 /**
  * Where Mendeley sends the browser back after authorising.
@@ -282,7 +297,8 @@ export interface FtStatus {
   total: number
   building: boolean
   done: number
-  /** how many leading pages of each PDF are indexed */
+  /** The budget the index was built with: a positive number of leading pages,
+   *  or `FULL_TEXT_ALL_PAGES` when every page was read. */
   pages: number
   bytes: number
   /** Name of the file being read, so a long run shows it is doing something
@@ -329,8 +345,9 @@ export interface FtStatus {
    */
   voided?: 'format' | 'budget' | null
   /** The budget the unreadable index was built with, when the budget is what
-   *  changed.  The sentence is only checkable with both numbers in it: "the
-   *  range changed" is an assertion, "3 → 5" is something to look at. */
+   *  changed.  The sentence is only checkable with both answers in it: "the
+   *  range changed" is an assertion, "3 pages → all pages" is something to
+   *  look at. Zero here means the old index was built for whole documents. */
   voidedPages?: number
 }
 

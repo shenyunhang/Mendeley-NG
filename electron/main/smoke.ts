@@ -20,6 +20,7 @@ import {
 } from './store'
 import {
   DEFAULT_FT_PAGES,
+  FULL_TEXT_ALL_PAGES,
   PROJECT_URL,
   type Annotation,
   type CloudAnnotation,
@@ -45,8 +46,10 @@ import {
 } from '../../src/lib/bitmapPixelSize'
 import {
   clampFullTextPages,
+  formatFullTextPageBudget,
   FULL_TEXT_MAX_PAGES,
   FULL_TEXT_MIN_PAGES,
+  isFullTextAllPages,
   restoredPageBudget
 } from '../../shared/fullTextPages'
 // The Settings field is committed on blur. It is pure too, so the number
@@ -3353,10 +3356,13 @@ export async function runSmoke() {
   }
 
   // The full-text page budget had one clamp in the renderer and another in
-  // the index builder, each with its own literal default.  Pulling the rule
-  // into shared/ is only safe if it answers exactly what both copies used to
-  // answer -- over a wide table of values, not two happy cases.  No sleeping
-  // here: every value is decided on the spot.
+  // the index builder, each with its own literal default. Pulling the rule
+  // into shared/ was safe because it answered exactly what both copies used
+  // to answer -- over a wide table of values, not two happy cases. Whole
+  // documents are the default now, which adds one value neither old rule
+  // could express. Keep the equivalence claim over the old domain and prove
+  // the new value is a real, intended break. No sleeping here: every value
+  // is decided on the spot.
   {
     const oldRendererRule = (n: number, fallback: number) =>
       Math.max(1, Math.min(50, Math.floor(n) || fallback))
@@ -3374,29 +3380,41 @@ export async function runSmoke() {
       { renderer: oldRendererRule(0, 5), main: oldMainRule(0) }
     )
 
-    // The equivalence claim.  This is the whole reason the change can be
-    // called behaviour preserving: not one value may move.
+    // The equivalence claim, limited to budgets the old rules could express.
+    // Zero now means every page; to the old rules it was a missing value that
+    // fell back to 3 or clamped to 1.
     const cases: unknown[] = [
       null, undefined, NaN, Infinity, -Infinity, '', '0', '7', '50.9',
       0, 1, 2.9, 3, 50, 50.9, 51, 999, -1, -999
     ]
     for (let n = -60; n <= 110; n++) cases.push(n)
-    const different = cases.filter(
+    const oldDomain = cases.filter(
+      (n) => !isFullTextAllPages(clampFullTextPages(n))
+    )
+    const different = oldDomain.filter(
       (n) =>
         clampFullTextPages(n) !== oldRendererRule(n as number, DEFAULT_FT_PAGES) ||
         clampFullTextPages(n) !== oldMainRule(n as number)
     )
     expect(
-      'the shared page-budget rule answers exactly what both old copies did',
-      different.length === 0,
-      { checked: cases.length, different }
+      'the shared page-budget rule answers what both old copies did for every budget they could express',
+      different.length === 0 && oldDomain.length < cases.length,
+      { checked: cases.length, oldDomain: oldDomain.length, different }
+    )
+    expect(
+      'the all-pages default is an intended break from both old rules',
+      DEFAULT_FT_PAGES === FULL_TEXT_ALL_PAGES &&
+        isFullTextAllPages(clampFullTextPages(0)) &&
+        oldMainRule(0) !== clampFullTextPages(0) &&
+        oldRendererRule(0, 5) !== clampFullTextPages(0),
+      { all: clampFullTextPages(0), oldMain: oldMainRule(0) }
     )
 
     const unusable: unknown[] = [0, null, undefined, NaN, '', '0']
     expect(
-      'a value that is not a usable page count falls back to the shared default',
-      unusable.every((n) => clampFullTextPages(n) === DEFAULT_FT_PAGES) &&
-        DEFAULT_FT_PAGES === 3,
+      'a value that is not a usable page count falls back to the all-pages default',
+      unusable.every((n) => isFullTextAllPages(clampFullTextPages(n))) &&
+        DEFAULT_FT_PAGES === FULL_TEXT_ALL_PAGES,
       { unusable, answers: unusable.map((n) => clampFullTextPages(n)) }
     )
 
@@ -3447,16 +3465,16 @@ export async function runSmoke() {
       const v = clampFullTextPages(n + 0.5)
       sample += 1
       if (
-        v < FULL_TEXT_MIN_PAGES ||
-        v > FULL_TEXT_MAX_PAGES ||
-        !Number.isInteger(v)
+        !isFullTextAllPages(v) &&
+        (v < FULL_TEXT_MIN_PAGES ||
+          v > FULL_TEXT_MAX_PAGES ||
+          !Number.isInteger(v))
       ) outside += 1
     }
     expect(
       'the shared default is itself valid and no input escapes the bounds',
       clampFullTextPages(DEFAULT_FT_PAGES) === DEFAULT_FT_PAGES &&
-        DEFAULT_FT_PAGES >= FULL_TEXT_MIN_PAGES &&
-        DEFAULT_FT_PAGES <= FULL_TEXT_MAX_PAGES &&
+        isFullTextAllPages(DEFAULT_FT_PAGES) &&
         outside === 0,
       { sample, outside, min: FULL_TEXT_MIN_PAGES, max: FULL_TEXT_MAX_PAGES }
     )
@@ -3487,7 +3505,8 @@ export async function runSmoke() {
     const inputs: string[] = [
       '', ' ', 'abc', 'NaN', 'Infinity', '-Infinity', 'null', '0', '-0',
       '0.9', '1', '1.9', '2', '3', '3.9', '49', '50', '50.9', '51', '100',
-      '999', '1e3', '+7', '007', '-5', '-999', '0x10', '  8  ', '1.0001'
+      '999', '1e3', '+7', '007', '-5', '-999', '0x10', '  8  ', '1.0001',
+      '全部', 'all', 'All pages'
     ]
     for (let n = -60; n <= 160; n++) inputs.push(String(n))
     for (let n = 0; n <= 60; n++) inputs.push(String(n + 0.5))
@@ -3517,12 +3536,15 @@ export async function runSmoke() {
       { old: oldOver, next: newOver }
     )
 
-    const unusable = ['abc', '', '0', '-5', 'Infinity', 'NaN', ' ']
+    const unusable = ['abc', '', '0', '-5', 'Infinity', 'NaN', ' ', '全部']
     expect(
       'an unusable field still falls back to the shared default',
       unusable.every((raw) => {
         const c = commitPageBudget(raw)
-        return c.shown === String(DEFAULT_FT_PAGES) && c.applied === DEFAULT_FT_PAGES
+        return (
+          c.shown === formatFullTextPageBudget(DEFAULT_FT_PAGES, '全部') &&
+          c.applied === DEFAULT_FT_PAGES
+        )
       }),
       unusable.map((raw) => ({ raw, ...commitPageBudget(raw) }))
     )
@@ -3530,10 +3552,10 @@ export async function runSmoke() {
     const drift = inputs.filter((raw) => {
       const c = commitPageBudget(raw)
       return (
-        c.shown !== String(c.applied) ||
+        c.shown !== formatFullTextPageBudget(c.applied, '全部') ||
         !Number.isInteger(c.applied) ||
-        c.applied < FULL_TEXT_MIN_PAGES ||
-        c.applied > FULL_TEXT_MAX_PAGES
+        (!isFullTextAllPages(c.applied) &&
+          (c.applied < FULL_TEXT_MIN_PAGES || c.applied > FULL_TEXT_MAX_PAGES))
       )
     })
     expect(
@@ -10319,13 +10341,14 @@ export async function runSmoke() {
   )
   log('config after changing the page budget', cfgAfter)
   expect('the page budget reaches the config', /"ftPages":5/.test(cfgAfter), cfgAfter)
-  // Raising the budget throws away the index that was read for the old one,
+  // Changing the budget throws away the index that was read for the old one,
   // and for a long time the panel said an update had changed how the index is
-  // stored.  Those are not the same event and only one of them is something
+  // stored. Those are not the same event and only one of them is something
   // the reader did: told an update ate their six-minute build they go looking
   // for a version to roll back, when what is wanted is a number put back.
-  // Both numbers are asked for, because "the range changed" is a claim and
-  // "3 → 5" is something to look at.
+  // Both budgets are asked for, because "the range changed" is a claim and
+  // "3 pages → 5 pages" is something to look at. Zero means every page, so
+  // it is a valid old budget and not a missing value.
   const voidedStat = JSON.parse(
     await w.webContents.executeJavaScript(
       '(async()=>JSON.stringify(await window.api.ftStatus()))()'
@@ -10341,13 +10364,13 @@ export async function runSmoke() {
     'a budget the reader changed is not blamed on an update',
     voidedStat.legacy === true &&
       voidedStat.voided === 'budget' &&
-      voidedStat.voidedPages > 0 &&
+      typeof voidedStat.voidedPages === 'number' &&
       voidedStat.voidedPages !== voidedStat.pages,
     voidedStat
   )
   // put it back the way it was, so the next run starts from the same place
   await w.webContents.executeJavaScript(
-    `window.api.setConfig({ftPages:${JSON.parse(cfgBefore).ftPages ?? 3}})`
+    `window.api.setConfig({ftPages:${JSON.parse(cfgBefore).ftPages ?? FULL_TEXT_ALL_PAGES}})`
   )
   await new Promise((r) => setTimeout(r, 400))
   // 171. The pure rule is checked above; this is the same claim at the
@@ -10384,7 +10407,7 @@ export async function runSmoke() {
     clampedField
   )
   await w.webContents.executeJavaScript(
-    `window.api.setConfig({ftPages:${JSON.parse(cfgBefore).ftPages ?? 3}})`
+    `window.api.setConfig({ftPages:${JSON.parse(cfgBefore).ftPages ?? FULL_TEXT_ALL_PAGES}})`
   )
   await new Promise((r) => setTimeout(r, 400))
   // The language switch lives in this same sheet. Every translated string

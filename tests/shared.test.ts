@@ -20,6 +20,8 @@ import {
   FULL_TEXT_MAX_PAGES,
   FULL_TEXT_MIN_PAGES,
   clampFullTextPages,
+  formatFullTextPageBudget,
+  isFullTextAllPages,
   restoredPageBudget
 } from '../shared/fullTextPages'
 import { mergeDocFields, reconcileSyncWrite } from '../shared/libraryReconcile'
@@ -32,6 +34,7 @@ import { UA } from '../shared/userAgent'
 import {
   DEFAULT_FT_PAGES,
   DEFAULT_PDF_TEMPLATE,
+  FULL_TEXT_ALL_PAGES,
   OAUTH_REDIRECT,
   PROJECT_URL
 } from '../shared/types'
@@ -480,12 +483,19 @@ describe('clampFullTextPages', () => {
     expect(clampFullTextPages('7.9')).toBe(7)
   })
 
-  it('falls back to the default for zero, NaN, null, undefined and empty string', () => {
-    expect(clampFullTextPages(0)).toBe(DEFAULT_FT_PAGES)
+  it('keeps zero as the all-pages budget instead of clamping it to one', () => {
+    expect(clampFullTextPages(0)).toBe(FULL_TEXT_ALL_PAGES)
+    expect(clampFullTextPages('0')).toBe(FULL_TEXT_ALL_PAGES)
+    expect(isFullTextAllPages(clampFullTextPages(0))).toBe(true)
+    expect(isFullTextAllPages(clampFullTextPages(5))).toBe(false)
+  })
+
+  it('falls back to the all-pages default for NaN, null, undefined and empty string', () => {
     expect(clampFullTextPages(NaN)).toBe(DEFAULT_FT_PAGES)
     expect(clampFullTextPages(null)).toBe(DEFAULT_FT_PAGES)
     expect(clampFullTextPages(undefined)).toBe(DEFAULT_FT_PAGES)
     expect(clampFullTextPages('')).toBe(DEFAULT_FT_PAGES)
+    expect(DEFAULT_FT_PAGES).toBe(FULL_TEXT_ALL_PAGES)
   })
 
   it('coerces numeric strings', () => {
@@ -498,7 +508,7 @@ describe('clampFullTextPages', () => {
     expect(clampFullTextPages({})).toBe(DEFAULT_FT_PAGES)
   })
 
-  it('falls back to the default for a positive fraction below one', () => {
+  it('falls back to the all-pages default for a positive fraction below one', () => {
     expect(clampFullTextPages(0.9)).toBe(DEFAULT_FT_PAGES)
   })
 
@@ -519,8 +529,12 @@ describe('restoredPageBudget', () => {
     expect(restoredPageBudget('7')).toBe(DEFAULT_FT_PAGES)
   })
 
-  it('rejects zero, negative numbers, NaN, null, undefined and objects', () => {
-    expect(restoredPageBudget(0)).toBe(DEFAULT_FT_PAGES)
+  it('keeps an explicitly stored zero as the all-pages budget', () => {
+    expect(restoredPageBudget(0)).toBe(FULL_TEXT_ALL_PAGES)
+    expect(isFullTextAllPages(restoredPageBudget(0))).toBe(true)
+  })
+
+  it('rejects negative numbers, NaN, null, undefined and objects', () => {
     expect(restoredPageBudget(-1)).toBe(DEFAULT_FT_PAGES)
     expect(restoredPageBudget(NaN)).toBe(DEFAULT_FT_PAGES)
     expect(restoredPageBudget(null)).toBe(DEFAULT_FT_PAGES)
@@ -536,10 +550,28 @@ describe('restoredPageBudget', () => {
     expect(restoredPageBudget(Infinity)).toBe(50)
   })
 
+  it('does not overwrite a budget the reader explicitly chose', () => {
+    expect(restoredPageBudget(3)).toBe(3)
+    expect(restoredPageBudget(50)).toBe(50)
+  })
+
   it('exposes the shared bounds and default', () => {
     expect(FULL_TEXT_MIN_PAGES).toBe(1)
     expect(FULL_TEXT_MAX_PAGES).toBe(50)
-    expect(DEFAULT_FT_PAGES).toBe(3)
+    expect(FULL_TEXT_ALL_PAGES).toBe(0)
+    expect(DEFAULT_FT_PAGES).toBe(FULL_TEXT_ALL_PAGES)
+  })
+})
+
+describe('formatFullTextPageBudget', () => {
+  it('names the all-pages budget with the supplied word, not a zero', () => {
+    expect(formatFullTextPageBudget(FULL_TEXT_ALL_PAGES, '全部')).toBe('全部')
+    expect(formatFullTextPageBudget(FULL_TEXT_ALL_PAGES, 'All pages')).toBe('All pages')
+  })
+
+  it('names a limited budget with its number', () => {
+    expect(formatFullTextPageBudget(3, '全部')).toBe('3')
+    expect(formatFullTextPageBudget(50, '全部')).toBe('50')
   })
 })
 
@@ -1271,8 +1303,8 @@ describe('docsWithAllWords', () => {
 // types.ts -------------------------------------------------------------------
 
 describe('shared constants from types.ts', () => {
-  it('defaults the full-text page budget to 3', () => {
-    expect(DEFAULT_FT_PAGES).toBe(3)
+  it('defaults the full-text page budget to every page', () => {
+    expect(DEFAULT_FT_PAGES).toBe(FULL_TEXT_ALL_PAGES)
   })
 
   it('pins the OAuth redirect', () => {

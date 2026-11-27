@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FtStatus, Language, UpdateState } from '../../shared/types'
 import { DEFAULT_PDF_TEMPLATE } from '../../shared/types'
 import { commitPageBudget } from '../lib/pageBudgetCommit'
+import { formatFullTextPageBudget, isFullTextAllPages } from '../../shared/fullTextPages'
 import { updateLine } from '../lib/updateText'
 import { useI18n } from '../lib/i18nContext'
 import logoUrl from '../../assets/logo.svg'
@@ -90,11 +91,15 @@ export default function Settings({
   onFullResync,
   onFtPages
 }: Props) {
-  // the page budget is applied on blur rather than on every keystroke: each
-  // change drops the index, and an index dropped per digit is not a setting
-  const [pages, setPages] = useState(String(ftPages))
-  const sheet = useRef<HTMLDivElement>(null)
   const t = useI18n()
+  // the page budget is applied on blur rather than on every keystroke: each
+  // change drops the index, and an index dropped per digit is not a setting.
+  // The field holds a word for the all-pages budget, not the number 0, so the
+  // default reads as an answer rather than as a malformed input.
+  const [pages, setPages] = useState(() =>
+    formatFullTextPageBudget(ftPages, t('全部'))
+  )
+  const sheet = useRef<HTMLDivElement>(null)
 
   // Scrolls to the section that was asked for.  It cannot be done by id: the
   // sections are headings in a scrolling box and there is nowhere to put an
@@ -113,7 +118,7 @@ export default function Settings({
   }, [focus, t])
 
   const commit = () => {
-    const { shown, applied } = commitPageBudget(pages)
+    const { shown, applied } = commitPageBudget(pages, t('全部'))
     setPages(shown)
     onFtPages(applied)
   }
@@ -249,7 +254,7 @@ export default function Settings({
         <div className="set-row">
           <span className="set-key">{t('每篇索引页数')}</span>
           <input
-            style={{ width: 64 }}
+            style={{ width: 88 }}
             value={pages}
             onChange={(e) => setPages(e.target.value)}
             onBlur={commit}
@@ -259,15 +264,19 @@ export default function Settings({
           />
           <span className="set-note">
             {ft?.indexed
-              ? t('已索引 {indexed} 篇，每篇前 {pages} 页；改动后需要重建', {
-                  indexed: ft.indexed,
-                  pages: ft.pages ?? pages
-                })
+              ? isFullTextAllPages(ft.pages)
+                ? t('已索引 {indexed} 篇，每篇全文；改动后需要重建', {
+                    indexed: ft.indexed
+                  })
+                : t('已索引 {indexed} 篇，每篇前 {pages} 页；改动后需要重建', {
+                    indexed: ft.indexed,
+                    pages: ft.pages
+                  })
               : t('还没建索引；改动后下次建索引生效')}
           </span>
         </div>
         <div className="set-note">
-          {t('页数越多越全，索引也越大。每篇前 3 页约 60 MB，全文约 293 MB。')}
+          {t('填「全部」索引整篇 PDF；也可以填 1–50 只索引前几页来省空间。前 3 页约 60 MB，全文约 293 MB。')}
         </div>
 
         <div className="set-sec">{t('关于')}</div>

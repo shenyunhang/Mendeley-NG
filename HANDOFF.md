@@ -539,8 +539,11 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
 - 搜索只在词变化时跑，但「索引建完」也算一次变化：用 `ftEpoch` 在 `building`
   由 true 变 false 时 +1 并放进依赖，`ftWasBuilding` 在 `onFtProgress` 与
   `ftBuild().then()` 两处都更新。
-- 页数的边界与默认值只有一份规则（`shared/fullTextPages.ts`）：设置面板、索引构建
-  和开机时的配置恢复共用，不会出现界面说 3 页、索引却按 50 页建的情况。
+- 全文索引默认读完整篇（`FULL_TEXT_ALL_PAGES = 0`，`DEFAULT_FT_PAGES` 指向它）；
+  1–50 是可选的省空间档位，在「设置 ▸ 全文检索」里填「全部」或数字。页数的边界、
+  全文档位与默认值只有一份规则（`shared/fullTextPages.ts`）：设置面板、索引构建
+  和开机时的配置恢复共用；配置里显式写过的页数保留，不随默认值迁移。预算写进
+  `fulltext.json` 的 `pages`，改动作废旧索引并提示重建。
 - 两个索引不各写一份基础设施：`sameIndexedFile`（mtime+size，追加路径额外比 `file`）、
   `snippetAround`（先按原文本切片再折叠空白）、`progressAllowed` 都在
   `shared/indexedFileRules.ts`；`fulltext.dat` 表的形状、偏移定位、页码与 worker
@@ -946,8 +949,9 @@ electron.vite.config.ts  main / preload / renderer 三段构建配置
   用 `src/lib/refly.ts` 的 `isRefHead` 找 References 标题，把之后的文本存进
   `<userData>/library/references.json`（`{version:1, entries:{[docId]:{mtime,size,text,page}}}`）。
   按 `mtime+size` 增量，单篇失败记 `skipped` 继续；`refs:build` 推 `refs:progress`，
-  `refs:search` / `refs:status` 是同步小结果。**全文索引只取前几页，搜不到参考文献**，
-  两套索引不要合并，也不要去改 `fulltext.ts` 的格式。
+  `refs:search` / `refs:status` 是同步小结果。**正文索引默认读完整篇，参考文献也在
+  其中，但两套索引仍不要合并**，也不要去改 `fulltext.ts` 的格式：参考文献索引按
+  末尾窗口现读并单独缓存，用途和失效条件都不同。
 - 首次选 `references` 且索引为空时自动建一次，渲染层查询按 250ms 防抖；
   `buildRefsIndex` 的 IPC 是长任务，进度必须显示，别让一次等待看起来像卡死。
 - 篇内查找也接这一份归一化：`usePdfFind` 的 `key`、`needle` 与长度判定都用

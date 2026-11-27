@@ -81,11 +81,14 @@ const EN: Record<string, string> = {
   // Settings: full text
   '全文检索': 'Full-text search',
   '每篇索引页数': 'Pages indexed per paper',
+  '全部': 'All pages',
+  '已索引 {indexed} 篇，每篇全文；改动后需要重建':
+    '{indexed} papers indexed, whole document each; changing this rebuilds the index',
   '已索引 {indexed} 篇，每篇前 {pages} 页；改动后需要重建':
     '{indexed} papers indexed, {pages} pages each; changing this rebuilds the index',
   '还没建索引；改动后下次建索引生效': 'No index yet; the change takes effect on the next build',
-  '页数越多越全，索引也越大。每篇前 3 页约 60 MB，全文约 293 MB。':
-    'More pages find more, and cost more space. The first 3 pages of each paper take about 60 MB; all pages about 293 MB.',
+  '填「全部」索引整篇 PDF；也可以填 1–50 只索引前几页来省空间。前 3 页约 60 MB，全文约 293 MB。':
+    'Use "All pages" to index whole PDFs, or a number from 1 to 50 to read only the leading pages and save space. The first 3 pages of each paper take about 60 MB; all pages about 293 MB.',
   // Settings: about
   '关于': 'About',
   'Mendeley Desktop 1.19.8 的替代品，本地优先，高 DPI 原生正常。':

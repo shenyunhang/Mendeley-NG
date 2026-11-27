@@ -9,7 +9,7 @@ import { app } from 'electron'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { pdfFontOptions } from './pdfFonts'
 import { DEFAULT_FT_PAGES, type Doc, type FtHit, type FtStatus } from '../../shared/types'
-import { clampFullTextPages } from '../../shared/fullTextPages'
+import { clampFullTextPages, isFullTextAllPages } from '../../shared/fullTextPages'
 import {
   MAX_NEAR_WORDS,
   SHORT_WORD_LENGTH,
@@ -79,26 +79,26 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerSrc()
  *
  * The shape of this is dictated by one measurement: the library has 5245
  * local PDFs, and pulling every page of every one of them yields about
- * 293 MB of text.  Indexing the first three pages yields about 60 MB, which
- * is small enough to keep in memory and to scan synchronously — 130 ms per
- * PDF for the whole document versus 39 ms for three pages.
+ * 293 MB of text. A scan of that with `indexOf` is still tens of milliseconds,
+ * so the text is kept in one flat file and the index is only an offset table;
+ * an inverted index over this corpus would be larger than the text it
+ * describes. Reading a whole PDF costs about 130 ms against 39 ms for its
+ * first three pages, so a build takes minutes either way.
  *
- * Three pages is title, authors, abstract and the start of the introduction
- * for most papers, which is where the terms someone searches for actually
- * are.  It is a real limit, so it is stated in the UI rather than hidden.
- *
- * The extracted text is kept in one flat file and the index is only an
- * offset table.  There is no inverted index: a scan of 60 MB with
- * `indexOf` costs tens of milliseconds, and an inverted index over this
- * corpus would be larger than the text it describes.
+ * Whole documents are the default. A budget of leading pages -- 3 of them
+ * take about 60 MB -- is an opt-in way to keep the index small, but it makes
+ * a search miss the body of a paper, which is the one thing a full-text
+ * search must not do silently. A limited budget is stated in the UI; the
+ * all-pages default is not a limit and needs no such caveat.
  */
 
 /**
- * How many leading pages of each PDF to index.  It used to be a constant,
- * which quietly decided for the user how big the index gets and how much of
- * each paper is searchable.  It is a setting now, and changing it drops the
- * index, because one built with a different budget does not describe the
- * same thing as the one about to be searched.
+ * How much of each PDF to index. It used to be a constant of three pages,
+ * which quietly decided for the user how much of each paper is searchable.
+ * It is a setting now: a positive number of leading pages, or the shared
+ * all-pages sentinel. Changing it drops the index, because one built with a
+ * different budget does not describe the same thing as the one about to be
+ * searched.
  *
  * The starting value and the clamp both come from `shared/`, so this half
  * cannot quietly answer a config value differently from the Settings panel.
@@ -482,7 +482,8 @@ function appendEntry(
   return next
 }
 
-/** Pull the text of the first `n` pages, and say why if there is none. */
+/** Pull the first `n` pages, or every page when `n` is the all-pages budget,
+ *  and say why if there is no text. */
 async function extract(file: string, n: number): Promise<Got> {
   // held in a box rather than a plain `let`, because the only assignment is
   // inside `parse` and TypeScript would otherwise narrow it to null in the
@@ -508,7 +509,9 @@ async function extract(file: string, n: number): Promise<Got> {
       throw new Error('timed out')
     }
     box.doc = d
-    const count = Math.min(n, d.numPages)
+    // The all-pages budget is a sentinel, not a number to hand to Math.min:
+    // min(0, numPages) would silently index nothing at all.
+    const count = isFullTextAllPages(n) ? d.numPages : Math.min(n, d.numPages)
     let out = ''
     const bounds: number[] = []
     for (let i = 1; i <= count; i++) {

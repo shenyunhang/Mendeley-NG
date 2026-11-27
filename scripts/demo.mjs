@@ -350,7 +350,9 @@ fs.writeFileSync(
       theme: 'dark',
       pdfContinuous: false,
       citeStyle: 'author-year',
-      ftPages: 3,
+      // 0 is the all-pages budget. Leaving the key out would do the same, but
+      // the demo config spells out every setting it cares about.
+      ftPages: 0,
       paneLeft: 260,
       paneRight: 46,
       savedSearches: [

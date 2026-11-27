@@ -137,7 +137,7 @@ export default function RefsView({
           <p>还没有参考文献索引。</p>
           <p className="sub">
             建索引会读一遍每篇本地 PDF 的末尾几页，找「References / 参考文献」那一段。
-            已有的正文索引只取前几页，搜不到这里。
+            参考文献索引是单独建的，从每篇 PDF 末尾现读，和正文索引互不影响。
           </p>
           {status?.total ? (
             <button style={{ marginTop: 10 }} onClick={onBuild}>

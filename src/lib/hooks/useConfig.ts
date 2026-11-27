@@ -6,6 +6,7 @@ import {
   DEFAULT_FT_PAGES,
   DEFAULT_LANGUAGE,
   DEFAULT_PDF_TEMPLATE,
+  FULL_TEXT_ALL_PAGES,
   type Language
 } from '../../../shared/types'
 import { restoredPageBudget } from '../../../shared/fullTextPages'
@@ -107,10 +108,11 @@ export function useConfig() {
       setSyncOnStart(c.syncOnStart !== false)
       setSyncPdfsOnSync(c.syncPdfsOnSync !== false)
       // The guard stays: a malformed value should not even schedule a state
-      // write (152). A positive one goes through the same rule the index
-      // builder uses, so a hand-edited file cannot put a number in this panel
-      // that the index would answer differently (see 161 / 163).
-      if (typeof c.ftPages === 'number' && c.ftPages > 0)
+      // write (152). Zero is a real value now -- the all-pages budget -- so
+      // an explicitly stored 0 goes through the same rule the index builder
+      // uses, just as a positive number does (see 161 / 163). A config that
+      // explicitly says 3 keeps saying 3: only the default changed.
+      if (typeof c.ftPages === 'number' && c.ftPages >= FULL_TEXT_ALL_PAGES)
         setFtPages(restoredPageBudget(c.ftPages))
       if (typeof c.paneLeft === 'number') setLeftW(clampLeft(c.paneLeft))
       if (typeof c.paneRight === 'number') setRightPct(clampRight(c.paneRight))

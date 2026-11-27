@@ -5,10 +5,11 @@ import path from 'node:path'
 import {
   clampFullTextPages,
   FULL_TEXT_MAX_PAGES,
-  FULL_TEXT_MIN_PAGES
+  FULL_TEXT_MIN_PAGES,
+  isFullTextAllPages
 } from '../shared/fullTextPages'
 import { clampToRange } from '../shared/clamp'
-import { DEFAULT_FT_PAGES } from '../shared/types'
+import { DEFAULT_FT_PAGES, FULL_TEXT_ALL_PAGES } from '../shared/types'
 import { normaliseQuery } from '../src/lib/searchScope'
 import { markAll, matchDoc, snippet } from '../src/lib/match'
 import type { Doc } from '../shared/types'
@@ -38,10 +39,17 @@ function repoRoot(): string {
 const ROOT = repoRoot()
 const read = (p: string): string => fs.readFileSync(path.join(ROOT, p), 'utf-8')
 
-describe('page budget: the shared clamp is the old expression', () => {
-  /** Copied verbatim from shared/fullTextPages.ts before the change. */
+describe('page budget: the shared clamp matches the old expression where it could answer', () => {
+  /** The default before whole-document indexing became the starting point.
+   *  Pinned here because the control below is a copy of the old rule, not a
+   *  second live definition of the default. */
+  const LEGACY_DEFAULT_FT_PAGES = 3
+
+  /** Copied verbatim from shared/fullTextPages.ts before the change, with the
+   *  old default pinned. It is a control: the equivalence claim only holds
+   *  over budgets the old rule could actually express. */
   const legacy = (n: unknown): number => {
-    const whole = Math.floor(Number(n)) || DEFAULT_FT_PAGES
+    const whole = Math.floor(Number(n)) || LEGACY_DEFAULT_FT_PAGES
     return Math.max(FULL_TEXT_MIN_PAGES, Math.min(FULL_TEXT_MAX_PAGES, whole))
   }
 
@@ -53,17 +61,31 @@ describe('page budget: the shared clamp is the old expression', () => {
   ]
   for (let i = -60; i <= 120; i++) inputs.push(i, i + 0.25, i + 0.75)
 
-  it('matches the old expression over the whole input batch', () => {
-    for (const n of inputs) {
+  /** Zero is a budget the old rule could not express: it clamped it to 1 or
+   *  fell back to 3. The all-pages sentinel is the one intended break. */
+  const oldDomain = inputs.filter((n) => !isFullTextAllPages(clampFullTextPages(n)))
+
+  it('proves the all-pages budget really is a break from the old rule', () => {
+    expect(isFullTextAllPages(clampFullTextPages(0))).toBe(true)
+    expect(legacy(0)).toBe(LEGACY_DEFAULT_FT_PAGES)
+    expect(legacy(0)).not.toBe(clampFullTextPages(0))
+    expect(DEFAULT_FT_PAGES).toBe(FULL_TEXT_ALL_PAGES)
+    expect(oldDomain.length).toBeLessThan(inputs.length)
+  })
+
+  it('matches the old expression over every budget it could express', () => {
+    for (const n of oldDomain) {
       expect(clampFullTextPages(n), `input=${String(n)}`).toBe(legacy(n))
     }
   })
 
-  it('is exactly clampToRange applied after the floor/default', () => {
+  it('is clampToRange after the floor/default, with the all-pages sentinel kept', () => {
     for (const n of inputs) {
       const whole = Math.floor(Number(n)) || DEFAULT_FT_PAGES
       expect(clampFullTextPages(n), `input=${String(n)}`).toBe(
-        clampToRange(whole, FULL_TEXT_MIN_PAGES, FULL_TEXT_MAX_PAGES)
+        isFullTextAllPages(whole)
+          ? FULL_TEXT_ALL_PAGES
+          : clampToRange(whole, FULL_TEXT_MIN_PAGES, FULL_TEXT_MAX_PAGES)
       )
     }
   })

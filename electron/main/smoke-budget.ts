@@ -2,9 +2,10 @@ import {
   clampFullTextPages,
   FULL_TEXT_MAX_PAGES,
   FULL_TEXT_MIN_PAGES,
+  isFullTextAllPages,
   restoredPageBudget
 } from '../../shared/fullTextPages'
-import { DEFAULT_FT_PAGES } from '../../shared/types'
+import { DEFAULT_FT_PAGES, FULL_TEXT_ALL_PAGES } from '../../shared/types'
 
 import type { SmokeCtx } from './smoke-ctx'
 
@@ -70,15 +71,26 @@ export function restoredBudget(ctx: SmokeCtx) {
     for (let n = -100; n <= 200; n++) {
       const v = restoredPageBudget(n + 0.5)
       if (
-        v < FULL_TEXT_MIN_PAGES ||
-        v > FULL_TEXT_MAX_PAGES ||
-        !Number.isInteger(v)
+        !isFullTextAllPages(v) &&
+        (v < FULL_TEXT_MIN_PAGES ||
+          v > FULL_TEXT_MAX_PAGES ||
+          !Number.isInteger(v))
       ) outside += 1
     }
     ctx.expect(
-      'no restored budget can leave the index bounds',
+      'no restored budget can leave the index bounds or the all-pages value',
       outside === 0 &&
         restoredPageBudget(DEFAULT_FT_PAGES) === DEFAULT_FT_PAGES,
       { outside, min: FULL_TEXT_MIN_PAGES, max: FULL_TEXT_MAX_PAGES }
+    )
+
+    ctx.expect(
+      'the all-pages budget survives a restore and an explicit old value stays put',
+      DEFAULT_FT_PAGES === FULL_TEXT_ALL_PAGES &&
+        isFullTextAllPages(restoredPageBudget(FULL_TEXT_ALL_PAGES)) &&
+        restoredPageBudget(3) === 3 &&
+        indexUses(3) === 3 &&
+        !isFullTextAllPages(restoredPageBudget(3)),
+      { all: restoredPageBudget(FULL_TEXT_ALL_PAGES), three: restoredPageBudget(3) }
     )
 }

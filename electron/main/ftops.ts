@@ -10,7 +10,7 @@ import {
 } from './fulltext'
 import { dataDir, loadConfig, loadLibrary } from './store'
 import { getWin } from './window'
-import type { Doc, FtStatus } from '../../shared/types'
+import { FULL_TEXT_ALL_PAGES, type Doc, type FtStatus } from '../../shared/types'
 
 /**
  * The full-text index, driven.
@@ -36,8 +36,13 @@ export function initFt() {
   // hand-edited config cannot push the index past its bounds. Do not add a
   // second clamp here: shared/fullTextPages.ts is the one rule, and the
   // renderer's restore path now calls it too (163).
-  const p = Number(loadConfig().ftPages ?? 0)
-  if (p > 0) setFullTextPages(p)
+  //
+  // Zero is a real choice now, not a missing value: it is the all-pages
+  // budget. Skipping it when the module already starts there is harmless,
+  // but a config that explicitly wrote it has to go through the same path as
+  // any other number, or the restore rule and the builder could drift.
+  const p = Number(loadConfig().ftPages ?? FULL_TEXT_ALL_PAGES)
+  if (Number.isFinite(p) && p >= FULL_TEXT_ALL_PAGES) setFullTextPages(p)
 }
 
 /** The papers the index is about: every one that has a file on this disk,

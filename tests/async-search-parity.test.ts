@@ -60,7 +60,10 @@ function manyDocIndex(count = 96) {
     path.join(dir, 'fulltext.json'),
     JSON.stringify({
       version: 2,
-      pages: 3,
+      // The offset table is only read when its budget matches the module's.
+      // Ask for it instead of pinning 3, the default before whole-document
+      // indexing became the starting point.
+      pages: ft.fullTextPages(),
       bytes: Buffer.byteLength(body, 'utf8'),
       entries
     }),

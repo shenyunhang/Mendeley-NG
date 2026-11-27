@@ -42,6 +42,7 @@ import { createLazyPages } from '../src/lib/lazyPages'
 import { isListBlank } from '../src/lib/listBlank'
 import { markAll, snippet, authorParts, matchDoc } from '../src/lib/match'
 import { commitPageBudget } from '../src/lib/pageBudgetCommit'
+import { formatFullTextPageBudget } from '../shared/fullTextPages'
 import { createPageWalk, PAGE_BATCH_SIZE } from '../src/lib/pageWalk'
 import { clampNum, clampLeft, clampRight, DEFAULT_LEFT_W, LEFT_MIN, LEFT_MAX } from '../src/lib/panes'
 import {
@@ -1103,7 +1104,7 @@ describe('match: every occurrence is marked and only matching fields are shown',
   })
 })
 
-describe('pageBudgetCommit: the shown number is always the applied number', () => {
+describe('pageBudgetCommit: the shown value is always the applied value', () => {
   it('a valid value within the range is applied unchanged', () => {
     expect(commitPageBudget('7')).toEqual({ shown: '7', applied: 7 })
   })
@@ -1112,20 +1113,22 @@ describe('pageBudgetCommit: the shown number is always the applied number', () =
     expect(commitPageBudget('100')).toEqual({ shown: '50', applied: 50 })
   })
 
-  it('a value below the minimum falls back to the default 3', () => {
-    expect(commitPageBudget('0')).toEqual({ shown: '3', applied: 3 })
-  })
-
-  it('empty, NaN, non-numeric and Infinity inputs fall back to the default', () => {
-    for (const raw of ['', 'abc', 'Infinity', 'NaN', '-5']) {
-      expect(commitPageBudget(raw)).toEqual({ shown: '3', applied: 3 })
+  it('zero and the word for every page both mean all pages', () => {
+    for (const raw of ['0', '全部', 'all', 'All pages']) {
+      expect(commitPageBudget(raw)).toEqual({ shown: '全部', applied: 0 })
     }
   })
 
-  it('shown always equals String(applied) for every input', () => {
-    for (const raw of ['', '1', '50.9', '999', 'abc']) {
+  it('empty, NaN, non-numeric, Infinity and negative inputs fall back to all pages', () => {
+    for (const raw of ['', 'abc', 'Infinity', 'NaN', '-5']) {
+      expect(commitPageBudget(raw)).toEqual({ shown: '全部', applied: 0 })
+    }
+  })
+
+  it('shown always names the value that takes effect', () => {
+    for (const raw of ['', '1', '0', '50.9', '999', 'abc', '全部', 'all']) {
       const r = commitPageBudget(raw)
-      expect(r.shown).toBe(String(r.applied))
+      expect(r.shown).toBe(formatFullTextPageBudget(r.applied, '全部'))
     }
   })
 })

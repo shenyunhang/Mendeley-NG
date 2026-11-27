@@ -28,6 +28,9 @@ export interface FullTextEntry {
 
 export interface FullTextMeta {
   version: 2
+  /** The budget this index was built with: leading pages, or
+   *  `FULL_TEXT_ALL_PAGES` when whole documents were read. An index built
+   *  under a different budget is voided rather than searched. */
   pages: number
   /**
    * How many bytes of the text file the entry table actually describes.

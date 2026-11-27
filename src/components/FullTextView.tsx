@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
-import type { Doc, FtHit, FtStatus } from '../../shared/types'
+import { FULL_TEXT_ALL_PAGES, type Doc, type FtHit, type FtStatus } from '../../shared/types'
+import { isFullTextAllPages } from '../../shared/fullTextPages'
 import { compareDocs, type SortKey } from '../lib/columns'
 import { markAllTerms } from '../lib/match'
 import { useI18n } from '../lib/i18nContext'
@@ -13,6 +14,12 @@ function Marked({ text, terms }: { text: string; terms: string[] }) {
       )}
     </>
   )
+}
+
+/** How far the index read, as a phrase that follows 每篇: the all-pages
+ *  default has to read as an answer, not as a zero. */
+function budgetWords(budget: number): string {
+  return isFullTextAllPages(budget) ? '全文' : `前 ${budget} 页`
 }
 
 interface Props {
@@ -61,6 +68,9 @@ export default function FullTextView({
   onOpenSettings
 }: Props) {
   const t = useI18n()
+  // A status that has not arrived yet is not a limited index: until it does,
+  // the panel must not claim a three-page budget it has no evidence for.
+  const everyPage = isFullTextAllPages(status?.pages ?? FULL_TEXT_ALL_PAGES)
   const byId = useMemo(() => {
     const m = new Map<string, Doc>()
     for (const d of docs) m.set(d.id, d)
@@ -125,7 +135,7 @@ export default function FullTextView({
         <span className="grow" />
         <span style={{ fontSize: '0.733rem', color: 'var(--fg-dim)' }}>
           {status
-            ? `已索引 ${status.indexed} / ${status.total} 篇 · 每篇前 ${status.pages} 页`
+            ? `已索引 ${status.indexed} / ${status.total} 篇 · 每篇${budgetWords(status.pages)}`
             : '…'}
         </span>
         <button
@@ -246,16 +256,19 @@ export default function FullTextView({
           <p>{status?.legacy ? '索引要重建一次。' : '还没有索引。'}</p>
           <p className="sub">
             {status?.voided === 'budget'
-              ? `「每篇索引页数」从 ${status.voidedPages} 改成了 ${status.pages}：`
-                + `按 ${status.voidedPages} 页读出来的索引对不上新的范围，所以作废了。`
-                + '不是更新弄丢的，是你刚改的——把数字改回去，或者重建一遍。'
+              ? `「每篇索引页数」从「${budgetWords(status.voidedPages ?? FULL_TEXT_ALL_PAGES)}」改成了「${budgetWords(status.pages)}」：`
+                + '按旧范围读出来的索引对不上新的范围，所以作废了。'
+                + '不是更新弄丢的，是你刚改的——把设置改回去，或者重建一遍。'
               : status?.legacy
                 ? '这次更新换了索引的存法：偏移量现在带一个字节锚点，建索引中途退出后下次才能接着建，'
                   + '而不用从头再来。旧索引读不了，重建一遍就好。'
                 : '建索引会读一遍本地 PDF 的正文，大约每篇 90 毫秒，几千篇要几分钟——中途'
                   + '可以停，下次会接着读。'}
-            {' '}只取每篇的前 {status?.pages ?? 3} 页：标题、作者、摘要和引言开头，
-            也就是要找的词通常在的地方。
+            {everyPage
+              ? ' 默认读完整篇 PDF，正文、参考文献和附录都在搜索范围内。'
+              : ` 当前只取每篇的${budgetWords(status?.pages ?? 3)}：标题、作者、摘要和引言开头，
+            正文后面的部分还读不到。要搜整篇，去「设置 ▸ 全文检索」填「全部」。`
+            }
           </p>
           {status?.total ? (
             <button style={{ marginTop: 10 }} onClick={() => onBuild(false)}>
@@ -282,22 +295,36 @@ export default function FullTextView({
           ) : searching ? (
             <div className="empty">正在查找「{query}」…</div>
           ) : !groups.length ? (
-            /* An empty answer over a part of every paper is not an empty
-               answer over the library, and the reader has no way to tell the
-               two apart unless the difference is stated: read as "this is not
-               in my library" it sends them off to import a paper they already
-               have.  So it names how far the index read, says what that does
-               not prove, and offers the one press that widens it. */
+            /* An empty answer over an index is not an empty answer over the
+               library, and the reader has no way to tell the two apart
+               unless the difference is stated: read as "this is not in my
+               library" it sends them off to import a paper they already
+               have. So it names how far the index read, says what that does
+               not prove, and offers the one press that widens it -- or, when
+               every page was read, the one that rebuilds it. */
             <div className="empty">
               <p>正文里没找到「{query}」。</p>
               <p className="sub">
-                只索引了每篇的前 {status.pages} 页——也就是标题、摘要和引言开头。
-                所以「这里没找到」<strong>不等于</strong>「这篇里没有」：正文后面的部分还没读过。
-                要连正文一起搜，去「设置 ▸ 全文检索」把「每篇索引页数」调大，改完重建一次
-                （{status.total} 篇，大约每篇 90 毫秒）。
+                {everyPage ? (
+                  <>
+                    索引读的是每篇的全部页，所以「这里没找到」不是因为只读了开头。
+                    它仍然<strong>不等于</strong>「库里没有」：没有文本层的扫描件读不出正文，
+                    还没建进索引的文献也不在搜索范围内。
+                  </>
+                ) : (
+                  <>
+                    只索引了每篇的{budgetWords(status.pages)}——也就是标题、摘要和引言开头。
+                    所以「这里没找到」<strong>不等于</strong>「这篇里没有」：正文后面的部分还没读过。
+                    要搜整篇，去「设置 ▸ 全文检索」填「全部」，改完重建一次
+                    （{status.total} 篇，大约每篇 90 毫秒）。
+                  </>
+                )}
               </p>
-              <button style={{ marginTop: 10 }} onClick={onOpenSettings}>
-                打开设置
+              <button
+                style={{ marginTop: 10 }}
+                onClick={everyPage ? () => onBuild(true) : onOpenSettings}
+              >
+                {everyPage ? '重建索引' : '打开设置'}
               </button>
             </div>
           ) : (

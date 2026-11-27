@@ -1,8 +1,9 @@
 import {
   clampFullTextPages,
+  formatFullTextPageBudget,
   FULL_TEXT_MIN_PAGES
 } from '../../shared/fullTextPages'
-import { DEFAULT_FT_PAGES } from '../../shared/types'
+import { DEFAULT_FT_PAGES, FULL_TEXT_ALL_PAGES } from '../../shared/types'
 
 /**
  * What the Settings sheet does when the full-text page budget is committed.
@@ -15,22 +16,36 @@ import { DEFAULT_FT_PAGES } from '../../shared/types'
  * different numbers. 170 documented the page budget as a single shared rule;
  * this was the call site still carrying a second one.
  *
- * The number written is deliberately identical to the old form for every
- * input, including an empty field and `Infinity`. Only what the field shows
- * is fixed: it now always shows the value that actually took effect. The
+ * The field takes a word as well as a number now. Whole documents are the
+ * default, and showing a bare 0 for them would read like a broken setting.
+ * The word is handed in by the caller so this rule stays language free; the
  * `Number.isFinite` check is not a second bound, it is what this field
- * accepts; the bounds and the default still come from `shared/`.
+ * accepts. The bounds and the default still come from `shared/`.
  */
 export interface PageBudgetCommit {
   shown: string
   applied: number
 }
 
-export function commitPageBudget(raw: string): PageBudgetCommit {
-  const n = Number(raw)
+/** Words the field accepts for the all-pages budget, in either language.
+ *  The English entries cover the label the English UI puts in the field. */
+const ALL_PAGES_WORDS = new Set(['全部', 'all', 'whole', 'full', 'all pages'])
+
+export function commitPageBudget(
+  raw: string,
+  allPagesLabel = '全部'
+): PageBudgetCommit {
+  const trimmed = raw.trim()
+  const n = Number(trimmed)
+  const asksForAll =
+    trimmed === String(FULL_TEXT_ALL_PAGES) ||
+    ALL_PAGES_WORDS.has(trimmed.toLowerCase())
   const applied =
-    !Number.isFinite(n) || n < FULL_TEXT_MIN_PAGES
+    asksForAll || !Number.isFinite(n) || n < FULL_TEXT_MIN_PAGES
       ? DEFAULT_FT_PAGES
       : clampFullTextPages(n)
-  return { shown: String(applied), applied }
+  return {
+    shown: formatFullTextPageBudget(applied, allPagesLabel),
+    applied
+  }
 }

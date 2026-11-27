@@ -469,7 +469,7 @@ export default function Toolbar(p: Props) {
           ref={p.searchRef}
           placeholder={
             p.view.kind === 'fulltext'
-              ? '搜索 PDF 正文（只索引每篇前几页）  (Ctrl+F)'
+              ? '搜索 PDF 正文（默认读完整篇）  (Ctrl+F)'
               : '搜索标题 / 作者 / 期刊 / 摘要 / 标签 / 笔记  (Ctrl+F)'
           }
           title="标题、作者、期刊、citation key、DOI、摘要、类型、关键词、标签，以及这篇上写的本地笔记"
