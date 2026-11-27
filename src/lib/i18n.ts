@@ -187,6 +187,7 @@ const EN: Record<string, string> = {
   '返回库': 'Back to library',
   '恢复': 'Restore',
   '彻底删除': 'Delete permanently',
+  '清空回收站': 'Empty trash',
   '回收站是空的': 'Trash is empty',
   '返回列表': 'Back to list',
   '复制列表': 'Copy list',

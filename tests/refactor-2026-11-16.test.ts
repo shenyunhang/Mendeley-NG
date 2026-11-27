@@ -215,3 +215,18 @@ describe('source-string guards for the optimisation pass', () => {
     expect(read('scripts/signcheck.mjs')).not.toContain("path.resolve('dist')")
   })
 })
+
+describe('the trash has a one-press empty action', () => {
+  it('asks with the count and keeps what the cloud refused to purge', () => {
+    const app = read('src/App.tsx')
+    const view = read('src/components/TrashView.tsx')
+    expect(app).toContain('const purgeAllTrashed = async () => {')
+    expect(app).toContain('title: `清空回收站里的 ${list.length} 条文献？`')
+    expect(app).toContain('gone.add(d.id)')
+    expect(app).toContain('onPurgeAll={() => void purgeAllTrashed()}')
+    expect(view).toContain('onPurgeAll?: () => void')
+    expect(view).toContain("t('清空回收站')")
+    expect(view).toContain('disabled={!docs.length}')
+    expect(read('src/lib/i18n.ts')).toContain("'清空回收站': 'Empty trash'")
+  })
+})

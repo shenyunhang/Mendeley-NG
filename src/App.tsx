@@ -492,6 +492,37 @@ export default function App() {
     )
     setPinned((p) => (p?.id === id ? null : p))
   }
+  /** Empty the whole bin. A purge cannot be undone, so the count belongs in
+   *  the question. The successful ids are collected as the calls happen, not
+   *  recovered from titles afterwards: two deleted papers can share a title,
+   *  and a partial purge that looked complete would leave records the reader
+   *  believes are gone. */
+  const purgeAllTrashed = async () => {
+    const list = view.kind === 'trash' ? view.docs : []
+    if (!list.length) return
+    const go = await askConfirm({
+      title: `清空回收站里的 ${list.length} 条文献？`,
+      body: '会逐条彻底删除，云端记录一并删掉，不能恢复；当前筛选不影响清空范围。',
+      ok: '清空回收站'
+    })
+    if (!go) return
+    const gone = new Set<string>()
+    const { ok: n, failed } = await runBatch(
+      list,
+      (d) => d.title || d.id,
+      async (d) => {
+        const r = await window.api.purgeDoc(d.id)
+        if (!r.ok) throw new Error('the cloud refused to purge this document')
+        gone.add(d.id)
+      },
+      (done, total) => showBatch(`正在清空回收站 ${done}/${total}…`)
+    )
+    setView((v) =>
+      v.kind === 'trash' ? { ...v, docs: v.docs.filter((d) => !gone.has(d.id)) } : v
+    )
+    setPinned((p) => (p && gone.has(p.id) ? null : p))
+    reportBatch('已彻底删除', n, failed)
+  }
   const toggleTheme = () => {
     const next = theme === 'light' ? 'dark' : 'light'
     setTheme(next)
@@ -2568,6 +2599,7 @@ export default function App() {
             openId={pinned?.id ?? null}
             onRestore={(id) => void restoreTrashed(id)}
             onPurge={(id) => void purgeTrashed(id)}
+            onPurgeAll={() => void purgeAllTrashed()}
           />
         ) : (
         <div className="pane pane-mid">

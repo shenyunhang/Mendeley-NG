@@ -9,6 +9,10 @@ interface Props {
   onClose: () => void
   onRestore: (id: string) => void
   onPurge?: (id: string) => void
+  /** Empty the whole bin in one press. Optional for the same reason as
+   *  `onPurge`: a caller with no destructive path should not have to invent
+   *  one, and the button simply does not appear. */
+  onPurgeAll?: () => void
   /** Open one of the trashed papers.
    *
    *  The bin is a list of names, but "do I want this back" is a question
@@ -32,6 +36,7 @@ export default function TrashView({
   onClose,
   onRestore,
   onPurge,
+  onPurgeAll,
   onOpen,
   openId
 }: Props) {
@@ -61,6 +66,17 @@ export default function TrashView({
         <span style={{ color: 'var(--fg-dim)' }}>
           {rows.length} / {docs.length} 条 · 点一行看 PDF 或详情 · 恢复后需重新归入文件夹
         </span>
+        {onPurgeAll && (
+          <button
+            className="danger"
+            style={{ padding: '2px 6px', fontSize: '0.733rem' }}
+            disabled={!docs.length}
+            title="逐条彻底删除回收站里的全部文献，云端记录一并删除，不可恢复；筛选不影响范围"
+            onClick={onPurgeAll}
+          >
+            {t('清空回收站')}
+          </button>
+        )}
         <button style={{ padding: '2px 6px', fontSize: '0.733rem' }} onClick={onClose}>
           {t('返回库')}
         </button>

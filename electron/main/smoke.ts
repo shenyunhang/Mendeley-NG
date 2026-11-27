@@ -9750,6 +9750,8 @@ export async function runSmoke() {
           + 'banner:(document.querySelector(".pane-right .trash-doc-banner")||{}).textContent||null,'
           + 'editable:[...document.querySelectorAll(".pane-right .meta-actions button")]'
           + '.some(b=>b.textContent.trim()==="移入回收站"),'
+          + 'emptyAll:[...document.querySelectorAll(".pane-mid .pane-head button")]'
+          + '.some(b=>b.textContent.trim()==="清空回收站"),'
           + 'empty:(document.querySelector(".pane-right .empty")||{}).textContent||null})'
         )
       const t0 = JSON.parse(await binInfo())
@@ -9762,6 +9764,12 @@ export async function runSmoke() {
           /3\s*\/\s*3/.test(t0.head),
         { binReady, rows: t0.rows, head: t0.head }
       )
+      // Only the presence of the destructive action is checked here. Pressing
+      // it would purge the fixture this whole block is built around.
+      expect('the bin offers a one-press empty action', t0.emptyAll === true, {
+        head: t0.head,
+        emptyAll: t0.emptyAll
+      })
       const rowN = (info: { rows: { id: string; n: string }[] }, id: string) =>
         (info.rows.find((r) => r.id === id)?.n ?? '')
       expect(
